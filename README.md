@@ -1,42 +1,36 @@
-# sv
+# Health Tracker
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Health Tracker is a multilingual SvelteKit app for storing patient profiles, importing lab results, and tracking clinical metrics over time.
 
-## Creating a project
+## Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- Manage multiple patient profiles
+- Add records manually or extract them from images, PDFs, and pasted text
+- Review and edit parsed metrics before saving
+- Track trends with localized dates and translated UI
+- Run on Cloudflare with SQLite/Turso-backed data storage
 
-```sh
-# create a new project
-npx sv create my-app
-```
+## Development
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-bun x sv@0.12.4 create --template minimal --types ts --add tailwindcss="plugins:forms" sveltekit-adapter="adapter:cloudflare+cfTarget:workers" devtools-json drizzle="database:sqlite+sqlite:turso" better-auth="demo:password,github" paraglide="languageTags:en, ja+demo:no" --install bun health-tracker
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Install dependencies and start the dev server:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+bun install
+bun run dev
 ```
 
-## Building
-
-To create a production version of your app:
+Useful commands:
 
 ```sh
-npm run build
+bun run check
+bun run build
+bun run preview
 ```
 
-You can preview the production build with `npm run preview`.
+## Tech Stack
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+- SvelteKit + Svelte 5
+- Tailwind CSS
+- Paraglide for i18n
+- Drizzle ORM
+- Cloudflare Workers
