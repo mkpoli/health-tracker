@@ -1,0 +1,48 @@
+{
+	"name": "health-tracker",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "bun run build && wrangler dev",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"gen": "wrangler types",
+		"db:push": "drizzle-kit push",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate",
+		"db:studio": "drizzle-kit studio",
+		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes",
+		"deploy": "bun run build && wrangler deploy",
+		"cf-typegen": "wrangler types ./src/worker-configuration.d.ts"
+	},
+	"devDependencies": {
+		"@inlang/paraglide-js": "^2.15.1",
+		"@libsql/client": "^0.17.2",
+		"@sveltejs/adapter-cloudflare": "^7.2.8",
+		"@sveltejs/kit": "^2.55.0",
+		"@sveltejs/vite-plugin-svelte": "^7.0.0",
+		"@tailwindcss/forms": "^0.5.11",
+		"@tailwindcss/vite": "^4.2.2",
+		"@types/node": "^25.5.0",
+		"drizzle-kit": "^0.31.10",
+		"drizzle-orm": "^0.45.1",
+		"svelte": "^5.54.0",
+		"svelte-check": "^4.4.5",
+		"tailwindcss": "^4.2.2",
+		"typescript": "^5.9.3",
+		"unplugin-icons": "^23.0.1",
+		"vite": "^8.0.1",
+		"vite-plugin-devtools-json": "^1.0.0",
+		"wrangler": "^4.76.0"
+	},
+	"dependencies": {
+		"@iconify/json": "^2.2.453",
+		"openai": "^6.32.0",
+		"pdf-parse": "^2.4.5",
+		"pdfjs-dist": "3.11.174"
+	}
+}
