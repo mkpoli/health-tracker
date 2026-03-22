@@ -3,6 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { and, eq, desc } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { patient, report, record } from '$lib/server/db/schema';
+import { resolveStoredReportSource } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -20,7 +21,10 @@ export const load: PageServerLoad = async ({ params }) => {
 
   return {
     currentPatient,
-    report: currentReport,
+    report: {
+      ...currentReport,
+      rawData: resolveStoredReportSource(typeof currentReport.rawData === 'string' ? currentReport.rawData : null),
+    },
     records: reportRecords,
   };
 };

@@ -31,7 +31,7 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-  extract: async ({ request, url }) => {
+  extract: async ({ request, url, platform }) => {
     const patientId = url.searchParams.get('patientId');
     if (!patientId) return fail(400, { error: 'Missing patient' });
 
@@ -41,7 +41,10 @@ export const actions: Actions = {
 
     try {
       const extracted = await extractMedicalData(textContext, file);
-      const rawSource = await buildRawReportSource(textContext, file);
+      const rawSource = await buildRawReportSource(textContext, file, {
+        patientId,
+        bucket: platform?.env.REPORT_SOURCES,
+      });
 
       return {
         success: true,

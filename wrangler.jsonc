@@ -15,6 +15,13 @@
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
+	"r2_buckets": [
+		{
+			"binding": "REPORT_SOURCES",
+			"bucket_name": "health-tracker-report-sources",
+			"preview_bucket_name": "health-tracker-report-sources-preview"
+		}
+	],
 	"observability": {
 		"enabled": true
 	},

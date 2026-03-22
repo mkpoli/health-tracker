@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { OPENAI_API_KEY, OPENAI_API_MODEL } from '$env/static/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
+export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const metricCatalogPrompt = metricSuggestions.map((label) => `- ${label}`).join('\n');
@@ -99,27 +100,4 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
   const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
 
   return JSON.parse(cleanedOutput);
-}
-
-export async function buildRawReportSource(textContext: string | null, file: File | null) {
-  if (file && file.size > 0) {
-    const arrayBuffer = await file.arrayBuffer();
-    const base64String = arrayBufferToBase64(arrayBuffer);
-
-    return JSON.stringify({
-      kind: 'file',
-      dataUrl: `data:${file.type || 'application/octet-stream'};base64,${base64String}`,
-      mimeType: file.type || null,
-      fileName: file.name || null,
-    });
-  }
-
-  if (textContext?.trim()) {
-    return JSON.stringify({
-      kind: 'text',
-      text: textContext,
-    });
-  }
-
-  return '';
 }

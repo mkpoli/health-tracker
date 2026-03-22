@@ -4,6 +4,7 @@
 declare namespace Cloudflare {
 	interface Env {
 		ASSETS: Fetcher;
+		REPORT_SOURCES: R2Bucket;
 		DATABASE_URL: string;
 		DATABASE_AUTH_TOKEN: string;
 		ORIGIN: string;

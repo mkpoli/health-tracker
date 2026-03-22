@@ -29,9 +29,11 @@
   };
 
   type RawReportSource = {
-    kind: 'text' | 'file';
+    kind: 'text' | 'file' | 'r2-file';
     text?: string;
     dataUrl?: string;
+    sourceUrl?: string;
+    key?: string;
     mimeType?: string | null;
     fileName?: string | null;
   };
@@ -95,12 +97,14 @@
     const parsed = parseJsonLike(value);
     const kind = parsed.kind;
 
-    if (kind !== 'text' && kind !== 'file') return null;
+    if (kind !== 'text' && kind !== 'file' && kind !== 'r2-file') return null;
 
     return {
       kind,
       text: typeof parsed.text === 'string' ? parsed.text : undefined,
       dataUrl: typeof parsed.dataUrl === 'string' ? parsed.dataUrl : undefined,
+      sourceUrl: typeof parsed.sourceUrl === 'string' ? parsed.sourceUrl : undefined,
+      key: typeof parsed.key === 'string' ? parsed.key : undefined,
       mimeType: typeof parsed.mimeType === 'string' ? parsed.mimeType : null,
       fileName: typeof parsed.fileName === 'string' ? parsed.fileName : null,
     };
@@ -294,21 +298,21 @@
         <h2 class="font-semibold text-slate-800">{m.original_document()}</h2>
       </div>
       <div class="flex flex-1 items-start justify-center overflow-auto bg-slate-100/50 p-6">
-        {#if previewSource?.kind === 'file' && previewSource.dataUrl && previewSource.mimeType?.startsWith('image/')}
+        {#if (previewSource?.kind === 'file' && previewSource.dataUrl && previewSource.mimeType?.startsWith('image/')) || (previewSource?.kind === 'r2-file' && previewSource.sourceUrl && previewSource.mimeType?.startsWith('image/'))}
           <img
-            src={previewSource.dataUrl}
+            src={previewSource.kind === 'r2-file' ? previewSource.sourceUrl : previewSource.dataUrl}
             alt={m.uploaded_document_alt()}
             class="h-auto max-w-full rounded-lg border border-slate-200 shadow"
           />
-        {:else if previewSource?.kind === 'file' && previewSource.dataUrl && previewSource.mimeType === 'application/pdf'}
+        {:else if ((previewSource?.kind === 'file' && previewSource.dataUrl) || (previewSource?.kind === 'r2-file' && previewSource.sourceUrl)) && previewSource?.mimeType === 'application/pdf'}
           <div class="h-full w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
               <p class="truncate font-medium text-slate-700">{previewSource.fileName || m.uploaded_document_alt()}</p>
-              <a href={previewSource.dataUrl} target="_blank" rel="noreferrer" class="text-sm font-semibold text-teal-700 hover:text-teal-800">
+              <a href={previewSource.kind === 'r2-file' ? previewSource.sourceUrl : previewSource.dataUrl} target="_blank" rel="noreferrer" class="text-sm font-semibold text-teal-700 hover:text-teal-800">
                 {m.open_full_pdf()}
               </a>
             </div>
-            <iframe src={previewSource.dataUrl} title={m.uploaded_document_alt()} class="h-[calc(100%-57px)] w-full bg-white"></iframe>
+            <iframe src={previewSource.kind === 'r2-file' ? previewSource.sourceUrl : previewSource.dataUrl} title={m.uploaded_document_alt()} class="h-[calc(100%-57px)] w-full bg-white"></iframe>
           </div>
         {:else if previewSource?.kind === 'text' && previewSource.text}
           <div class="min-h-full w-full rounded-lg border border-slate-200 bg-white p-6 shadow">
