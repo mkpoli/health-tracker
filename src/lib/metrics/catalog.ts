@@ -6,6 +6,12 @@ export type MetricDefinition = {
   aliases?: string[];
   wikidataId?: string;
   custom?: boolean;
+  calculation?: {
+    dependencies: string[];
+    compute: (inputs: Record<string, number>) => number | null;
+    unit?: string | null;
+    precision?: number;
+  };
 };
 
 const metricCatalog: MetricDefinition[] = [
@@ -17,18 +23,20 @@ const metricCatalog: MetricDefinition[] = [
   { key: 'fib-4-index', canonicalLabel: 'FIB-4 Index', testType: 'other', categories: ['liver', 'fibrosis'], aliases: ['fib-4 index', 'fib 4 index'] },
   { key: 'free-t3', canonicalLabel: 'Free T3', testType: 'blood', categories: ['hormone', 'thyroid', 'endocrine'], aliases: ['free t3', 'ft3'] },
   { key: 'free-t4', canonicalLabel: 'Free T4', testType: 'blood', categories: ['hormone', 'thyroid', 'endocrine'], aliases: ['free t4', 'ft4'] },
-  { key: 'fsh', canonicalLabel: 'FSH', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['fsh'] },
+  { key: 'fsh', canonicalLabel: 'FSH', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['fsh', 'follicle stimulating hormone', '卵胞刺激ホルモン'] },
   { key: 'growth-hormone', canonicalLabel: 'Growth Hormone', testType: 'blood', categories: ['hormone', 'pituitary', 'endocrine'], aliases: ['growth hormone', 'gh', '血中gh'] },
   { key: 'igf-1', canonicalLabel: 'IGF-1', testType: 'blood', categories: ['hormone', 'growth', 'endocrine'], aliases: ['igf-1', 'igf 1', 'igf-1 ｿﾏﾄﾒｼﾞﾝc'] },
-  { key: 'lh', canonicalLabel: 'LH', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['lh'] },
+  { key: 'lh', canonicalLabel: 'LH', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['lh', 'luteinizing hormone', '黄体形成ホルモン'] },
   { key: 'lymphocyte-count', canonicalLabel: 'Lymphocyte Count', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['lymphocyte count', 'ﾘﾝﾊﾟ球数'] },
   { key: 'metamyelocytes', canonicalLabel: 'Metamyelocytes', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['metamyelocytes', '後骨髄球'] },
   { key: 'myelocytes', canonicalLabel: 'Myelocytes', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['myelocytes', '骨髄球'] },
   { key: 'neutrophil-count', canonicalLabel: 'Neutrophil Count', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['neutrophil count', '好中球数'] },
   { key: 'nitrite', canonicalLabel: 'Nitrite', testType: 'urine', categories: ['urinalysis', 'infection'], aliases: ['nitrite', '亜硝酸塩'] },
   { key: 'occult-blood', canonicalLabel: 'Occult Blood', testType: 'urine', categories: ['urinalysis'], aliases: ['occult blood', '潜血'] },
-  { key: 'prolactin', canonicalLabel: 'Prolactin', testType: 'blood', categories: ['hormone', 'pituitary', 'endocrine'], aliases: ['prolactin', 'ﾌﾟﾛﾗｸﾁﾝ'] },
-  { key: 'testosterone', canonicalLabel: 'Testosterone', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['testosterone', '血中ﾃｽﾄｽﾃﾛﾝ'] },
+  { key: 'prolactin', canonicalLabel: 'Prolactin', testType: 'blood', categories: ['hormone', 'sexual', 'pituitary', 'endocrine'], aliases: ['prolactin', 'prl', 'ﾌﾟﾛﾗｸﾁﾝ', '催乳素'] },
+  { key: 'progesterone', canonicalLabel: 'Progesterone', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['progesterone', 'p4', '黄体酮', 'ﾌﾟﾛｹﾞｽﾃﾛﾝ'] },
+  { key: 'testosterone', canonicalLabel: 'Testosterone', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['testosterone', 't testosterone', 'total testosterone', 'テストステロン', '血中ﾃｽﾄｽﾃﾛﾝ', '睾酮'] },
+  { key: 'free-testosterone', canonicalLabel: 'Free Testosterone', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['free testosterone', 'ft', '遊離テストステロン'] },
   { key: 'total-cholesterol', canonicalLabel: 'Total Cholesterol', testType: 'blood', categories: ['fat', 'cardiometabolic'], aliases: ['total cholesterol', '総ｺﾚｽﾃﾛｰﾙ'] },
   { key: 'tsh', canonicalLabel: 'TSH', testType: 'blood', categories: ['hormone', 'thyroid', 'endocrine'], aliases: ['tsh'] },
   { key: 'urine-bilirubin', canonicalLabel: 'Urine Bilirubin', testType: 'urine', categories: ['urinalysis', 'liver'], aliases: ['urine bilirubin', 'bilirubin urine', 'ﾋﾞﾘﾙﾋﾞﾝ'] },
@@ -40,6 +48,9 @@ const metricCatalog: MetricDefinition[] = [
   { key: 'urine-white-blood-cells', canonicalLabel: 'Urine White Blood Cells', testType: 'urine', categories: ['urinalysis', 'infection', 'blood-cell'], aliases: ['urine white blood cells', 'white blood cells urine', '白血球'] },
   { key: 'urobilinogen', canonicalLabel: 'Urobilinogen', testType: 'urine', categories: ['urinalysis', 'liver'], aliases: ['urobilinogen', 'ｳﾛﾋﾞﾘﾉｰｹﾞﾝ'] },
   { key: 'eosinophils', canonicalLabel: 'Eosinophils', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['eosinophil'], wikidataId: 'Q107238' },
+  { key: 'estradiol', canonicalLabel: 'Estradiol', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['estradiol', 'e2', 'oestradiol', 'エストラジオール', '雌二醇'] },
+  { key: 'amh', canonicalLabel: 'AMH', testType: 'blood', categories: ['hormone', 'sexual', 'endocrine'], aliases: ['amh', 'anti mullerian hormone', 'anti-mullerian hormone', 'antimullerian hormone', '抗ミュラー管ホルモン'] },
+  { key: 'dhea-s', canonicalLabel: 'DHEA-S', testType: 'blood', categories: ['hormone', 'sexual', 'adrenal', 'endocrine'], aliases: ['dhea-s', 'dhea s', 'dheas', 'dehydroepiandrosterone sulfate'] },
   { key: 'ast', canonicalLabel: 'AST', testType: 'blood', categories: ['liver'], aliases: ['ast got', 'got'] },
   { key: 'egfr', canonicalLabel: 'eGFR', testType: 'blood', categories: ['kidney', 'renal'], aliases: ['egfrcreat', 'egfr creat'] },
   { key: 'wbc', canonicalLabel: 'White Blood Cell Count', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['white blood cell count', 'wbc'] },
@@ -79,7 +90,7 @@ const metricCatalog: MetricDefinition[] = [
   { key: 'band-neutrophils', canonicalLabel: 'Band Neutrophils', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['band neutrophils', 'bands'] },
   { key: 'cholinesterase', canonicalLabel: 'Cholinesterase', testType: 'blood', categories: ['liver', 'enzyme'] },
   { key: 'basophils', canonicalLabel: 'Basophils', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['basophil'] },
-  { key: 'albumin-calculated', canonicalLabel: 'Albumin (Calculated)', testType: 'blood', categories: ['protein', 'liver'], aliases: ['albumin calculated'] },
+  { key: 'albumin', canonicalLabel: 'Albumin', testType: 'blood', categories: ['protein', 'liver'] },
   { key: 'alpha1-globulin', canonicalLabel: 'alpha1-Globulin', testType: 'blood', categories: ['protein'], aliases: ['a1-globulin', 'alpha1 globulin'] },
   { key: 'beta2-globulin', canonicalLabel: 'beta2-Globulin', testType: 'blood', categories: ['protein'], aliases: ['b2-globulin', 'beta2 globulin'] },
   { key: 'gamma-globulin', canonicalLabel: 'gamma-Globulin', testType: 'blood', categories: ['protein', 'immune'], aliases: ['g-globulin', 'gamma globulin'] },
@@ -90,7 +101,22 @@ const metricCatalog: MetricDefinition[] = [
   { key: 'ag-ratio', canonicalLabel: 'A/G Ratio', testType: 'blood', categories: ['protein', 'liver'], aliases: ['a g ratio', 'ag ratio'] },
   { key: 'neutrophils', canonicalLabel: 'Neutrophils', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['neutrophil'] },
   { key: 'atypical-lymphocytes', canonicalLabel: 'Atypical Lymphocytes', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['atypical lymphocytes'] },
-  { key: 'ldl-hdl-ratio', canonicalLabel: 'LDL/HDL Ratio', testType: 'blood', categories: ['fat', 'cardiometabolic'], aliases: ['ldl hdl ratio'] },
+  {
+    key: 'ldl-hdl-ratio',
+    canonicalLabel: 'LDL/HDL Ratio',
+    testType: 'blood',
+    categories: ['fat', 'cardiometabolic'],
+    aliases: ['ldl hdl ratio'],
+    calculation: {
+      dependencies: ['ldl', 'hdl'],
+      compute: ({ ldl, hdl }) => {
+        if (!Number.isFinite(ldl) || !Number.isFinite(hdl) || hdl === 0) return null;
+        return ldl / hdl;
+      },
+      unit: null,
+      precision: 2,
+    },
+  },
 ];
 
 function normalizeMetricKey(value: string) {
@@ -102,7 +128,7 @@ function normalizeMetricKey(value: string) {
     .replaceAll('µ', 'u')
     .replaceAll('μ', 'u')
     .replace(/\(.*?\)/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
@@ -166,4 +192,8 @@ export function getMetricTags(definition: MetricDefinition) {
     testType: definition.testType || 'other',
     categories: definition.categories || ['other'],
   };
+}
+
+export function getCalculatedMetricDefinitions() {
+  return metricCatalog.filter((definition) => definition.calculation);
 }

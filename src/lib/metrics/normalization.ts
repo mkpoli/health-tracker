@@ -41,6 +41,19 @@ function getUnitScale(unit?: string | null) {
     return { multiplier: 1, comparableUnit: unit?.trim() || null };
   }
 
+  const directConversions: Array<{ pattern: RegExp; multiplier: number; comparableUnit: string }> = [
+    { pattern: /^ng\/mL$/i, multiplier: 100, comparableUnit: 'ng/dL' },
+  ];
+
+  for (const conversion of directConversions) {
+    if (conversion.pattern.test(normalized)) {
+      return {
+        multiplier: conversion.multiplier,
+        comparableUnit: conversion.comparableUnit,
+      };
+    }
+  }
+
   const baseUnit = normalized
     .replace(/[xX×*]?10\^?\d+/gi, '')
     .replace(/[xX×*]?10000/gi, '')

@@ -4,6 +4,7 @@ import { eq, desc, inArray } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
+import { saveReviewedReport } from '$lib/server/report-review';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -28,6 +29,17 @@ function normalizeReportDate(value?: string | null) {
   if (Number.isNaN(parsed.getTime())) return new Date().toISOString();
 
   return parsed.toISOString();
+}
+
+function normalizeMetricMatchKey(value: unknown) {
+  if (typeof value !== 'string') return '';
+
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export const load: PageServerLoad = async ({ url }) => {
@@ -115,55 +127,24 @@ export const actions: Actions = {
     const data = await request.formData();
     const patientId = data.get('patientId')?.toString();
     const metricsStr = data.get('metrics')?.toString();
-    const reportFacility = data.get('reportFacility')?.toString().trim();
+    const reportFacility = data.get('reportFacility')?.toString();
     const reportTestDate = data.get('reportTestDate')?.toString();
+    const targetReportId = data.get('targetReportId')?.toString();
+    const reportRawSource = data.get('reportRawSource')?.toString();
 
     if (!patientId || !metricsStr) return fail(400, { error: 'Missing inputs' });
 
-    const metrics = JSON.parse(metricsStr);
-
-    const newReport = await db.insert(report).values({
+    const result = await saveReviewedReport({
       patientId,
-      testDate: normalizeReportDate(reportTestDate),
-      parsedJsonData: metricsStr,
-      extraData: JSON.stringify({ facilityName: reportFacility || null })
-    }).returning();
+      metricsStr,
+      reportFacility,
+      reportTestDate,
+      targetReportId,
+      reportRawSource,
+      deletedRecordIdsStr: data.get('deletedRecordIds')?.toString()
+    });
 
-    for (const m of metrics) {
-      const originalLabel = m.originalLabel || m.label || null;
-      const parsedLabel = m.parsedLabel || m.label || m.type || 'Other';
-      const fallbackComparable = normalizeComparableMeasurement(m.value, m.unit, m.referenceRange);
-      const explicitComparableValue =
-        m.comparableValue === '' || m.comparableValue === null || m.comparableValue === undefined
-          ? null
-          : Number(m.comparableValue);
-      const comparableValue = Number.isFinite(explicitComparableValue)
-        ? explicitComparableValue
-        : fallbackComparable.comparableValue;
-      const comparableUnit = m.comparableUnit || fallbackComparable.comparableUnit || null;
-      const comparableReferenceRange =
-        m.comparableReferenceRange || fallbackComparable.comparableReferenceRange || null;
-
-      await db.insert(record).values({
-        patientId,
-        reportId: newReport[0].id,
-        metricName: parsedLabel,
-        value: String(m.value) || 'N/A',
-        unit: m.unit || null,
-        refRange: m.referenceRange || null,
-        status: m.status || 'Review Required',
-        extraData: JSON.stringify({
-          notes: m.notes,
-          category: m.type,
-          originalLabel,
-          parsedLabel,
-          comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
-          comparableUnit,
-          comparableReferenceRange
-        })
-      });
-    }
-    return { success: true };
+    return { success: true, ...result };
   },
 
   updateRecord: async ({ request }) => {
@@ -181,6 +162,7 @@ export const actions: Actions = {
     if (!current) return fail(404, { error: 'Record not found' });
 
     const existingExtraData = parseJsonLike(current.extraData);
+    const { category: _legacyCategory, ...extraDataWithoutLegacyCategory } = existingExtraData;
     const fallbackComparable = normalizeComparableMeasurement(value, current.unit, current.refRange);
 
     await db.update(record).set({
@@ -188,7 +170,7 @@ export const actions: Actions = {
       value,
       status,
       extraData: JSON.stringify({
-        ...existingExtraData,
+        ...extraDataWithoutLegacyCategory,
         parsedLabel: metricName,
         comparableValue: fallbackComparable.comparableValue,
         comparableUnit: fallbackComparable.comparableUnit,

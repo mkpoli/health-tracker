@@ -7,6 +7,7 @@
   import WikipediaIcon from '~icons/simple-icons/wikipedia';
   import WikidataIcon from '~icons/simple-icons/wikidata';
   import {
+    getCalculatedMetricDefinitions,
     getMetricDefinition,
     getMetricMessageKey,
     getMetricTags,
@@ -31,6 +32,8 @@
   let isSavingReport = $state(false);
   let extractText = $state('');
   let extractFile: File | null = $state(null);
+  let homepageExtractFile: File | null = $state(null);
+  let homepageExtractSubmitting = $state(false);
   let fileInput: HTMLInputElement = $state() as HTMLInputElement;
   let smartUploadActive = $state(true);
 
@@ -39,9 +42,16 @@
 
   let selectedRecordIds = $state<string[]>([]);
   let selectedTrendMetric = $state('');
+  let trendSearchQuery = $state('');
+  let trendComboboxOpen = $state(false);
+  let lastSyncedTrendMetric = $state('');
   let reportFacilityName = $state('');
   let reportTestDate = $state('');
+  let reportRawSource = $state('');
+  let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);
+  let trendComboboxContainer = $state<HTMLDivElement | null>(null);
+  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
 
   const currentLocale = $derived(getLocale());
 
@@ -58,6 +68,8 @@
     formattedDate: string;
     refRange: string | null;
     rawRefRange: string | null;
+    reportId: string | null;
+    calculated: boolean;
   };
 
   type ParsedRefRange = {
@@ -66,9 +78,51 @@
     label: string;
   };
 
+  type ReviewMetric = {
+    type: string;
+    originalLabel: string;
+    parsedLabel: string;
+    value: string | number;
+    unit?: string | null;
+    comparableValue?: string | number | null;
+    comparableUnit?: string | null;
+    comparableReferenceRange?: string | null;
+    referenceRange?: string | null;
+    date?: string | null;
+    status?: string | null;
+    notes?: string | null;
+    saveMode: 'create' | 'update';
+    matchedRecordId: string | null;
+  };
+
+  type ReportDestination = 'new' | string;
+
+  type RawReportSource = {
+    kind: 'text' | 'file';
+    text?: string;
+    dataUrl?: string;
+    mimeType?: string | null;
+    fileName?: string | null;
+  };
+
   type TrendMetricGroup = {
     metricName: string;
     points: TrendPoint[];
+  };
+
+  type TrendMetricOption = {
+    metricName: string;
+    label: string;
+    testType: string;
+    testTypeLabel: string;
+    categoryKeys: string[];
+    categoryLabels: string[];
+    primaryGroupKey: string;
+    primaryGroupLabel: string;
+    secondaryGroupKey: string;
+    secondaryGroupLabel: string;
+    readingCount: number;
+    searchText: string;
   };
 
   const reportLookup = $derived(
@@ -121,6 +175,7 @@
 
   const trendMetrics = $derived.by(() => {
     const grouped = new Map<string, TrendPoint[]>();
+    const reportMetricValues = new Map<string, Map<string, { point: TrendPoint; value: number }>>();
 
     for (const item of data.records) {
       const numericValue = getRecordComparableValue(item);
@@ -141,11 +196,69 @@
         formattedDate: formatDate(report?.testDate || null),
         refRange: getRecordComparableRange(item),
         rawRefRange: item.refRange,
+        reportId: item.reportId,
+        calculated: false,
       };
 
       const existing = grouped.get(item.metricName) || [];
       existing.push(point);
       grouped.set(item.metricName, existing);
+
+      const definition = getMetricDefinition(item.metricName);
+      const reportValues = reportMetricValues.get(item.reportId) || new Map();
+      reportValues.set(definition.key, { point, value: numericValue });
+      reportMetricValues.set(item.reportId, reportValues);
+    }
+
+    for (const calculatedDefinition of getCalculatedMetricDefinitions()) {
+      const calculation = calculatedDefinition.calculation;
+      if (!calculation) continue;
+
+      for (const report of data.reports) {
+        const reportValues = reportMetricValues.get(report.id);
+        if (!reportValues || reportValues.has(calculatedDefinition.key)) continue;
+
+        const dependencyInputs: Record<string, number> = {};
+        let missingDependency = false;
+
+        for (const dependency of calculation.dependencies) {
+          const dependencyValue = reportValues.get(dependency);
+          if (!dependencyValue) {
+            missingDependency = true;
+            break;
+          }
+
+          dependencyInputs[dependency] = dependencyValue.value;
+        }
+
+        if (missingDependency) continue;
+
+        const computedValue = calculation.compute(dependencyInputs);
+        if (computedValue === null || !Number.isFinite(computedValue)) continue;
+
+        const precision = calculation.precision ?? 2;
+        const roundedValue = Number(computedValue.toFixed(precision));
+        const calculatedPoint: TrendPoint = {
+          id: `calculated:${report.id}:${calculatedDefinition.key}`,
+          metricName: calculatedDefinition.canonicalLabel,
+          value: roundedValue,
+          rawValue: roundedValue.toFixed(precision),
+          unit: calculation.unit ?? null,
+          rawUnit: calculation.unit ?? null,
+          status: null,
+          date: report.testDate || null,
+          chartDate: formatDate(report.testDate || null, { dateStyle: 'medium' }),
+          formattedDate: formatDate(report.testDate || null),
+          refRange: null,
+          rawRefRange: null,
+          reportId: report.id,
+          calculated: true,
+        };
+
+        const existing = grouped.get(calculatedDefinition.canonicalLabel) || [];
+        existing.push(calculatedPoint);
+        grouped.set(calculatedDefinition.canonicalLabel, existing);
+      }
     }
 
     return Array.from(grouped.entries())
@@ -194,6 +307,86 @@
       .map((group) => ({
         ...group,
         metrics: group.metrics.sort((a, b) => getMetricLabel(a.metricName).localeCompare(getMetricLabel(b.metricName))),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  });
+
+  const trendMetricOptions = $derived.by(() =>
+    trendMetrics.map((metric) => {
+      const definition = getMetricDefinition(metric.metricName);
+      const tags = getMetricTags(definition);
+      const categoryKeys = tags.categories.length ? tags.categories : ['other'];
+      const categoryLabels = categoryKeys.map(getCategoryLabel);
+
+      return {
+        metricName: metric.metricName,
+        label: getMetricLabel(metric.metricName),
+        testType: tags.testType,
+        testTypeLabel: getTestTypeLabel(tags.testType),
+        categoryKeys,
+        categoryLabels,
+        primaryGroupKey: categoryKeys[0] || 'other',
+        primaryGroupLabel: categoryLabels[0] || getCategoryLabel('other'),
+        secondaryGroupKey: categoryKeys[1] || 'general',
+        secondaryGroupLabel: categoryLabels[1] || 'General',
+        readingCount: metric.points.length,
+        searchText: [
+          metric.metricName,
+          getMetricLabel(metric.metricName),
+          definition.canonicalLabel,
+          ...(definition.aliases || []),
+          tags.testType,
+          ...categoryKeys,
+          ...categoryLabels,
+        ]
+          .map((value) => normalizeMetricMatchKey(value))
+          .filter(Boolean)
+          .join(' '),
+      } satisfies TrendMetricOption;
+    }),
+  );
+
+  const filteredTrendMetricOptions = $derived.by(() => {
+    const query = normalizeMetricMatchKey(trendSearchQuery);
+    const selectedLabelQuery = normalizeMetricMatchKey(selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '');
+
+    if (!query || query === selectedLabelQuery) return trendMetricOptions;
+
+    return trendMetricOptions.filter((option) => option.searchText.includes(query));
+  });
+
+  const groupedTrendMetricOptions = $derived.by(() => {
+    const groups = new Map<
+      string,
+      { key: string; label: string; sections: Map<string, { key: string; label: string; options: TrendMetricOption[] }> }
+    >();
+
+    for (const option of filteredTrendMetricOptions) {
+      const group = groups.get(option.primaryGroupKey) || {
+        key: option.primaryGroupKey,
+        label: option.primaryGroupLabel,
+        sections: new Map(),
+      };
+      const section = group.sections.get(option.secondaryGroupKey) || {
+        key: option.secondaryGroupKey,
+        label: option.secondaryGroupLabel,
+        options: [],
+      };
+
+      section.options.push(option);
+      group.sections.set(option.secondaryGroupKey, section);
+      groups.set(option.primaryGroupKey, group);
+    }
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        sections: Array.from(group.sections.values())
+          .map((section) => ({
+            ...section,
+            options: section.options.sort((a, b) => a.label.localeCompare(b.label)),
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
   });
@@ -475,6 +668,174 @@
     return originalLabel && originalLabel !== record.metricName ? originalLabel : '';
   }
 
+  function normalizeMetricMatchKey(value: unknown) {
+    if (typeof value !== 'string') return '';
+
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function getDateOnlyKey(value?: string | null) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  function getRecordMatchKeys(record: (typeof data.records)[number]) {
+    const metadata = getRecordMetadata(record);
+
+    return [record.metricName, metadata.parsedLabel, metadata.originalLabel]
+      .map(normalizeMetricMatchKey)
+      .filter(Boolean);
+  }
+
+  function getRecordTimestamp(record: (typeof data.records)[number]) {
+    const reportDate = reportLookup[record.reportId]?.testDate;
+    if (!reportDate) return 0;
+
+    const parsed = new Date(reportDate);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  function findBestRecordMatch(metric: Omit<ReviewMetric, 'saveMode' | 'matchedRecordId'>, extractedReportDate?: string) {
+    const metricKeys = [metric.parsedLabel, metric.originalLabel, metric.type]
+      .map(normalizeMetricMatchKey)
+      .filter(Boolean);
+
+    if (metricKeys.length === 0) return null;
+
+    const extractedDateKey = getDateOnlyKey(extractedReportDate || metric.date);
+
+    return data.records
+      .filter((record) => metricKeys.some((key) => getRecordMatchKeys(record).includes(key)))
+      .sort((a, b) => {
+        const aDateKey = getDateOnlyKey(reportLookup[a.reportId]?.testDate);
+        const bDateKey = getDateOnlyKey(reportLookup[b.reportId]?.testDate);
+        const aSameDay = extractedDateKey && aDateKey === extractedDateKey ? 1 : 0;
+        const bSameDay = extractedDateKey && bDateKey === extractedDateKey ? 1 : 0;
+
+        return bSameDay - aSameDay || getRecordTimestamp(b) - getRecordTimestamp(a);
+      })[0] || null;
+  }
+
+  function getMatchedRecord(metric: ReviewMetric) {
+    return metric.matchedRecordId ? recordLookup[metric.matchedRecordId] : null;
+  }
+
+  function getReviewTargetReport() {
+    return reviewTargetReportId === 'new' ? null : reportLookup[reviewTargetReportId] || null;
+  }
+
+  function parseRawReportSource(value: unknown): RawReportSource | null {
+    const parsed = parseJsonLike(value);
+    if (!parsed) return null;
+
+    const kind = parsed.kind;
+    if (kind !== 'text' && kind !== 'file') return null;
+
+    return {
+      kind,
+      text: typeof parsed.text === 'string' ? parsed.text : undefined,
+      dataUrl: typeof parsed.dataUrl === 'string' ? parsed.dataUrl : undefined,
+      mimeType: typeof parsed.mimeType === 'string' ? parsed.mimeType : null,
+      fileName: typeof parsed.fileName === 'string' ? parsed.fileName : null,
+    };
+  }
+
+  function applyReportSource(source: RawReportSource | null) {
+    if (previewFileURL?.startsWith('blob:')) {
+      URL.revokeObjectURL(previewFileURL);
+    }
+
+    previewFileURL = null;
+    previewFileType = null;
+    extractText = '';
+
+    if (!source) return;
+
+    if (source.kind === 'text') {
+      extractText = source.text || '';
+      return;
+    }
+
+    if (source.dataUrl) {
+      previewFileURL = source.dataUrl;
+      previewFileType = source.mimeType || null;
+    }
+  }
+
+  function fileToDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildCurrentRawSource() {
+    if (extractFile) {
+      const dataUrl = await fileToDataUrl(extractFile);
+
+      return JSON.stringify({
+        kind: 'file',
+        dataUrl,
+        mimeType: extractFile.type || null,
+        fileName: extractFile.name || null,
+      } satisfies RawReportSource);
+    }
+
+    if (extractText.trim()) {
+      return JSON.stringify({
+        kind: 'text',
+        text: extractText,
+      } satisfies RawReportSource);
+    }
+
+    return '';
+  }
+
+  function startReportReview(group: (typeof groupedReports)[number]) {
+    pendingMetrics = group.records.map((record) => {
+      const metadata = getRecordMetadata(record);
+      const comparableValue =
+        typeof metadata.comparableValue === 'number' || typeof metadata.comparableValue === 'string'
+          ? metadata.comparableValue
+          : '';
+
+      return {
+        type: typeof metadata.category === 'string' ? metadata.category : 'Other',
+        originalLabel: getRecordOriginalLabel(record) || record.metricName,
+        parsedLabel: typeof metadata.parsedLabel === 'string' ? metadata.parsedLabel : record.metricName,
+        value: record.value,
+        unit: record.unit || '',
+        comparableValue,
+        comparableUnit: typeof metadata.comparableUnit === 'string' ? metadata.comparableUnit : record.unit || '',
+        comparableReferenceRange:
+          typeof metadata.comparableReferenceRange === 'string'
+            ? metadata.comparableReferenceRange
+            : record.refRange || '',
+        referenceRange: record.refRange || '',
+        date: group.report.testDate,
+        status: record.status || 'Review Required',
+        notes: typeof metadata.notes === 'string' ? metadata.notes : '',
+        saveMode: 'update',
+        matchedRecordId: record.id,
+      } satisfies ReviewMetric;
+    });
+
+    reportFacilityName = group.facilityName || '';
+    reportTestDate = normalizeDateTimeLocal(group.report.testDate);
+    reportRawSource = typeof group.report.rawData === 'string' ? group.report.rawData : '';
+    reviewTargetReportId = group.report.id;
+    applyReportSource(parseRawReportSource(group.report.rawData));
+  }
+
   function getMetricMessage(messageKey: string) {
     const lookup = m as unknown as Record<string, (inputs?: Record<string, never>) => string>;
     const message = lookup[messageKey];
@@ -553,6 +914,26 @@
     const safeIndex = currentIndex === -1 ? 0 : currentIndex;
     const nextIndex = (safeIndex + direction + trendMetrics.length) % trendMetrics.length;
     selectedTrendMetric = trendMetrics[nextIndex].metricName;
+    trendSearchQuery = getMetricLabel(trendMetrics[nextIndex].metricName);
+  }
+
+  function selectTrendMetric(metricName: string) {
+    selectedTrendMetric = metricName;
+    trendSearchQuery = getMetricLabel(metricName);
+    trendComboboxOpen = false;
+  }
+
+  function handleTrendComboboxKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      trendComboboxOpen = false;
+      trendSearchQuery = getMetricLabel(selectedTrendMetric);
+      return;
+    }
+
+    if (event.key === 'Enter' && filteredTrendMetricOptions.length > 0) {
+      event.preventDefault();
+      selectTrendMetric(filteredTrendMetricOptions[0].metricName);
+    }
   }
 
   function normalizeDateTimeLocal(value?: string | null) {
@@ -611,12 +992,29 @@
 
     if (!trendMetrics.length) {
       selectedTrendMetric = '';
+      lastSyncedTrendMetric = '';
+      trendSearchQuery = '';
       return;
     }
 
     if (!trendMetrics.some(({ metricName }) => metricName === selectedTrendMetric)) {
       selectedTrendMetric = trendMetrics[0].metricName;
     }
+
+    if (selectedTrendMetric !== lastSyncedTrendMetric) {
+      trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
+      lastSyncedTrendMetric = selectedTrendMetric;
+    }
+  });
+
+  $effect(() => {
+    if (!trendComboboxOpen) return;
+
+    const selectedMetric = selectedTrendMetric;
+
+    tick().then(() => {
+      trendOptionButtons[selectedMetric]?.scrollIntoView({ block: 'nearest' });
+    });
   });
 
   function updateFormHints() {
@@ -643,7 +1041,7 @@
   let addReportForm: HTMLFormElement = $state() as HTMLFormElement;
   let hiddenMetricsInput: HTMLInputElement = $state() as HTMLInputElement;
 
-  let pendingMetrics = $state<any[] | null>(null);
+  let pendingMetrics = $state<ReviewMetric[] | null>(null);
   let previewFileURL = $state<string | null>(null);
   let previewFileType = $state<string | null>(null);
 
@@ -655,6 +1053,8 @@
     pendingMetrics = null;
     reportFacilityName = '';
     reportTestDate = '';
+    reportRawSource = '';
+    reviewTargetReportId = 'new';
 
     if (previewFileURL) {
       URL.revokeObjectURL(previewFileURL);
@@ -707,8 +1107,10 @@
 
       if (!response.ok) throw new Error(m.extract_failed());
       const apiData = (await response.json()) as any;
+      const rawSource = await buildCurrentRawSource();
 
-      const metrics = (apiData.metrics || []).map((metric: any) => ({
+      const extractedReportDate = normalizeDateTimeLocal(apiData.reportDate);
+      const baseMetrics = (apiData.metrics || []).map((metric: any) => ({
         ...metric,
         originalLabel: metric.originalLabel || metric.label || '',
         parsedLabel: metric.parsedLabel || metric.label || metric.type || 'Other',
@@ -717,10 +1119,26 @@
         comparableReferenceRange: metric.comparableReferenceRange || metric.referenceRange || '',
       }));
 
+      const metrics = baseMetrics.map((metric: Omit<ReviewMetric, 'saveMode' | 'matchedRecordId'>) => {
+        const matchedRecord = findBestRecordMatch(metric, extractedReportDate);
+        const matchedReportDate = matchedRecord ? reportLookup[matchedRecord.reportId]?.testDate : null;
+        const shouldDefaultToUpdate = Boolean(
+          matchedRecord && extractedReportDate && getDateOnlyKey(matchedReportDate) === getDateOnlyKey(extractedReportDate),
+        );
+
+        return {
+          ...metric,
+          saveMode: shouldDefaultToUpdate ? 'update' : 'create',
+          matchedRecordId: matchedRecord?.id || null,
+        } satisfies ReviewMetric;
+      });
+
       if (metrics.length > 0) {
         pendingMetrics = metrics;
         reportFacilityName = apiData.facilityName || reportFacilityName;
-        reportTestDate = normalizeDateTimeLocal(apiData.reportDate) || inferReportDateFromMetrics(metrics);
+        reportTestDate = extractedReportDate || inferReportDateFromMetrics(metrics);
+        reportRawSource = rawSource;
+        reviewTargetReportId = 'new';
         if (previewFileURL) {
           URL.revokeObjectURL(previewFileURL);
         }
@@ -751,6 +1169,15 @@
     }
   }
 
+  function handleHomepageExtractFileChange(e: Event) {
+    const target = e.target as HTMLInputElement;
+    homepageExtractFile = target.files?.[0] || null;
+  }
+
+  function startHomepageExtractSubmit() {
+    homepageExtractSubmitting = true;
+  }
+
   let editingRecordId: string | null = $state(null);
   let editMetricName = $state('');
   let editValue = $state('');
@@ -769,6 +1196,17 @@
   }
 
   async function jumpToTrendPoint(point: TrendPoint) {
+    if (point.calculated && point.reportId) {
+      if (!expandedReportIds.includes(point.reportId)) {
+        expandedReportIds = [...expandedReportIds, point.reportId];
+      }
+
+      await tick();
+      const reportTarget = document.getElementById(`report-${point.reportId}`);
+      reportTarget?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     const record = recordLookup[point.id];
     if (!record) return;
 
@@ -987,6 +1425,8 @@
         <input type="hidden" name="metrics" bind:this={hiddenMetricsInput} />
         <input type="hidden" name="reportFacility" value={reportFacilityName} />
         <input type="hidden" name="reportTestDate" value={reportTestDate} />
+        <input type="hidden" name="reportRawSource" value={reportRawSource} />
+        <input type="hidden" name="targetReportId" value={reviewTargetReportId === 'new' ? '' : reviewTargetReportId} />
       </form>
       <datalist id="metric-parsed-label-suggestions">
         {#each metricSuggestions as suggestion}
@@ -1004,6 +1444,7 @@
           <div>
             <h2 class="text-2xl font-bold text-slate-900 tracking-tight">{m.review_extracted_records()}</h2>
             <p class="text-slate-500 mt-1">{m.review_extracted_subtitle()}</p>
+            <p class="mt-2 text-sm text-slate-500">{m.review_edit_hint()}</p>
             {#if reviewRequiredCount > 0}
               <div class="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800">
                 <span class="h-2 w-2 rounded-full bg-amber-500"></span>
@@ -1029,6 +1470,26 @@
                 class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
               />
             </label>
+            <label for="review-target-report" class="mt-4 block max-w-md">
+              <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.new_records_destination()}</span>
+              <select
+                id="review-target-report"
+                bind:value={reviewTargetReportId}
+                class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              >
+                <option value="new">{m.create_new_report()}</option>
+                {#each groupedReports as group}
+                  <option value={group.report.id}>{group.title}</option>
+                {/each}
+              </select>
+            </label>
+            {#if getReviewTargetReport()}
+              <div class="mt-3 max-w-xl rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-900">
+                <div class="font-semibold">{m.add_records_to_existing_report()}</div>
+                <div class="mt-1">{getReportTitle(getReviewTargetReport()!)}</div>
+                <div class="mt-1">{m.check_date()}: {formatDate(getReviewTargetReport()!.testDate)}</div>
+              </div>
+            {/if}
           </div>
           <div class="flex items-center gap-3">
             <button
@@ -1080,7 +1541,7 @@
               {:else if previewFileURL && previewFileType === 'application/pdf'}
                 <div class="w-full h-full bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
                   <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
-                    <p class="font-medium text-slate-700 truncate">{extractFile?.name}</p>
+                    <p class="font-medium text-slate-700 truncate">{extractFile?.name || parseRawReportSource(reportRawSource)?.fileName || m.uploaded_document_alt()}</p>
                     <a
                       href={previewFileURL}
                       target="_blank"
@@ -1100,6 +1561,10 @@
                 <div class="bg-white p-6 rounded-lg shadow border border-slate-200 w-full h-auto min-h-full">
                   <pre
                     class="text-xs text-slate-700 whitespace-pre-wrap font-mono uppercase tracking-tight">{extractText}</pre>
+                </div>
+              {:else}
+                <div class="w-full rounded-lg border border-dashed border-slate-300 bg-white/80 p-8 text-center text-sm text-slate-500">
+                  {m.no_source_preview()}
                 </div>
               {/if}
             </div>
@@ -1131,9 +1596,9 @@
               </div>
             </div>
             <div class="flex-1 overflow-auto p-4 space-y-4 bg-slate-50/50">
-              {#each pendingMetrics as m, i}
+              {#each pendingMetrics as metric, i}
                 <div
-                  class={`p-5 border rounded-xl transition-colors bg-white shadow-sm group ${m.status === 'Review Required'
+                  class={`p-5 border rounded-xl transition-colors bg-white shadow-sm group ${metric.status === 'Review Required'
                     ? 'border-amber-300 bg-amber-50/40 shadow-amber-100/60'
                     : 'border-slate-200 hover:border-teal-400'}`}
                 >
@@ -1144,12 +1609,12 @@
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
                         >{m.original_label()}</label
                       >
-                      <input
-                        id="metric-original-label-{i}"
-                        type="text"
-                        bind:value={m.originalLabel}
-                        class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
-                      />
+                        <input
+                          id="metric-original-label-{i}"
+                          type="text"
+                          bind:value={metric.originalLabel}
+                          class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
+                        />
                     </div>
                     <div>
                       <label
@@ -1157,13 +1622,13 @@
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
                         >{m.parsed_label()}</label
                       >
-                      <input
-                        id="metric-parsed-label-{i}"
-                        type="text"
-                        bind:value={m.parsedLabel}
-                        list="metric-parsed-label-suggestions"
-                        class="w-full text-sm font-semibold text-slate-900 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
-                      />
+                        <input
+                          id="metric-parsed-label-{i}"
+                          type="text"
+                          bind:value={metric.parsedLabel}
+                          list="metric-parsed-label-suggestions"
+                          class="w-full text-sm font-semibold text-slate-900 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
+                        />
                     </div>
                   </div>
 
@@ -1173,11 +1638,11 @@
                         for="metric-type-{i}"
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.category()}</label
                       >
-                      <select
-                        id="metric-type-{i}"
-                        bind:value={m.type}
-                        class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
-                      >
+                        <select
+                          id="metric-type-{i}"
+                          bind:value={metric.type}
+                          class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
+                        >
                         <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
                         <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
                         <option value="Weight">{getMetricLabel('Weight')}</option>
@@ -1187,34 +1652,63 @@
                     </div>
                     <div class="flex items-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
                        {m.parsed_label_help()}
+                     </div>
+                   </div>
+
+                  <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div>
+                      <label
+                        for="metric-save-mode-{i}"
+                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.save_action()}</label
+                      >
+                      <select
+                        id="metric-save-mode-{i}"
+                        bind:value={metric.saveMode}
+                        class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
+                      >
+                        <option value="create">{m.save_as_new_record()}</option>
+                        {#if getMatchedRecord(metric)}
+                          <option value="update">{m.update_matched_record()}</option>
+                        {/if}
+                      </select>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      {#if getMatchedRecord(metric)}
+                        <div class="font-semibold text-slate-800">{m.matched_existing_record()}</div>
+                        <div class="mt-1">{getMatchedRecord(metric)?.metricName}: {getMatchedRecord(metric)?.value}{getMatchedRecord(metric)?.unit ? ` ${getMatchedRecord(metric)?.unit}` : ''}</div>
+                        <div class="mt-1">{m.check_date()}: {formatDate(reportLookup[getMatchedRecord(metric)?.reportId || '']?.testDate)}</div>
+                      {:else}
+                        <div class="font-semibold text-slate-800">{m.save_as_new_record()}</div>
+                        <div class="mt-1">{reviewTargetReportId === 'new' ? m.create_new_report() : m.add_records_to_existing_report()}</div>
+                      {/if}
                     </div>
                   </div>
 
-                  <div class="grid grid-cols-6 gap-4 mb-4">
+                   <div class="grid grid-cols-6 gap-4 mb-4">
                     <div class="col-span-2">
                       <label
                         for="metric-val-{i}"
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.value()}</label
                       >
-                      <input
-                        id="metric-val-{i}"
-                        type="text"
-                        bind:value={m.value}
-                        class="w-full text-sm font-medium text-slate-900 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
-                      />
+                        <input
+                          id="metric-val-{i}"
+                          type="text"
+                          bind:value={metric.value}
+                          class="w-full text-sm font-medium text-slate-900 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
+                        />
                     </div>
                     <div class="col-span-2">
                       <label
                         for="metric-unit-{i}"
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.unit()}</label
                       >
-                      <input
-                        id="metric-unit-{i}"
-                        type="text"
-                        bind:value={m.unit}
-                        placeholder={m.unit_example()}
-                        class="w-full text-sm text-slate-600 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
-                      />
+                        <input
+                          id="metric-unit-{i}"
+                          type="text"
+                          bind:value={metric.unit}
+                          placeholder={m.unit_example()}
+                          class="w-full text-sm text-slate-600 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
+                        />
                     </div>
                     <div class="col-span-2">
                       <label
@@ -1223,14 +1717,14 @@
                       >
                       <select
                         id="metric-status-{i}"
-                        bind:value={m.status}
+                        bind:value={metric.status}
                         class="w-full text-sm font-medium border rounded-md px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-colors bg-white
-                         {m.status === 'Review Required' ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400' : 'border-slate-300 hover:border-slate-400'}
-                         {m.status === 'High' ? 'text-rose-600' : ''}
-                         {m.status === 'Low' ? 'text-orange-600' : ''}
-                         {m.status === 'Normal' ? 'text-emerald-600' : ''}
-                         {m.status === 'Optimal' ? 'text-blue-600' : ''}
-                      "
+                         {metric.status === 'Review Required' ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400' : 'border-slate-300 hover:border-slate-400'}
+                         {metric.status === 'High' ? 'text-rose-600' : ''}
+                         {metric.status === 'Low' ? 'text-orange-600' : ''}
+                         {metric.status === 'Normal' ? 'text-emerald-600' : ''}
+                         {metric.status === 'Optimal' ? 'text-blue-600' : ''}
+                       "
                       >
                         <option value="Normal">{m.status_normal()}</option>
                         <option value="High">{m.status_high()}</option>
@@ -1248,37 +1742,37 @@
                         for="metric-ref-{i}"
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.ref_range()}</label
                       >
-                      <input
-                        id="metric-ref-{i}"
-                        type="text"
-                        bind:value={m.referenceRange}
-                        placeholder={m.ref_range_example()}
-                        class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
-                      />
+                        <input
+                          id="metric-ref-{i}"
+                          type="text"
+                          bind:value={metric.referenceRange}
+                          placeholder={m.ref_range_example()}
+                          class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
+                        />
                     </div>
                     <div class="col-span-4">
                       <label
                         for="metric-notes-{i}"
                         class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.notes()}</label
                       >
-                      <input
-                        id="metric-notes-{i}"
-                        type="text"
-                        bind:value={m.notes}
-                        placeholder={m.optional_notes_placeholder()}
-                        class="w-full text-sm text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
-                      />
+                        <input
+                          id="metric-notes-{i}"
+                          type="text"
+                          bind:value={metric.notes}
+                          placeholder={m.optional_notes_placeholder()}
+                          class="w-full text-sm text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {#if m.comparableValue !== '' && m.comparableValue !== null && m.comparableValue !== undefined && (String(m.comparableValue) !== String(m.value) || (m.comparableUnit || '') !== (m.unit || '') || (m.comparableReferenceRange || '') !== (m.referenceRange || ''))}
+                  {#if metric.comparableValue !== '' && metric.comparableValue !== null && metric.comparableValue !== undefined && (String(metric.comparableValue) !== String(metric.value) || (metric.comparableUnit || '') !== (metric.unit || '') || (metric.comparableReferenceRange || '') !== (metric.referenceRange || ''))}
                     <div class="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm text-teal-900">
                       <div class="font-semibold">{m.comparable_normalization()}</div>
                       <div class="mt-1">
-                        {m.value()}: {m.comparableValue} {m.comparableUnit || ''}
+                        {m.value()}: {metric.comparableValue} {metric.comparableUnit || ''}
                       </div>
-                      {#if m.comparableReferenceRange}
-                        <div class="mt-1">{m.reference()}: {m.comparableReferenceRange}</div>
+                      {#if metric.comparableReferenceRange}
+                        <div class="mt-1">{m.reference()}: {metric.comparableReferenceRange}</div>
                       {/if}
                     </div>
                   {/if}
@@ -1474,112 +1968,51 @@
                   </div>
                 </form>
               {:else}
-                <form onsubmit={handleExtract} class="space-y-5">
+                <form method="POST" action={`/extract?/extract&patientId=${data.currentPatient.id}`} enctype="multipart/form-data" class="space-y-5" onsubmit={startHomepageExtractSubmit}>
                   <div>
-                    <label for="report-facility" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{m.lab_or_hospital()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
-                    >
-                    <input
-                      id="report-facility"
-                      type="text"
-                      bind:value={reportFacilityName}
-                       placeholder={m.auto_detected_facility()}
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span
-                    >
-                    <div
-                      class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-300 border-dashed rounded-lg hover:border-teal-500 transition-colors bg-white"
-                    >
+                    <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
+                    <label class="mt-1 flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 pb-6 pt-5 transition-colors hover:border-teal-500">
                       <div class="space-y-1 text-center">
-                        <svg
-                          class="mx-auto h-12 w-12 text-slate-400"
-                          stroke="currentColor"
-                          fill="none"
-                          viewBox="0 0 48 48"
-                          aria-hidden="true"
-                          ><path
-                            d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          /></svg
-                        >
-                        <div class="flex text-sm text-slate-600 justify-center">
-                          <label
-                            for="file-upload"
-                            class="relative cursor-pointer rounded-md font-medium text-teal-600 hover:text-teal-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-teal-500"
-                          >
-                            <span>{m.upload_file()}</span>
-                            <input
-                              id="file-upload"
-                              bind:this={fileInput}
-                              onchange={handleFileChange}
-                              type="file"
-                              accept="image/*,application/pdf"
-                              class="sr-only"
-                            />
-                          </label>
-                        </div>
+                        <svg class="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                        <div class="text-sm font-medium text-teal-600">{m.upload_file()}</div>
                         <p class="text-xs text-slate-500">{m.file_size_hint()}</p>
                       </div>
-                    </div>
-                    {#if extractFile}
-                      <p class="mt-2 text-sm text-teal-600 font-medium">{m.selected_file({ name: extractFile.name })}</p>
+                      <input name="file" type="file" accept="image/*,application/pdf" class="sr-only" onchange={handleHomepageExtractFileChange} />
+                    </label>
+                    {#if homepageExtractFile}
+                      <p class="mt-2 text-sm font-medium text-teal-600">{m.selected_file({ name: homepageExtractFile.name })}</p>
                     {/if}
                   </div>
                   <div>
-                    <label for="extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{m.paste_raw_text()}</label
-                    >
+                    <label for="homepage-extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5">{m.paste_raw_text()}</label>
                     <textarea
-                      id="extract-text"
-                      bind:value={extractText}
+                      id="homepage-extract-text"
+                      name="text"
                       rows="3"
-                       placeholder={m.paste_lab_results()}
+                      placeholder={m.paste_lab_results()}
                       class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
                     ></textarea>
                   </div>
                   <div class="pt-2">
                     <button
                       type="submit"
-                      disabled={isExtracting || (!extractFile && !extractText)}
-                      class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
+                      disabled={homepageExtractSubmitting}
+                      class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
                     >
-                      {#if isExtracting}
-                        <svg
-                          class="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          ><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
-                          ></circle><path
-                            class="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path></svg
-                        >
-                        {m.extracting()}
+                      {#if homepageExtractSubmitting}
+                        <svg class="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Preparing review...
                       {:else}
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke-width="2.5"
-                          stroke="currentColor"
-                          class="w-4 h-4 mr-2"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"
-                          /></svg
-                        >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 mr-2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"></path></svg>
                         {m.smart_extract()}
                       {/if}
                     </button>
                   </div>
+                  {#if homepageExtractSubmitting}
+                    <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
+                      Uploading the document and extracting metrics. This can take a little while for larger files.
+                    </div>
+                  {/if}
                 </form>
               {/if}
             </div>
@@ -1708,9 +2141,9 @@
                       </div>
                     </div>
 
-                    <div class="min-w-[14rem]">
+                    <div class="min-w-[24rem] max-w-[36rem] xl:min-w-[30rem]">
                        <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{m.metric()}</span>
-                      <div class="flex items-center gap-2">
+                      <div class="flex items-start gap-2">
                         <button
                           type="button"
                           onclick={() => stepTrendMetric(-1)}
@@ -1722,24 +2155,77 @@
                           </svg>
                         </button>
 
-                        <div class="relative flex-1">
-                        <select
-                          bind:value={selectedTrendMetric}
-                          class="w-full appearance-none rounded-2xl border border-white/70 bg-white/80 px-4 py-3 pr-10 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                        <div
+                          bind:this={trendComboboxContainer}
+                          class="relative flex-1"
+                          onfocusout={(event) => {
+                            const nextTarget = event.relatedTarget as Node | null;
+                            if (!nextTarget || !trendComboboxContainer?.contains(nextTarget)) {
+                              trendComboboxOpen = false;
+                              trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
+                            }
+                          }}
                         >
-                          {#each groupedTrendMetrics as group}
-                            <optgroup label={group.label}>
-                              {#each group.metrics as metric}
-                                <option value={metric.metricName}>{getMetricLabel(metric.metricName)}</option>
-                              {/each}
-                            </optgroup>
-                          {/each}
-                        </select>
+                        <input
+                          type="text"
+                          bind:value={trendSearchQuery}
+                          placeholder="Search biomarker"
+                          class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                          onclick={() => (trendComboboxOpen = true)}
+                          onfocus={() => (trendComboboxOpen = true)}
+                          oninput={() => (trendComboboxOpen = true)}
+                          onkeydown={handleTrendComboboxKeydown}
+                          role="combobox"
+                          aria-controls="trend-metric-listbox"
+                          aria-expanded={trendComboboxOpen}
+                          aria-label="Search biomarker"
+                        />
                         <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
                           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                           </svg>
                         </div>
+                        {#if trendComboboxOpen}
+                          <div id="trend-metric-listbox" class="absolute left-0 right-0 top-[calc(100%+0.65rem)] z-20 overflow-hidden rounded-[1.4rem] border border-white/80 bg-white/95 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.45)] backdrop-blur">
+                            <div class="max-h-[26rem] overflow-y-auto px-2 py-2">
+                              {#if groupedTrendMetricOptions.length === 0}
+                                <div class="px-4 py-6 text-sm text-slate-500">No biomarker found.</div>
+                              {:else}
+                                {#each groupedTrendMetricOptions as group}
+                                  <div class="px-2 py-2">
+                                    <div class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700/80">{group.label}</div>
+                                    {#each group.sections as section}
+                                      <div class="mb-2 rounded-2xl bg-slate-50/80 px-2 py-2">
+                                        <div class="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{section.label}</div>
+                                        <div class="space-y-1">
+                                          {#each section.options as option}
+                                            <button
+                                              type="button"
+                                              bind:this={trendOptionButtons[option.metricName]}
+                                              onclick={() => selectTrendMetric(option.metricName)}
+                                              class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? 'bg-teal-50 text-teal-900 ring-1 ring-teal-200' : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
+                                            >
+                                              <div class="min-w-0 flex-1">
+                                                <div class="truncate text-sm font-semibold">{option.label}</div>
+                                                <div class="mt-1 flex flex-wrap gap-1.5">
+                                                  <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{option.testTypeLabel}</span>
+                                                  {#each option.categoryLabels as tag}
+                                                    <span class="inline-flex items-center rounded-full border border-teal-100 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">{tag}</span>
+                                                  {/each}
+                                                </div>
+                                              </div>
+                                              <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">{option.readingCount}</span>
+                                            </button>
+                                          {/each}
+                                        </div>
+                                      </div>
+                                    {/each}
+                                  </div>
+                                {/each}
+                              {/if}
+                            </div>
+                          </div>
+                        {/if}
                         </div>
 
                         <button
@@ -1931,16 +2417,25 @@
                                 </label>
                               </div>
 
-                              <button
-                                type="button"
-                                onclick={() => toggleReportExpanded(group.report.id)}
-                                class="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                                aria-label={m.collapse_report()}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5">
-                                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 15l-7-7-7 7" />
-                                </svg>
-                              </button>
+                              <div class="flex items-center gap-2">
+                                <a
+                                  href={`/reports/${group.report.id}/review`}
+                                  data-sveltekit-reload
+                                  class="inline-flex items-center rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 transition-colors hover:bg-teal-100"
+                                >
+                                  {m.review_report()}
+                                </a>
+                                <button
+                                  type="button"
+                                  onclick={() => toggleReportExpanded(group.report.id)}
+                                  class="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                                  aria-label={m.collapse_report()}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 15l-7-7-7 7" />
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
 
                             <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
