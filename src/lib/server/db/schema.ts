@@ -9,6 +9,7 @@ export const task = sqliteTable('task', {
 
 export const patient = sqliteTable('patient', {
 	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+	ownerUserId: text('owner_user_id'),
 	name: text('name').notNull(),
 	agab: text('agab'), // assigned gender at birth
 	birthday: text('birthday'), // standard ISO format date string

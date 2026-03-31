@@ -5,16 +5,17 @@ import { db } from '$lib/server/db';
 import { patient, report, record } from '$lib/server/db/schema';
 import { buildRawReportSource, extractMedicalData } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
+import { getOwnedPatient, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
-export const load: PageServerLoad = async ({ url }) => {
+export const load: PageServerLoad = async ({ url, locals }) => {
+  const userId = requireUserId(locals);
   const patientId = url.searchParams.get('patientId');
 
   if (!patientId) {
     throw redirect(303, '/');
   }
 
-  const currentPatient = await db.select().from(patient).where(eq(patient.id, patientId));
-  const selectedPatient = currentPatient[0];
+  const selectedPatient = await getOwnedPatient(userId, patientId);
 
   if (!selectedPatient) {
     throw redirect(303, '/');
@@ -31,9 +32,13 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-  extract: async ({ request, url, platform }) => {
+  extract: async ({ request, url, platform, locals }) => {
+    const userId = requireUserId(locals);
     const patientId = url.searchParams.get('patientId');
     if (!patientId) return fail(400, { error: 'Missing patient' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
 
     const data = await request.formData();
     const textContext = data.get('text')?.toString() || null;
@@ -49,7 +54,7 @@ export const actions: Actions = {
       return {
         success: true,
         review: {
-          patientId,
+          patientId: ownedPatient.id,
           rawSource,
           facilityName: extracted.facilityName || '',
           reportDate: extracted.reportDate || '',
@@ -61,25 +66,38 @@ export const actions: Actions = {
     }
   },
 
-  save: async ({ request, url }) => {
+  save: async ({ request, url, locals }) => {
+    const userId = requireUserId(locals);
     const patientId = url.searchParams.get('patientId');
     if (!patientId) return fail(400, { error: 'Missing patient' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
 
     const data = await request.formData();
     const metricsStr = data.get('metrics')?.toString();
 
     if (!metricsStr) return fail(400, { error: 'Missing metrics' });
 
+    const targetReportId = data.get('targetReportId')?.toString();
+
+    if (targetReportId) {
+      const ownedReport = await getOwnedReport(userId, targetReportId);
+      if (!ownedReport || ownedReport.patientId !== ownedPatient.id) {
+        return fail(404, { error: 'Report not found' });
+      }
+    }
+
     await saveReviewedReport({
-      patientId,
+      patientId: ownedPatient.id,
       metricsStr,
       reportFacility: data.get('reportFacility')?.toString(),
       reportTestDate: data.get('reportTestDate')?.toString(),
-      targetReportId: data.get('targetReportId')?.toString(),
+      targetReportId,
       reportRawSource: data.get('reportRawSource')?.toString(),
       deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
     });
 
-    throw redirect(303, `/?patientId=${patientId}`);
+    throw redirect(303, `/?patientId=${ownedPatient.id}`);
   },
 };

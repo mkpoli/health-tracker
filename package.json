@@ -12,10 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"gen": "wrangler types",
 		"db:push": "drizzle-kit push",
-		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
-		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes",
 		"deploy": "bun run build && wrangler deploy",
 		"cf-typegen": "wrangler types ./src/worker-configuration.d.ts"
 	},
@@ -41,6 +38,7 @@
 	},
 	"dependencies": {
 		"@iconify/json": "^2.2.453",
+		"jose": "^6.2.2",
 		"openai": "^6.32.0",
 		"pdf-parse": "^2.4.5",
 		"pdfjs-dist": "3.11.174"

@@ -19,6 +19,7 @@
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
+  import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
@@ -1352,6 +1353,10 @@
             <LanguageSwitcher />
           </div>
 
+          <div class="hidden xl:block">
+            <AuthStatus user={data.user} />
+          </div>
+
           <div class="w-px h-6 bg-slate-200 hidden sm:block"></div>
 
           <button
@@ -1387,7 +1392,10 @@
       </div>
 
       <div class="border-t border-slate-100 px-4 py-3 md:hidden sm:px-6 lg:px-8">
-        <LanguageSwitcher />
+        <div class="flex flex-col gap-3">
+          <LanguageSwitcher />
+          <AuthStatus user={data.user} compact={true} />
+        </div>
       </div>
     </div>
   </header>

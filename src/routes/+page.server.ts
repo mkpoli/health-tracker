@@ -1,10 +1,11 @@
 import { db } from '$lib/server/db';
 import { patient, report, record } from '$lib/server/db/schema';
-import { eq, desc, inArray } from 'drizzle-orm';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
 import { saveReviewedReport } from '$lib/server/report-review';
+import { getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -42,10 +43,15 @@ function normalizeMetricMatchKey(value: unknown) {
     .trim();
 }
 
-export const load: PageServerLoad = async ({ url }) => {
+export const load: PageServerLoad = async ({ url, locals }) => {
+  const userId = requireUserId(locals);
   const selectedPatientId = url.searchParams.get('patientId');
 
-  const patients = await db.select().from(patient).orderBy(desc(patient.id));
+  const patients = await db
+    .select()
+    .from(patient)
+    .where(eq(patient.ownerUserId, userId))
+    .orderBy(desc(patient.id));
 
   let currentPatient = null;
   let recordsList: typeof record.$inferSelect[] = [];
@@ -77,7 +83,8 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-  createPatient: async ({ request }) => {
+  createPatient: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const name = data.get('name')?.toString();
     const agab = data.get('agab')?.toString();
@@ -86,6 +93,7 @@ export const actions: Actions = {
     if (!name) return fail(400, { error: 'Name is required' });
 
     const newPatient = await db.insert(patient).values({
+      ownerUserId: userId,
       name,
       agab,
       birthday
@@ -94,7 +102,8 @@ export const actions: Actions = {
     return { success: true, patient: newPatient[0] };
   },
 
-  addManualRecord: async ({ request }) => {
+  addManualRecord: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const patientId = data.get('patientId')?.toString();
     const type = data.get('type')?.toString();
@@ -105,14 +114,18 @@ export const actions: Actions = {
 
     if (!patientId || !type || !value) return fail(400, { error: 'Missing required fields' });
 
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
+
     const newReport = await db.insert(report).values({
-      patientId,
+      patientId: ownedPatient.id,
       testDate: date || new Date().toISOString(),
       extraData: JSON.stringify({ facilityName: facilityName || null })
     }).returning();
 
     await db.insert(record).values({
-      patientId,
+      patientId: ownedPatient.id,
       reportId: newReport[0].id,
       metricName: type,
       value,
@@ -123,7 +136,8 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  addReport: async ({ request }) => {
+  addReport: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const patientId = data.get('patientId')?.toString();
     const metricsStr = data.get('metrics')?.toString();
@@ -134,8 +148,19 @@ export const actions: Actions = {
 
     if (!patientId || !metricsStr) return fail(400, { error: 'Missing inputs' });
 
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
+
+    if (targetReportId) {
+      const ownedReport = await getOwnedReport(userId, targetReportId);
+      if (!ownedReport || ownedReport.patientId !== ownedPatient.id) {
+        return fail(404, { error: 'Report not found' });
+      }
+    }
+
     const result = await saveReviewedReport({
-      patientId,
+      patientId: ownedPatient.id,
       metricsStr,
       reportFacility,
       reportTestDate,
@@ -147,7 +172,8 @@ export const actions: Actions = {
     return { success: true, ...result };
   },
 
-  updateRecord: async ({ request }) => {
+  updateRecord: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
     const metricName = data.get('metricName')?.toString().trim();
@@ -156,8 +182,7 @@ export const actions: Actions = {
 
     if (!id || !metricName || !value) return fail(400, { error: 'Missing required fields' });
 
-    const existingRecord = await db.select().from(record).where(eq(record.id, id));
-    const current = existingRecord[0];
+    const current = await getOwnedRecord(userId, id);
 
     if (!current) return fail(404, { error: 'Record not found' });
 
@@ -181,7 +206,8 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  updateReport: async ({ request }) => {
+  updateReport: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
     const testDate = data.get('testDate')?.toString();
@@ -191,8 +217,7 @@ export const actions: Actions = {
 
     if (!id || !testDate) return fail(400, { error: 'Missing required fields' });
 
-    const existingReport = await db.select().from(report).where(eq(report.id, id));
-    const current = existingReport[0];
+    const current = await getOwnedReport(userId, id);
 
     if (!current) return fail(404, { error: 'Report not found' });
 
@@ -211,11 +236,16 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  deleteReport: async ({ request }) => {
+  deleteReport: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
 
     if (!id) return fail(400, { error: 'Missing ID' });
+
+    const current = await getOwnedReport(userId, id);
+
+    if (!current) return fail(404, { error: 'Report not found' });
 
     await db.delete(record).where(eq(record.reportId, id));
     await db.delete(report).where(eq(report.id, id));
@@ -223,11 +253,16 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  deletePatient: async ({ request }) => {
+  deletePatient: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('patientId')?.toString();
 
     if (!id) return fail(400, { error: 'Missing ID' });
+
+    const current = await getOwnedPatient(userId, id);
+
+    if (!current) return fail(404, { error: 'Patient not found' });
 
     await db.delete(record).where(eq(record.patientId, id));
     await db.delete(report).where(eq(report.patientId, id));
@@ -236,18 +271,24 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  deleteRecord: async ({ request }) => {
+  deleteRecord: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
 
     if (!id) return fail(400, { error: 'Missing ID' });
+
+    const current = await getOwnedRecord(userId, id);
+
+    if (!current) return fail(404, { error: 'Record not found' });
 
     await db.delete(record).where(eq(record.id, id));
 
     return { success: true };
   },
 
-  batchDeleteRecords: async ({ request }) => {
+  batchDeleteRecords: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const idsStr = data.get('ids')?.toString();
 
@@ -259,7 +300,14 @@ export const actions: Actions = {
         return fail(400, { error: 'Invalid IDs array' });
       }
 
-      await db.delete(record).where(inArray(record.id, ids));
+      const ownedRecords = await Promise.all(ids.map((id) => getOwnedRecord(userId, String(id))));
+      const ownedIds = ownedRecords.map((item) => item?.id).filter(Boolean) as string[];
+
+      if (ownedIds.length === 0) {
+        return fail(404, { error: 'No matching records found' });
+      }
+
+      await db.delete(record).where(inArray(record.id, ownedIds));
       return { success: true };
     } catch (e) {
       return fail(400, { error: 'Failed to process batch deletion' });

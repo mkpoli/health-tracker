@@ -2,18 +2,18 @@ import { redirect, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { and, eq, desc } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { patient, report, record } from '$lib/server/db/schema';
+import { record } from '$lib/server/db/schema';
 import { resolveStoredReportSource } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
+import { getOwnedPatient, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
-export const load: PageServerLoad = async ({ params }) => {
-  const reportResult = await db.select().from(report).where(eq(report.id, params.reportId));
-  const currentReport = reportResult[0];
+export const load: PageServerLoad = async ({ params, locals }) => {
+  const userId = requireUserId(locals);
+  const currentReport = await getOwnedReport(userId, params.reportId);
 
   if (!currentReport) throw redirect(303, '/');
 
-  const patientResult = await db.select().from(patient).where(eq(patient.id, currentReport.patientId));
-  const currentPatient = patientResult[0];
+  const currentPatient = await getOwnedPatient(userId, currentReport.patientId);
 
   if (!currentPatient) throw redirect(303, '/');
 
@@ -30,14 +30,14 @@ export const load: PageServerLoad = async ({ params }) => {
 };
 
 export const actions: Actions = {
-  save: async ({ request, params }) => {
+  save: async ({ request, params, locals }) => {
+    const userId = requireUserId(locals);
     const data = await request.formData();
     const metricsStr = data.get('metrics')?.toString();
 
     if (!metricsStr) return fail(400, { error: 'Missing metrics' });
 
-    const reportResult = await db.select().from(report).where(eq(report.id, params.reportId));
-    const currentReport = reportResult[0];
+    const currentReport = await getOwnedReport(userId, params.reportId);
     if (!currentReport) return fail(404, { error: 'Report not found' });
 
     await saveReviewedReport({
