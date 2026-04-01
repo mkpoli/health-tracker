@@ -522,7 +522,7 @@
   function parseReferenceRange(refRange?: string | null): ParsedRefRange | null {
     if (!refRange) return null;
 
-    const matches = Array.from(refRange.matchAll(/-?\d*\.?\d+/g), (match) => Number(match[0])).filter(
+    const matches = Array.from(refRange.matchAll(/(?<![\d.])[+-]?\d*\.?\d+/g), (match) => Number(match[0])).filter(
       (value) => Number.isFinite(value),
     );
 

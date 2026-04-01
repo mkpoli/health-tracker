@@ -92,7 +92,7 @@ function normalizeReferenceRange(refRange: string | null | undefined, multiplier
   if (!refRange) return null;
   if (multiplier === 1) return refRange;
 
-  return refRange.replace(/-?\d*\.?\d+/g, (match) => {
+  return refRange.replace(/(?<![\d.])[+-]?\d*\.?\d+/g, (match) => {
     const parsed = Number(match);
     return Number.isFinite(parsed) ? formatNumber(parsed * multiplier) : match;
   });
