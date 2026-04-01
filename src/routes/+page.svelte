@@ -35,7 +35,7 @@
   let extractFile: File | null = $state(null);
   let homepageExtractFile: File | null = $state(null);
   let homepageExtractSubmitting = $state(false);
-  let fileInput: HTMLInputElement = $state() as HTMLInputElement;
+  let homepageExtractInput: HTMLInputElement = $state() as HTMLInputElement;
   let smartUploadActive = $state(true);
 
   let showPatientModal = $state(false);
@@ -1065,7 +1065,7 @@
 
     extractText = '';
     extractFile = null;
-    if (fileInput) fileInput.value = '';
+    if (homepageExtractInput) homepageExtractInput.value = '';
     smartUploadActive = false;
   }
 
@@ -1170,9 +1170,24 @@
     }
   }
 
+  function setHomepageExtractFile(file: File | null, fileList?: FileList | null) {
+    homepageExtractFile = file;
+
+    if (!homepageExtractInput) return;
+
+    if (fileList) {
+      homepageExtractInput.files = fileList;
+      return;
+    }
+
+    if (!file) {
+      homepageExtractInput.value = '';
+    }
+  }
+
   function handleHomepageExtractFileChange(e: Event) {
     const target = e.target as HTMLInputElement;
-    homepageExtractFile = target.files?.[0] || null;
+    setHomepageExtractFile(target.files?.[0] || null, target.files);
   }
 
   function startHomepageExtractSubmit() {
@@ -1253,6 +1268,7 @@
     if (e.dataTransfer?.files?.length && data.currentPatient) {
       const file = e.dataTransfer.files[0];
       extractFile = file;
+      setHomepageExtractFile(file, e.dataTransfer.files);
       smartUploadActive = true;
     }
   }
@@ -1985,7 +2001,7 @@
                         <div class="text-sm font-medium text-teal-600">{m.upload_file()}</div>
                         <p class="text-xs text-slate-500">{m.file_size_hint()}</p>
                       </div>
-                      <input name="file" type="file" accept="image/*,application/pdf" class="sr-only" onchange={handleHomepageExtractFileChange} />
+                      <input bind:this={homepageExtractInput} name="file" type="file" accept="image/*,application/pdf" class="sr-only" onchange={handleHomepageExtractFileChange} />
                     </label>
                     {#if homepageExtractFile}
                       <p class="mt-2 text-sm font-medium text-teal-600">{m.selected_file({ name: homepageExtractFile.name })}</p>
