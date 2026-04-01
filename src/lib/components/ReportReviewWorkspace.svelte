@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { enhance } from '$app/forms';
+  import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { metricSuggestions } from '$lib/metrics/catalog';
@@ -77,6 +79,7 @@
   let deletedRecordIds = $state<string[]>([]);
   let metricCards = $state<Array<HTMLDivElement | null>>([]);
   let parsedLabelInputs = $state<Array<HTMLInputElement | null>>([]);
+  let isSaving = $state(false);
 
   function parseJsonLike(value: unknown) {
     if (!value) return {} as Record<string, unknown>;
@@ -207,6 +210,15 @@
     parsedLabelInputs = parsedLabelInputs.filter((_, metricIndex) => metricIndex !== index);
   }
 
+  const enhanceSaveForm: SubmitFunction = () => {
+    isSaving = true;
+
+    return async ({ update }) => {
+      await update({ invalidateAll: true, reset: false });
+      isSaving = false;
+    };
+  };
+
   const previewSource = $derived(parseRawReportSource(initialRawSource));
   const reviewRequiredCount = $derived(metrics.filter((metric) => metric.status === 'Review Required').length);
   const selectedTargetReport = $derived(
@@ -220,7 +232,7 @@
   {/each}
 </datalist>
 
-<form method="POST" action={saveAction} class="space-y-8">
+<form method="POST" action={saveAction} use:enhance={enhanceSaveForm} class="space-y-8" aria-busy={isSaving}>
   <input type="hidden" name="patientId" value={patientId} />
   <input type="hidden" name="metrics" value={JSON.stringify(metrics)} />
   <input type="hidden" name="reportFacility" value={reportFacilityName} />
@@ -244,18 +256,35 @@
     <div class="flex items-center gap-3">
       <a
         href={cancelHref}
-        class="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+        class={`rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 ${isSaving ? 'pointer-events-none opacity-60' : ''}`}
+        aria-disabled={isSaving}
+        tabindex={isSaving ? -1 : undefined}
       >
         {m.cancel()}
       </a>
       <button
         type="submit"
-        class="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-teal-700"
+        disabled={isSaving}
+        class="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-wait disabled:bg-teal-400"
       >
-        {m.confirm_save()}
+        {#if isSaving}
+          <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          {m.saving()}
+        {:else}
+          {m.confirm_save()}
+        {/if}
       </button>
     </div>
   </div>
+
+  {#if isSaving}
+    <div class="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900 shadow-sm">
+      Saving your reviewed values and updating the report. This can take a few moments for larger PDFs.
+    </div>
+  {/if}
 
   <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
     <label class="block">
