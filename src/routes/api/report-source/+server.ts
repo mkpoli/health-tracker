@@ -15,7 +15,31 @@ export const GET: RequestHandler = async ({ url, platform }) => {
   }
 
   const headers = new Headers();
-  object.writeHttpMetadata(headers);
+
+  if (object.httpMetadata?.contentType) {
+    headers.set('content-type', object.httpMetadata.contentType);
+  }
+
+  if (object.httpMetadata?.contentLanguage) {
+    headers.set('content-language', object.httpMetadata.contentLanguage);
+  }
+
+  if (object.httpMetadata?.contentDisposition) {
+    headers.set('content-disposition', object.httpMetadata.contentDisposition);
+  }
+
+  if (object.httpMetadata?.contentEncoding) {
+    headers.set('content-encoding', object.httpMetadata.contentEncoding);
+  }
+
+  if (object.httpMetadata?.cacheControl) {
+    headers.set('cache-control', object.httpMetadata.cacheControl);
+  }
+
+  if (object.httpMetadata?.cacheExpiry) {
+    headers.set('expires', object.httpMetadata.cacheExpiry.toUTCString());
+  }
+
   headers.set('etag', object.httpEtag);
   headers.set('cache-control', 'private, max-age=3600');
 
