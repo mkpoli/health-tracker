@@ -1194,6 +1194,25 @@
     setHomepageExtractFile(target.files?.[0] || null, target.files);
   }
 
+  function handleHomepageExtractPaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        e.preventDefault();
+        const ext = blob.type.split('/')[1] || 'png';
+        const name = blob.name && blob.name !== 'image.png' ? blob.name : `pasted-${Date.now()}.${ext}`;
+        const file = new File([blob], name, { type: blob.type });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        setHomepageExtractFile(file, dt.files);
+        return;
+      }
+    }
+  }
+
   function startHomepageExtractSubmit() {
     homepageExtractSubmitting = true;
   }
@@ -2534,6 +2553,7 @@
                         rows="3"
                         placeholder={m.paste_lab_results()}
                         class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
+                        onpaste={handleHomepageExtractPaste}
                       ></textarea>
                     </div>
                     <div class="pt-2">
