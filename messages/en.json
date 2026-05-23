@@ -386,5 +386,16 @@
   "confirm_deletion": "Confirm Deletion",
   "type_name_to_confirm": "Please type {name} to confirm.",
   "type_name_here": "Type name here",
-  "permanently_delete_data": "Permanently Delete Data"
+  "permanently_delete_data": "Permanently Delete Data",
+  "extract_page_subtitle": "Upload a document or paste text, then review the extracted values on a dedicated page.",
+  "extract_data_action": "Extract data",
+  "preparing_review": "Preparing review...",
+  "extract_uploading_status": "Uploading the document and extracting metrics. This can take a little while for larger files.",
+  "search_biomarker": "Search biomarker",
+  "no_biomarker_found": "No biomarker found.",
+  "saving_review_status": "Saving your reviewed values and updating the report. This can take a few moments for larger PDFs.",
+  "add_record": "Add record",
+  "delete": "Delete",
+  "record_n": "Record {n}",
+  "manual_records_hint": "New rows added here are saved as new records in this report."
 }

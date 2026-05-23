@@ -286,7 +286,7 @@
 
   {#if isSaving}
     <div class="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900 shadow-sm">
-      Saving your reviewed values and updating the report. This can take a few moments for larger PDFs.
+      {m.saving_review_status()}
     </div>
   {/if}
 
@@ -369,7 +369,7 @@
               onclick={addMetricRow}
               class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-700 transition-colors hover:bg-teal-100"
             >
-              Add record
+              {m.add_record()}
             </button>
           {/if}
         </div>
@@ -380,14 +380,14 @@
             <div bind:this={metricCards[i]} class={`rounded-xl border bg-white p-5 shadow-sm ${metric.status === 'Review Required' ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200'}`}>
               <div class="mb-4 flex items-start justify-between gap-3">
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Record {i + 1}</p>
+                  <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{m.record_n({ n: i + 1 })}</p>
                 </div>
                 <button
                   type="button"
                   onclick={() => removeMetricRow(i)}
                   class="inline-flex items-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                 >
-                  Delete
+                  {m.delete()}
                 </button>
               </div>
 
@@ -416,13 +416,13 @@
                 <label>
                   <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{m.status()}</span>
                   <select bind:value={metric.status} class={`w-full rounded-md border px-3 py-2 text-sm outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-500 ${getStatusFieldClass(metric.status)}`}>
-                    <option value="Normal">Normal</option>
-                    <option value="High">High</option>
-                    <option value="Low">Low</option>
-                    <option value="Optimal">Optimal</option>
-                    <option value="Stable">Stable</option>
-                    <option value="Review Required">Review Required</option>
-                    <option value="Manual">Manual</option>
+                    <option value="Normal">{m.status_normal()}</option>
+                    <option value="High">{m.status_high()}</option>
+                    <option value="Low">{m.status_low()}</option>
+                    <option value="Optimal">{m.status_optimal()}</option>
+                    <option value="Stable">{m.status_stable()}</option>
+                    <option value="Review Required">{m.status_review_required()}</option>
+                    <option value="Manual">{m.status_manual()}</option>
                   </select>
                 </label>
               </div>
@@ -457,7 +457,7 @@
                 </label>
                 {#if allowManualAdd && metric.saveMode === 'create'}
                   <div class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-                    New rows added here are saved as new records in this report.
+                    {m.manual_records_hint()}
                   </div>
                 {/if}
               </div>

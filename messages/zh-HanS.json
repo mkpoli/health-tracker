@@ -230,5 +230,16 @@
   "save_as_new_record": "创建新记录",
   "update_matched_record": "更新匹配记录",
   "matched_existing_record": "匹配到的现有记录",
-  "review_report": "查看报告"
+  "review_report": "查看报告",
+  "extract_page_subtitle": "上传文档或粘贴文本，然后在专用页面审核提取的数值。",
+  "extract_data_action": "提取数据",
+  "preparing_review": "正在准备审核...",
+  "extract_uploading_status": "正在上传文档并提取指标。文件较大时可能需要一些时间。",
+  "search_biomarker": "搜索生物标志物",
+  "no_biomarker_found": "未找到生物标志物。",
+  "saving_review_status": "正在保存已审核的数值并更新报告。PDF 较大时可能需要片刻。",
+  "add_record": "添加记录",
+  "delete": "删除",
+  "record_n": "记录 {n}",
+  "manual_records_hint": "在此添加的行会作为新记录保存到这份报告中。"
 }

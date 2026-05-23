@@ -1,5 +1,6 @@
 <script lang="ts">
   import ReportReviewWorkspace from '$lib/components/ReportReviewWorkspace.svelte';
+  import * as m from '$lib/paraglide/messages.js';
 
   type ReviewMetric = {
     type: string;
@@ -45,28 +46,28 @@
 <div class="mx-auto max-w-7xl px-6 py-10">
   {#if !form?.review}
     <div class="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Review Extracted Records</h1>
-      <p class="mt-2 text-slate-500">Upload a document or paste text, then review the extracted values on a dedicated page.</p>
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">{m.review_extracted_records()}</h1>
+      <p class="mt-2 text-slate-500">{m.extract_page_subtitle()}</p>
 
       <form method="POST" action={extractAction} enctype="multipart/form-data" class="mt-8 space-y-5" onsubmit={startExtractSubmit}>
         <div>
-          <span class="mb-1.5 block text-sm font-semibold text-slate-700">Upload document</span>
+          <span class="mb-1.5 block text-sm font-semibold text-slate-700">{m.upload_document()}</span>
           <input type="file" name="file" accept="image/*,application/pdf" class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700" />
         </div>
         <div>
-          <label for="extract-text" class="mb-1.5 block text-sm font-semibold text-slate-700">Paste raw text</label>
-          <textarea id="extract-text" name="text" rows="6" placeholder="Paste lab results or report text" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700"></textarea>
+          <label for="extract-text" class="mb-1.5 block text-sm font-semibold text-slate-700">{m.paste_raw_text()}</label>
+          <textarea id="extract-text" name="text" rows="6" placeholder={m.paste_lab_results()} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700"></textarea>
         </div>
         {#if form?.error}
           <p class="text-sm text-rose-600">{form.error}</p>
         {/if}
         <div class="flex items-center gap-3">
-          <a href={cancelHref} class="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700">Cancel</a>
-          <button type="submit" disabled={extractSubmitting} class="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-teal-400">{extractSubmitting ? 'Preparing review...' : 'Extract data'}</button>
+          <a href={cancelHref} class="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700">{m.cancel()}</a>
+          <button type="submit" disabled={extractSubmitting} class="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-teal-400">{extractSubmitting ? m.preparing_review() : m.extract_data_action()}</button>
         </div>
         {#if extractSubmitting}
           <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-            Uploading the document and extracting metrics. This can take a little while for larger files.
+            {m.extract_uploading_status()}
           </div>
         {/if}
       </form>

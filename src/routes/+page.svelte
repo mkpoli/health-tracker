@@ -2799,7 +2799,7 @@
                             <input
                               type="text"
                               bind:value={trendSearchQuery}
-                              placeholder="Search biomarker"
+                              placeholder={m.search_biomarker()}
                               class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
                               onclick={() => (trendComboboxOpen = true)}
                               onfocus={() => (trendComboboxOpen = true)}
@@ -2808,7 +2808,7 @@
                               role="combobox"
                               aria-controls="trend-metric-listbox"
                               aria-expanded={trendComboboxOpen}
-                              aria-label="Search biomarker"
+                              aria-label={m.search_biomarker()}
                             />
                             <div
                               class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400"
@@ -2825,7 +2825,7 @@
                               >
                                 <div class="max-h-[26rem] overflow-y-auto px-2 py-2">
                                   {#if groupedTrendMetricOptions.length === 0}
-                                    <div class="px-4 py-6 text-sm text-slate-500">No biomarker found.</div>
+                                    <div class="px-4 py-6 text-sm text-slate-500">{m.no_biomarker_found()}</div>
                                   {:else}
                                     {#each groupedTrendMetricOptions as group}
                                       <div class="px-2 py-2">

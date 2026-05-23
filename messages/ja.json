@@ -386,5 +386,16 @@
   "confirm_deletion": "削除を確認",
   "type_name_to_confirm": "確認のため {name} と入力してください。",
   "type_name_here": "ここに名前を入力",
-  "permanently_delete_data": "データを完全に削除"
+  "permanently_delete_data": "データを完全に削除",
+  "extract_page_subtitle": "ドキュメントをアップロードまたはテキストを貼り付けて、抽出された値を専用ページで確認します。",
+  "extract_data_action": "データを抽出",
+  "preparing_review": "確認画面を準備中...",
+  "extract_uploading_status": "ドキュメントをアップロードして指標を抽出しています。大きなファイルでは時間がかかる場合があります。",
+  "search_biomarker": "バイオマーカーを検索",
+  "no_biomarker_found": "バイオマーカーが見つかりません。",
+  "saving_review_status": "確認済みの値を保存し、レポートを更新しています。大きな PDF では少し時間がかかる場合があります。",
+  "add_record": "記録を追加",
+  "delete": "削除",
+  "record_n": "記録 {n}",
+  "manual_records_hint": "ここで追加した行はこのレポートの新規記録として保存されます。"
 }
