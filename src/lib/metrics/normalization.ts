@@ -113,3 +113,32 @@ export function normalizeComparableMeasurement(
     multiplier,
   };
 }
+
+export function convertValueBetweenUnits(
+  value: number,
+  fromUnit?: string | null,
+  toUnit?: string | null,
+): number | null {
+  if (!Number.isFinite(value)) return null;
+  if (!fromUnit && !toUnit) return value;
+  if ((fromUnit || '').trim() === (toUnit || '').trim()) return value;
+
+  const fromScale = getUnitScale(fromUnit);
+  const toScale = getUnitScale(toUnit);
+
+  if (
+    fromScale.comparableUnit &&
+    toScale.comparableUnit &&
+    fromScale.comparableUnit === toScale.comparableUnit &&
+    toScale.multiplier !== 0
+  ) {
+    return (value * fromScale.multiplier) / toScale.multiplier;
+  }
+
+  return null;
+}
+
+export function formatConvertedValue(value: number): string {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}

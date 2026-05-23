@@ -3,7 +3,7 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { tick } from 'svelte';
-  import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
+  import { normalizeComparableMeasurement, convertValueBetweenUnits, formatConvertedValue } from '$lib/metrics/normalization';
   import WikipediaIcon from '~icons/simple-icons/wikipedia';
   import WikidataIcon from '~icons/simple-icons/wikidata';
   import {
@@ -54,7 +54,7 @@
   let expandedReportIds = $state<string[]>([]);
   let trendComboboxContainer = $state<HTMLDivElement | null>(null);
   let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
-  let trendUnitDisplayMode = $state<'mixed' | 'normalized'>('normalized');
+  let trendUnitDisplay = $state<Record<string, string>>({});
   let trendRefRangeOverride = $state<Record<string, string>>({});
 
   const currentLocale = $derived(getLocale());
@@ -458,6 +458,13 @@
     const hasMixedUnits = rawUnits.size > 1;
     const overrideActive = Boolean(overrideRange);
 
+    const unitCandidateSet = new Set<string>();
+    for (const point of series) {
+      if (point.rawUnit) unitCandidateSet.add(point.rawUnit);
+      if (point.unit) unitCandidateSet.add(point.unit);
+    }
+    const unitOptions = Array.from(unitCandidateSet);
+
     return {
       width,
       height,
@@ -477,8 +484,31 @@
       refRangePath,
       hasMixedUnits,
       overrideActive,
+      unitOptions,
     };
   });
+
+  const currentTrendUnitMode = $derived.by(() => {
+    if (!selectedTrend) return 'asRecorded';
+    return trendUnitDisplay[selectedTrend.metricName] || 'asRecorded';
+  });
+
+  function renderTrendPointLabel(point: TrendPoint, mode: string): { value: string; unit: string | null } {
+    if (mode === 'asRecorded') {
+      return { value: point.rawValue, unit: point.rawUnit ?? null };
+    }
+    const source = point.rawUnit;
+    const sourceValueRaw = Number(point.rawValue);
+    const sourceValue = Number.isFinite(sourceValueRaw) ? sourceValueRaw : point.value;
+    if (source === mode) {
+      return { value: formatConvertedValue(sourceValue), unit: mode };
+    }
+    const converted = convertValueBetweenUnits(sourceValue, source, mode);
+    if (converted === null) {
+      return { value: point.rawValue, unit: point.rawUnit ?? null };
+    }
+    return { value: formatConvertedValue(converted), unit: mode };
+  }
 
   let allRecordsSelected = $derived(data.records.length > 0 && selectedRecordIds.length === data.records.length);
 
@@ -2988,31 +3018,22 @@
                     </div>
 
                     <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
-                      <div class="inline-flex rounded-lg border border-slate-200 bg-white/70 p-0.5 shadow-sm">
-                        <button
-                          type="button"
-                          onclick={() => (trendUnitDisplayMode = 'normalized')}
-                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
-                            trendUnitDisplayMode === 'normalized'
-                              ? 'bg-teal-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:bg-slate-100'
-                          }`}
+                      <label class="flex items-center gap-2">
+                        <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
+                        <select
+                          value={currentTrendUnitMode}
+                          onchange={(e) => {
+                            const target = e.currentTarget as HTMLSelectElement;
+                            trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: target.value };
+                          }}
+                          class="rounded-lg border border-slate-200 bg-white/80 px-2.5 py-1 font-medium text-slate-700 shadow-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
                         >
-                          {m.unit_display_normalized()}
-                        </button>
-                        <button
-                          type="button"
-                          onclick={() => (trendUnitDisplayMode = 'mixed')}
-                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
-                            trendUnitDisplayMode === 'mixed'
-                              ? 'bg-teal-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {m.unit_display_mixed()}
-                        </button>
-                      </div>
+                          <option value="asRecorded">{m.unit_display_mixed()}</option>
+                          {#each trendChart.unitOptions as unit}
+                            <option value={unit}>{unit}</option>
+                          {/each}
+                        </select>
+                      </label>
                       {#if trendChart.hasMixedUnits}
                         <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                           {m.mixed_units_detected()}
@@ -3052,14 +3073,12 @@
                         ></polyline>
 
                         {#each trendChart.points as point, index}
-                          {@const pointLabel =
-                            trendUnitDisplayMode === 'mixed'
-                              ? `${point.rawValue}${trendChart.hasMixedUnits && point.rawUnit ? ` ${point.rawUnit}` : ''}`
-                              : `${point.value}`}
+                          {@const rendered = renderTrendPointLabel(point, currentTrendUnitMode)}
+                          {@const pointLabel = `${rendered.value}${rendered.unit ? ` ${rendered.unit}` : ''}`}
                           {@const tooltipLabel =
                             `${point.rawValue}${point.rawUnit ? ` ${point.rawUnit}` : ''}` +
-                            (point.unit && point.unit !== point.rawUnit
-                              ? ` (${point.value}${point.unit ? ` ${point.unit}` : ''})`
+                            (currentTrendUnitMode !== 'asRecorded' && rendered.unit !== point.rawUnit
+                              ? ` (= ${rendered.value}${rendered.unit ? ` ${rendered.unit}` : ''})`
                               : '') +
                             ` — ${point.chartDate}`}
                           <g

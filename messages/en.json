@@ -282,7 +282,6 @@
   "ref_converted_from": "Converted from {unit}",
   "ref_unit_mismatch": "Different unit: {unit}",
   "unit_display": "Unit display",
-  "unit_display_normalized": "Normalized",
   "unit_display_mixed": "As recorded",
   "mixed_units_detected": "Mixed units in series",
   "reset_to_record_range": "Reset to recorded range",

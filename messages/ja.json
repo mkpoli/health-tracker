@@ -282,7 +282,6 @@
   "ref_converted_from": "{unit} から換算",
   "ref_unit_mismatch": "単位が異なります: {unit}",
   "unit_display": "単位表示",
-  "unit_display_normalized": "正規化",
   "unit_display_mixed": "記録のまま",
   "mixed_units_detected": "系列内に異なる単位",
   "reset_to_record_range": "記録の基準値に戻す",
