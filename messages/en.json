@@ -314,7 +314,7 @@
   "assessed_records": "Assessed Records",
   "assessed_records_subtitle": "Grouped by report so you can expand a check, review its values, and edit its metadata in place.",
   "delete_selected": "Delete Selected ({count})",
-  "diachronic_view": "Diachronic View",
+  "diachronic_view": "Trend over time",
   "reading_count_one": "{count} reading",
   "reading_count_other": "{count} readings",
   "canonical": "Canonical",

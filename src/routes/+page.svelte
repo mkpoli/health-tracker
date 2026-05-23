@@ -1487,7 +1487,7 @@
                     <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div class="min-w-0 max-w-2xl">
                         <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">
-                          Diachronic view
+                          {m.diachronic_view()}
                         </p>
                         <div class="mt-2 flex flex-wrap items-end gap-3">
                           <h4 class="text-2xl font-semibold tracking-tight text-slate-900">LDL Cholesterol</h4>

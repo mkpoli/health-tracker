@@ -314,7 +314,7 @@
   "assessed_records": "評価済み記録",
   "assessed_records_subtitle": "レポート単位でグループ化されているため、検査を展開して値を確認し、その場でメタデータを編集できます。",
   "delete_selected": "選択を削除 ({count})",
-  "diachronic_view": "時系列ビュー",
+  "diachronic_view": "時系列の推移",
   "reading_count_one": "{count} 件の測定",
   "reading_count_other": "{count} 件の測定",
   "canonical": "標準名",
