@@ -2383,6 +2383,7 @@
                             metricLabel={metric.parsedLabel}
                             patient={data.currentPatient}
                             currentUnit={metric.unit}
+                            currentValue={metric.referenceRange}
                             onSelect={(rangeText) => (metric.referenceRange = rangeText)}
                           />
                         </div>
@@ -3055,6 +3056,7 @@
                             metricLabel={selectedTrend.metricName}
                             patient={data.currentPatient}
                             currentUnit={trendChart.latest.unit}
+                            currentValue={trendRefRangeOverride[selectedTrend.metricName] ?? trendChart.refRange?.label ?? null}
                             onSelect={(rangeText) => {
                               trendRefRangeOverride = { ...trendRefRangeOverride, [selectedTrend.metricName]: rangeText };
                             }}

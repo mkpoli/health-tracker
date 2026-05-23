@@ -443,6 +443,7 @@
                       metricLabel={metric.parsedLabel}
                       {patient}
                       currentUnit={metric.unit}
+                      currentValue={metric.referenceRange}
                       onSelect={(rangeText) => (metric.referenceRange = rangeText)}
                     />
                   </div>

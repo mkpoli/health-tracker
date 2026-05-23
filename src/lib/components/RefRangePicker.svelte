@@ -12,11 +12,13 @@
     metricLabel,
     patient,
     currentUnit,
+    currentValue = null,
     onSelect,
   }: {
     metricLabel?: string | null;
     patient?: PatientContext | null;
     currentUnit?: string | null;
+    currentValue?: string | null;
     onSelect: (rangeText: string) => void;
   } = $props();
 
@@ -28,6 +30,25 @@
   function entryDisplay(entry: RefRangeEntry) {
     return formatRefRangeForUnit(entry, currentUnit);
   }
+
+  function normalizeForCompare(value: string | null | undefined): string {
+    return (value || '').replace(/\s+/g, '').toLowerCase();
+  }
+
+  // Selected entry is the one whose displayed range matches the current value,
+  // or whose native range matches it (covers the case where the user typed
+  // the entry's raw range without unit conversion).
+  const selectedIndex = $derived.by(() => {
+    const target = normalizeForCompare(currentValue);
+    if (!target) return -1;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (normalizeForCompare(entry.range) === target) return i;
+      const display = entryDisplay(entry);
+      if (normalizeForCompare(display.range) === target) return i;
+    }
+    return -1;
+  });
 
   function handlePick(entry: RefRangeEntry) {
     const display = entryDisplay(entry);
@@ -53,12 +74,17 @@
     >
       {#each entries as entry, idx}
         {@const display = entryDisplay(entry)}
+        {@const isSelected = idx === selectedIndex}
+        {@const isRecommended = selectedIndex === -1 && idx === 0}
         <button
           type="button"
           onclick={() => handlePick(entry)}
-          class="block w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-teal-50 {idx === 0
-            ? 'border border-teal-100 bg-teal-50/40'
-            : ''}"
+          aria-current={isSelected ? 'true' : undefined}
+          class="block w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-teal-50 {isSelected
+            ? 'border-2 border-teal-500 bg-teal-50'
+            : isRecommended
+              ? 'border border-teal-100 bg-teal-50/40'
+              : 'border border-transparent'}"
         >
           <div class="flex items-baseline justify-between gap-2">
             <span class="text-xs font-semibold text-slate-800">{entry.label}</span>
