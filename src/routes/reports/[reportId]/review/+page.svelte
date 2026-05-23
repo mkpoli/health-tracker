@@ -85,6 +85,7 @@
 <div class="mx-auto max-w-7xl px-6 py-10">
   <ReportReviewWorkspace
     patientId={data.currentPatient.id}
+    patient={data.currentPatient}
     saveAction="?/save"
     {cancelHref}
     heading={`Review report: ${getReportTitle()}`}

@@ -22,6 +22,7 @@
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
+  import RefRangePicker from '$lib/components/RefRangePicker.svelte';
 
   let { data, form } = $props();
 
@@ -2264,11 +2265,19 @@
 
                     <div class="grid grid-cols-6 gap-4">
                       <div class="col-span-2">
-                        <label
-                          for="metric-ref-{i}"
-                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
-                          >{m.ref_range()}</label
-                        >
+                        <div class="mb-1.5 flex items-center justify-between gap-2">
+                          <label
+                            for="metric-ref-{i}"
+                            class="block text-xs font-bold text-slate-500 uppercase tracking-wide"
+                            >{m.ref_range()}</label
+                          >
+                          <RefRangePicker
+                            metricLabel={metric.parsedLabel}
+                            patient={data.currentPatient}
+                            currentUnit={metric.unit}
+                            onSelect={(rangeText) => (metric.referenceRange = rangeText)}
+                          />
+                        </div>
                         <input
                           id="metric-ref-{i}"
                           type="text"

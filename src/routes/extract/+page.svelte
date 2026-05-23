@@ -74,6 +74,7 @@
   {:else}
     <ReportReviewWorkspace
       patientId={data.currentPatient.id}
+      patient={data.currentPatient}
       saveAction={saveAction}
       {cancelHref}
       initialMetrics={initialMetrics}

@@ -4,6 +4,8 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { metricSuggestions } from '$lib/metrics/catalog';
+  import RefRangePicker from './RefRangePicker.svelte';
+  import type { PatientContext } from '$lib/metrics/ref-ranges';
   import { tick } from 'svelte';
 
   type ReviewMetric = {
@@ -42,6 +44,7 @@
 
   let {
     patientId,
+    patient = null,
     saveAction,
     cancelHref,
     heading = m.review_extracted_records(),
@@ -56,6 +59,7 @@
     allowManualAdd = false,
   }: {
     patientId: string;
+    patient?: PatientContext | null;
     saveAction: string;
     cancelHref: string;
     heading?: string;
@@ -432,10 +436,18 @@
                   <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{m.unit()}</span>
                   <input type="text" bind:value={metric.unit} class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-500" />
                 </label>
-                <label class="lg:col-span-2">
-                  <span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{m.reference()}</span>
+                <div class="lg:col-span-2">
+                  <div class="mb-1.5 flex items-center justify-between gap-2">
+                    <span class="block text-xs font-bold uppercase tracking-wide text-slate-500">{m.reference()}</span>
+                    <RefRangePicker
+                      metricLabel={metric.parsedLabel}
+                      {patient}
+                      currentUnit={metric.unit}
+                      onSelect={(rangeText) => (metric.referenceRange = rangeText)}
+                    />
+                  </div>
                   <input type="text" bind:value={metric.referenceRange} class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-500" />
-                </label>
+                </div>
               </div>
 
               <div class="mt-4 space-y-4">
