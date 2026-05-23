@@ -407,20 +407,55 @@
       return null;
     }
 
+    const metricName = selectedTrend?.metricName ?? '';
+    const mode = trendUnitDisplay[metricName] || 'asRecorded';
     const latest = series[series.length - 1];
-    const override = trendRefRangeOverride[selectedTrend?.metricName ?? ''] ?? null;
+
+    // The chart's plotted Y value must agree with what the user sees in labels.
+    // For 'asRecorded', plot by raw value; for a chosen unit, plot by the value
+    // converted into that unit. Falls back to the comparable value if a raw
+    // value can't be parsed and isn't convertible.
+    function plotValueFor(point: TrendPoint): number {
+      if (mode === 'asRecorded') {
+        const n = Number(point.rawValue);
+        return Number.isFinite(n) ? n : point.value;
+      }
+      const source = canonicalUnitForm(point.rawUnit);
+      const n = Number(point.rawValue);
+      const sourceValue = Number.isFinite(n) ? n : point.value;
+      if (source === mode) return sourceValue;
+      const converted = convertValueBetweenUnits(sourceValue, source, mode);
+      return converted ?? sourceValue;
+    }
+
+    const plotValues = series.map(plotValueFor);
+
+    const override = trendRefRangeOverride[metricName] ?? null;
     const overrideRange = override ? parseReferenceRange(override) : null;
     const parsedRanges = series.map((point) => parseReferenceRange(point.refRange)).filter(Boolean) as ParsedRefRange[];
-    const values = series.map((point) => point.value);
+    const bounds: number[] = [...plotValues];
+
+    // For chart bounds, project the active ref range into the plotted unit too —
+    // otherwise the band can sit outside the visible y-range.
+    const refSourceUnit = canonicalUnitForm(latest.rawUnit);
+    const refTargetUnit = mode === 'asRecorded' ? refSourceUnit : mode;
+    function convertRefBound(value: number | null): number | null {
+      if (value === null) return null;
+      if (!refTargetUnit || !refSourceUnit || refTargetUnit === refSourceUnit) return value;
+      const converted = convertValueBetweenUnits(value, refSourceUnit, refTargetUnit);
+      return converted ?? value;
+    }
 
     const rangesForBounds = overrideRange ? [overrideRange] : parsedRanges;
     for (const range of rangesForBounds) {
-      if (range.low !== null) values.push(range.low);
-      if (range.high !== null) values.push(range.high);
+      const low = convertRefBound(range.low);
+      const high = convertRefBound(range.high);
+      if (low !== null) bounds.push(low);
+      if (high !== null) bounds.push(high);
     }
 
-    const rawMin = Math.min(...values);
-    const rawMax = Math.max(...values);
+    const rawMin = Math.min(...bounds);
+    const rawMax = Math.max(...bounds);
     const spread = rawMax - rawMin || Math.max(Math.abs(rawMax) * 0.1, 1);
     const min = rawMin - spread * 0.18;
     const max = rawMax + spread * 0.18;
@@ -437,11 +472,11 @@
     const xForIndex = (index: number) => left + index * xStep;
     const yForValue = (value: number) => top + ((max - value) / (max - min || 1)) * chartHeight;
 
-    const line = series.map((point, index) => `${xForIndex(index)},${yForValue(point.value)}`).join(' ');
+    const line = plotValues.map((v, index) => `${xForIndex(index)},${yForValue(v)}`).join(' ');
     const area = `${line} ${xForIndex(series.length - 1)},${height - bottom} ${xForIndex(0)},${height - bottom}`;
 
     const previous = series.length > 1 ? series[series.length - 2] : null;
-    const delta = previous ? latest.value - previous.value : null;
+    const delta = previous ? plotValueFor(latest) - plotValueFor(previous) : null;
     const activeRange =
       overrideRange ||
       parseReferenceRange(latest.refRange) ||
@@ -452,8 +487,8 @@
     let refRangePath = '';
 
     if (activeRange && activeRange.low !== null && activeRange.high !== null) {
-      const low = activeRange.low;
-      const high = activeRange.high;
+      const low = convertRefBound(activeRange.low)!;
+      const high = convertRefBound(activeRange.high)!;
       const upper = `${left},${yForValue(high)} ${width - right},${yForValue(high)}`;
       const lower = `${width - right},${yForValue(low)} ${left},${yForValue(low)}`;
       refRangePath = `${upper} ${lower}`;
@@ -480,7 +515,7 @@
       points: series.map((point, index) => ({
         ...point,
         x: xForIndex(index),
-        y: yForValue(point.value),
+        y: yForValue(plotValues[index]),
       })),
       firstDate: series[0].formattedDate,
       lastDate: latest.formattedDate,
