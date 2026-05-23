@@ -18,13 +18,35 @@ export type PatientContext = {
   birthday?: string | null;
 };
 
-// Reference values below are common adult intervals collated from publicly
-// available lab references (Mayo Clinic Labs, Quest, LabCorp). Real clinical
-// ranges vary by lab and assay; users should verify against their report.
+// Endogenous adult intervals collated from publicly available lab references
+// (Mayo Clinic Labs, Quest, LabCorp). Real clinical ranges vary by lab and assay;
+// users should verify against their report.
+//
+// Gender-affirming HRT target intervals are intervention targets, NOT physiological
+// reference intervals — they describe where clinicians typically aim while a patient
+// is on therapy. Sources:
+//   - Endocrine Society Clinical Practice Guideline, Hembree et al. 2017
+//   - WPATH Standards of Care v8 (2022)
+//   - Transfeminine Science (transfemscience.org)
+//   - MtF.Wiki / community references
 const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
   testosterone: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '264-916', unit: 'ng/dL' },
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '8-60', unit: 'ng/dL' },
+    {
+      label: 'Transfeminine HRT target (suppressed)',
+      range: '<50',
+      unit: 'ng/dL',
+      notes: 'On feminizing HRT with anti-androgen or orchiectomy. Endocrine Society 2017 cites <55 ng/dL.',
+      source: 'Endocrine Society 2017; WPATH SOC8',
+    },
+    {
+      label: 'Transmasculine HRT target',
+      range: '320-1000',
+      unit: 'ng/dL',
+      notes: 'On masculinizing testosterone therapy — aim for the cis male physiological range.',
+      source: 'Endocrine Society 2017; WPATH SOC8',
+    },
   ],
   'free-testosterone': [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '9.3-26.5', unit: 'pg/mL' },
@@ -36,6 +58,20 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, ovulatory', sex: 'Female', notes: 'Ovulatory', range: '110-410', unit: 'pg/mL' },
     { label: 'Female, luteal phase', sex: 'Female', notes: 'Luteal', range: '19-241', unit: 'pg/mL' },
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '<10', unit: 'pg/mL' },
+    {
+      label: 'Transfeminine HRT target',
+      range: '100-200',
+      unit: 'pg/mL',
+      notes: 'Common feminizing-HRT target (premenopausal female range). Some clinicians and patients on monotherapy aim higher (up to ~250-300).',
+      source: 'Endocrine Society 2017; WPATH SOC8; Transfeminine Science',
+    },
+    {
+      label: 'Transmasculine on T (suppressed)',
+      range: '<50',
+      unit: 'pg/mL',
+      notes: 'On masculinizing testosterone therapy, endogenous estradiol is typically suppressed.',
+      source: 'Endocrine Society 2017',
+    },
   ],
   progesterone: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '0.1-0.8', unit: 'ng/mL' },
@@ -49,6 +85,12 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, ovulatory', sex: 'Female', notes: 'Ovulatory', range: '4.7-21.5', unit: 'mIU/mL' },
     { label: 'Female, luteal phase', sex: 'Female', notes: 'Luteal', range: '1.7-7.7', unit: 'mIU/mL' },
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '25.8-134.8', unit: 'mIU/mL' },
+    {
+      label: 'On HRT (suppressed)',
+      range: '<5',
+      unit: 'mIU/mL',
+      notes: 'Both feminizing and masculinizing HRT typically suppress endogenous gonadotropins. Not a hard target; trended for context.',
+    },
   ],
   lh: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '1.7-8.6', unit: 'mIU/mL' },
@@ -56,6 +98,12 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, ovulatory', sex: 'Female', notes: 'Ovulatory', range: '14-95.6', unit: 'mIU/mL' },
     { label: 'Female, luteal phase', sex: 'Female', notes: 'Luteal', range: '1.0-11.4', unit: 'mIU/mL' },
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '7.7-58.5', unit: 'mIU/mL' },
+    {
+      label: 'On HRT (suppressed)',
+      range: '<5',
+      unit: 'mIU/mL',
+      notes: 'Both feminizing and masculinizing HRT typically suppress endogenous gonadotropins. Not a hard target; trended for context.',
+    },
   ],
   prolactin: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '4.0-15.2', unit: 'ng/mL' },
@@ -83,10 +131,24 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
   hemoglobin: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '13.5-17.5', unit: 'g/dL' },
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '12.0-15.5', unit: 'g/dL' },
+    {
+      label: 'On masculinizing T therapy',
+      range: '13.5-17.5',
+      unit: 'g/dL',
+      notes: 'Trends toward cis male range on testosterone. Monitor for erythrocytosis.',
+      source: 'Endocrine Society 2017',
+    },
   ],
   hematocrit: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '41-50', unit: '%' },
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '36-44', unit: '%' },
+    {
+      label: 'On masculinizing T therapy (safety cap)',
+      range: '<52',
+      unit: '%',
+      notes: 'Hematocrit >52% on testosterone therapy is the commonly cited threshold for clinical action (dose review, phlebotomy).',
+      source: 'Endocrine Society 2017; WPATH SOC8',
+    },
   ],
   rbc: [
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '4.7-6.1', unit: '10^6/uL' },
