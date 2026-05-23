@@ -17,8 +17,9 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 
   const pathname = event.url.pathname;
   const isAuthRoute = pathname.startsWith('/auth');
+  const isPublicLandingRoute = event.route.id === '/';
 
-  if (!session?.user && !isAuthRoute) {
+  if (!session?.user && !isAuthRoute && !isPublicLandingRoute) {
     const returnTo = `${pathname}${event.url.search}`;
     throw redirect(302, `/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   }

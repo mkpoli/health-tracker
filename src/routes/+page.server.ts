@@ -44,6 +44,17 @@ function normalizeMetricMatchKey(value: unknown) {
 }
 
 export const load: PageServerLoad = async ({ url, locals }) => {
+  if (!locals.user) {
+    return {
+      user: locals.user,
+      session: locals.session,
+      patients: [],
+      currentPatient: null,
+      records: [],
+      reports: []
+    };
+  }
+
   const userId = requireUserId(locals);
   const selectedPatientId = url.searchParams.get('patientId');
 
@@ -75,6 +86,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   }
 
   return {
+    user: locals.user,
+    session: locals.session,
     patients,
     currentPatient,
     records: recordsList,

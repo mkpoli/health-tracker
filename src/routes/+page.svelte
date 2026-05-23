@@ -126,13 +126,9 @@
     searchText: string;
   };
 
-  const reportLookup = $derived(
-    Object.fromEntries(data.reports.map((report) => [report.id, report])),
-  );
+  const reportLookup = $derived(Object.fromEntries(data.reports.map((report) => [report.id, report])));
 
-  const recordLookup = $derived(
-    Object.fromEntries(data.records.map((record) => [record.id, record])),
-  );
+  const recordLookup = $derived(Object.fromEntries(data.records.map((record) => [record.id, record])));
 
   const reportCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
@@ -359,7 +355,11 @@
   const groupedTrendMetricOptions = $derived.by(() => {
     const groups = new Map<
       string,
-      { key: string; label: string; sections: Map<string, { key: string; label: string; options: TrendMetricOption[] }> }
+      {
+        key: string;
+        label: string;
+        sections: Map<string, { key: string; label: string; options: TrendMetricOption[] }>;
+      }
     >();
 
     for (const option of filteredTrendMetricOptions) {
@@ -467,9 +467,7 @@
     };
   });
 
-  let allRecordsSelected = $derived(
-    data.records.length > 0 && selectedRecordIds.length === data.records.length,
-  );
+  let allRecordsSelected = $derived(data.records.length > 0 && selectedRecordIds.length === data.records.length);
 
   function toggleSelectAll() {
     if (allRecordsSelected) {
@@ -659,8 +657,11 @@
 
   function getRecordComparableRange(record: (typeof data.records)[number]) {
     const metadata = getRecordMetadata(record);
-    const candidate = typeof metadata.comparableReferenceRange === 'string' ? metadata.comparableReferenceRange.trim() : '';
-    return candidate || normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableReferenceRange;
+    const candidate =
+      typeof metadata.comparableReferenceRange === 'string' ? metadata.comparableReferenceRange.trim() : '';
+    return (
+      candidate || normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableReferenceRange
+    );
   }
 
   function getRecordOriginalLabel(record: (typeof data.records)[number]) {
@@ -703,7 +704,10 @@
     return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
   }
 
-  function findBestRecordMatch(metric: Omit<ReviewMetric, 'saveMode' | 'matchedRecordId'>, extractedReportDate?: string) {
+  function findBestRecordMatch(
+    metric: Omit<ReviewMetric, 'saveMode' | 'matchedRecordId'>,
+    extractedReportDate?: string,
+  ) {
     const metricKeys = [metric.parsedLabel, metric.originalLabel, metric.type]
       .map(normalizeMetricMatchKey)
       .filter(Boolean);
@@ -712,16 +716,18 @@
 
     const extractedDateKey = getDateOnlyKey(extractedReportDate || metric.date);
 
-    return data.records
-      .filter((record) => metricKeys.some((key) => getRecordMatchKeys(record).includes(key)))
-      .sort((a, b) => {
-        const aDateKey = getDateOnlyKey(reportLookup[a.reportId]?.testDate);
-        const bDateKey = getDateOnlyKey(reportLookup[b.reportId]?.testDate);
-        const aSameDay = extractedDateKey && aDateKey === extractedDateKey ? 1 : 0;
-        const bSameDay = extractedDateKey && bDateKey === extractedDateKey ? 1 : 0;
+    return (
+      data.records
+        .filter((record) => metricKeys.some((key) => getRecordMatchKeys(record).includes(key)))
+        .sort((a, b) => {
+          const aDateKey = getDateOnlyKey(reportLookup[a.reportId]?.testDate);
+          const bDateKey = getDateOnlyKey(reportLookup[b.reportId]?.testDate);
+          const aSameDay = extractedDateKey && aDateKey === extractedDateKey ? 1 : 0;
+          const bSameDay = extractedDateKey && bDateKey === extractedDateKey ? 1 : 0;
 
-        return bSameDay - aSameDay || getRecordTimestamp(b) - getRecordTimestamp(a);
-      })[0] || null;
+          return bSameDay - aSameDay || getRecordTimestamp(b) - getRecordTimestamp(a);
+        })[0] || null
+    );
   }
 
   function getMatchedRecord(metric: ReviewMetric) {
@@ -894,11 +900,7 @@
     return 'text-slate-700 bg-slate-50 border-slate-200';
   }
 
-  function getStatusFromRange(
-    value: number,
-    range: ParsedRefRange | null,
-    fallbackStatus?: string | null,
-  ) {
+  function getStatusFromRange(value: number, range: ParsedRefRange | null, fallbackStatus?: string | null) {
     if (!range) return fallbackStatus || null;
 
     if (range.low !== null && value < range.low) return 'Low';
@@ -1124,7 +1126,9 @@
         const matchedRecord = findBestRecordMatch(metric, extractedReportDate);
         const matchedReportDate = matchedRecord ? reportLookup[matchedRecord.reportId]?.testDate : null;
         const shouldDefaultToUpdate = Boolean(
-          matchedRecord && extractedReportDate && getDateOnlyKey(matchedReportDate) === getDateOnlyKey(extractedReportDate),
+          matchedRecord &&
+          extractedReportDate &&
+          getDateOnlyKey(matchedReportDate) === getDateOnlyKey(extractedReportDate),
         );
 
         return {
@@ -1302,14 +1306,15 @@
   </div>
 {/if}
 
-<div class="min-h-screen bg-slate-50 font-sans text-slate-800 pb-10">
-  <!-- Top Navigation -->
-  <header class="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center h-16">
+{#if !data.session?.user}
+  <div
+    class="min-h-screen overflow-hidden bg-[linear-gradient(180deg,_#f7fcfb_0%,_#eef6ff_45%,_#fff8ef_100%)] text-slate-900"
+  >
+    <div class="mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-12 pt-6 sm:px-6 lg:px-8">
+      <header class="flex items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <div
-            class="w-9 h-9 bg-teal-600 rounded-lg flex items-center justify-center text-white shadow-sm ring-1 ring-teal-700/50"
+            class="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-[0_18px_40px_-24px_rgba(13,148,136,0.95)]"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -1317,216 +1322,422 @@
               viewBox="0 0 24 24"
               stroke-width="2.5"
               stroke="currentColor"
-              class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
+              class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
             >
           </div>
-          <h1 class="text-xl font-semibold tracking-tight text-slate-900">
-            {m.app_title()} <span class="text-teal-600 font-bold">{m.app_pro()}</span>
-          </h1>
-        </div>
-
-        <div class="flex items-center gap-3 sm:gap-4 lg:gap-6">
-          <a
-            href="/admin"
-            class="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900 sm:inline-flex"
-          >
-            {m.admin()}
-          </a>
-          <!-- Patient Selector -->
-          <div class="flex items-center space-x-3">
-            <form method="GET" action="/" class="flex flex-row items-center gap-2">
-              <select
-                name="patientId"
-                onchange={(e) => e.currentTarget.form?.submit()}
-                class="block w-full pl-3 pr-8 py-1.5 text-sm border-slate-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md bg-slate-50 font-medium"
-              >
-                {#if data.patients.length === 0}
-                  <option disabled>{m.no_patients()}</option>
-                {/if}
-                {#each data.patients as p}
-                  <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
-                {/each}
-              </select>
-            </form>
-            <button
-              onclick={() => (showPatientModal = true)}
-              class="flex items-center justify-center w-7 h-7 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-teal-700 border border-slate-200 transition-colors"
-              aria-label={m.nav_add_patient()}
-              title={m.nav_add_patient()}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="2"
-                stroke="currentColor"
-                class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
-              >
-            </button>
-          </div>
-
-          <div class="hidden md:block">
-            <LanguageSwitcher />
-          </div>
-
-          <div class="hidden xl:block">
-            <AuthStatus user={data.user} />
-          </div>
-
-          <div class="w-px h-6 bg-slate-200 hidden sm:block"></div>
-
-          <button
-            class="text-slate-400 hover:text-teal-600 transition-colors pointer relative"
-            aria-label={m.notifications()}
-          >
-            <span
-              class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white translate-x-1/2 -translate-y-1/2"
-            ></span>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-6 h-6"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-              /></svg
-            >
-          </button>
-
-          {#if data.currentPatient}
-            <div
-              class="hidden sm:flex w-9 h-9 rounded-full bg-teal-100 border border-teal-200 shadow-sm overflow-hidden items-center justify-center text-teal-700 font-bold text-sm uppercase"
-            >
-              {data.currentPatient.name.substring(0, 2)}
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="border-t border-slate-100 px-4 py-3 md:hidden sm:px-6 lg:px-8">
-        <div class="flex flex-col gap-3">
-          <LanguageSwitcher />
-          <AuthStatus user={data.user} compact={true} />
-        </div>
-      </div>
-    </div>
-  </header>
-
-  {#if showPatientModal}
-    <AddPatientModal onClose={() => (showPatientModal = false)} />
-  {/if}
-
-  {#if showDeleteModal && data.currentPatient}
-    <DangerZoneModal patient={data.currentPatient} records={data.records} onClose={() => (showDeleteModal = false)} />
-  {/if}
-
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <form
-      id="edit-form"
-      method="POST"
-      action="?/updateRecord"
-      use:enhance={() => {
-        return async ({ update }) => {
-          await update({ invalidateAll: true, reset: false });
-          cancelEdit();
-        };
-      }}
-      class="hidden"
-    >
-      <input type="hidden" name="id" value={editingRecordId} />
-      <input type="hidden" name="metricName" value={editMetricName} />
-      <input type="hidden" name="value" value={editValue} />
-      <input type="hidden" name="status" value={editStatus} />
-    </form>
-
-    {#if data.currentPatient}
-      <form bind:this={addReportForm} method="POST" action="?/addReport" use:enhance={enhanceAddReport} class="hidden">
-        <input type="hidden" name="patientId" value={data.currentPatient.id} />
-        <input type="hidden" name="metrics" bind:this={hiddenMetricsInput} />
-        <input type="hidden" name="reportFacility" value={reportFacilityName} />
-        <input type="hidden" name="reportTestDate" value={reportTestDate} />
-        <input type="hidden" name="reportRawSource" value={reportRawSource} />
-        <input type="hidden" name="targetReportId" value={reviewTargetReportId === 'new' ? '' : reviewTargetReportId} />
-      </form>
-      <datalist id="metric-parsed-label-suggestions">
-        {#each metricSuggestions as suggestion}
-          <option value={suggestion}></option>
-        {/each}
-      </datalist>
-    {/if}
-
-    {#if !data.currentPatient}
-      <WelcomeWizard onCreateProfile={() => (showPatientModal = true)} />
-    {:else if pendingMetrics}
-      <!-- Review UI -->
-      <div class="mb-8">
-        <div class="flex items-center justify-between mb-6">
           <div>
-            <h2 class="text-2xl font-bold text-slate-900 tracking-tight">{m.review_extracted_records()}</h2>
-            <p class="text-slate-500 mt-1">{m.review_extracted_subtitle()}</p>
-            <p class="mt-2 text-sm text-slate-500">{m.review_edit_hint()}</p>
-            {#if reviewRequiredCount > 0}
-              <div class="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800">
-                <span class="h-2 w-2 rounded-full bg-amber-500"></span>
-                {m.review_required_count({ count: reviewRequiredCount })}
-              </div>
-            {/if}
-            <label for="review-facility" class="mt-4 block max-w-md">
-              <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.lab_or_hospital()}</span>
-              <input
-                id="review-facility"
-                type="text"
-                bind:value={reportFacilityName}
-                placeholder={m.enter_testing_facility()}
-                class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-              />
-            </label>
-            <label for="review-report-date" class="mt-4 block max-w-xs">
-              <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.check_date()}</span>
-              <input
-                id="review-report-date"
-                type="datetime-local"
-                bind:value={reportTestDate}
-                class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-              />
-            </label>
-            <label for="review-target-report" class="mt-4 block max-w-md">
-              <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.new_records_destination()}</span>
-              <select
-                id="review-target-report"
-                bind:value={reviewTargetReportId}
-                class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-              >
-                <option value="new">{m.create_new_report()}</option>
-                {#each groupedReports as group}
-                  <option value={group.report.id}>{group.title}</option>
-                {/each}
-              </select>
-            </label>
-            {#if getReviewTargetReport()}
-              <div class="mt-3 max-w-xl rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-900">
-                <div class="font-semibold">{m.add_records_to_existing_report()}</div>
-                <div class="mt-1">{getReportTitle(getReviewTargetReport()!)}</div>
-                <div class="mt-1">{m.check_date()}: {formatDate(getReviewTargetReport()!.testDate)}</div>
-              </div>
-            {/if}
+            <p class="text-xs font-semibold uppercase tracking-[0.26em] text-teal-700/80">Healthcare Tracker</p>
+            <h1 class="text-lg font-semibold tracking-tight text-slate-900">
+              {m.app_title()} <span class="text-teal-600">{m.app_pro()}</span>
+            </h1>
           </div>
-          <div class="flex items-center gap-3">
-            <button
-              onclick={cancelReview}
-              disabled={isSavingReport}
-              class="px-5 py-2.5 border border-slate-300 text-slate-700 bg-white rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+        </div>
+
+        <AuthStatus user={data.session?.user} />
+      </header>
+
+      <main class="grid flex-1 items-start gap-8 py-8 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:gap-10 xl:py-14">
+        <section class="xl:sticky xl:top-8">
+          <h2 class="max-w-md text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl xl:text-6xl">
+            Review trends. Upload reports. Then log in.
+          </h2>
+
+          <div class="mt-6 flex flex-col gap-3 sm:flex-row xl:flex-col 2xl:flex-row">
+            <a
+              href="/auth/login?returnTo=/"
+              class="inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-teal-700"
             >
-              {m.cancel()}
-            </button>
-            <button
-              onclick={confirmAndSave}
-              disabled={isSavingReport}
-              class="px-5 py-2.5 flex items-center gap-2 border border-transparent text-white bg-teal-600 rounded-lg text-sm font-semibold hover:bg-teal-700 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+              Log in to continue
+            </a>
+          </div>
+        </section>
+
+        <aside id="landing-preview" class="relative">
+          <div class="absolute -left-10 top-10 h-32 w-32 rounded-full bg-teal-300/25 blur-3xl"></div>
+          <div class="absolute -right-10 bottom-8 h-36 w-36 rounded-full bg-amber-200/35 blur-3xl"></div>
+          <div
+            class="relative overflow-hidden rounded-[2rem] border border-white/80 bg-white/85 p-4 shadow-[0_28px_80px_-36px_rgba(15,23,42,0.35)] backdrop-blur sm:p-6"
+          >
+            <div class="grid gap-6 2xl:grid-cols-[16rem_minmax(0,1fr)]">
+              <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden 2xl:order-1">
+                <div class="px-6 py-4 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50 rounded-t-xl">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
+                    <h3 class="text-lg font-semibold text-slate-800">Upload report</h3>
+                  </div>
+                  <div class="flex bg-slate-200/50 p-1 rounded-lg">
+                    <button class="flex-1 py-1.5 text-sm font-medium rounded-md text-slate-500">Manual</button>
+                    <button class="flex-1 py-1.5 text-sm font-medium rounded-md bg-white text-slate-800 shadow-sm"
+                      >Test result</button
+                    >
+                  </div>
+                </div>
+                <div class="p-6 space-y-5">
+                  <div>
+                    <span class="block text-sm font-semibold text-slate-700 mb-1.5">Upload document</span>
+                    <div class="mt-1 rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 pb-6 pt-5">
+                      <div class="space-y-1 text-center">
+                        <svg
+                          class="mx-auto h-12 w-12 text-slate-400"
+                          stroke="currentColor"
+                          fill="none"
+                          viewBox="0 0 48 48"
+                          aria-hidden="true"
+                          ><path
+                            d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          ></path></svg
+                        >
+                        <div class="text-sm font-medium text-teal-600">cbc-lipid-panel.png</div>
+                        <p class="text-xs text-slate-500">PNG preview ready</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <div class="aspect-[4/3] sm:aspect-[5/4] 2xl:aspect-[4/5] bg-[linear-gradient(180deg,_#ffffff_0%,_#f8fafc_100%)] p-4">
+                      <div class="h-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div class="h-3 w-28 rounded-full bg-slate-200"></div>
+                        <div class="mt-4 grid gap-3">
+                          <div class="rounded-lg border border-slate-200 p-3">
+                            <div class="h-2 w-20 rounded-full bg-slate-200"></div>
+                            <div class="mt-2 flex items-center justify-between">
+                              <div class="h-2 w-16 rounded-full bg-slate-200"></div>
+                              <div class="h-2 w-10 rounded-full bg-teal-200"></div>
+                            </div>
+                          </div>
+                          <div class="rounded-lg border border-slate-200 p-3">
+                            <div class="h-2 w-24 rounded-full bg-slate-200"></div>
+                            <div class="mt-2 flex items-center justify-between">
+                              <div class="h-2 w-12 rounded-full bg-slate-200"></div>
+                              <div class="h-2 w-8 rounded-full bg-blue-200"></div>
+                            </div>
+                          </div>
+                          <div class="rounded-lg border border-slate-200 p-3">
+                            <div class="h-2 w-16 rounded-full bg-slate-200"></div>
+                            <div class="mt-2 flex items-center justify-between">
+                              <div class="h-2 w-24 rounded-full bg-slate-200"></div>
+                              <div class="h-2 w-10 rounded-full bg-amber-200"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="2.5"
+                      stroke="currentColor"
+                      class="w-4 h-4 mr-2"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"
+                      ></path></svg
+                    >
+                    Smart extract
+                  </button>
+                </div>
+              </div>
+
+              <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex min-w-0 flex-col 2xl:order-2">
+                <div
+                  class="px-6 py-5 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50 lg:flex-row lg:items-center lg:justify-between"
+                >
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
+                    <div>
+                      <h3 class="text-lg font-semibold text-slate-800">Assessed records</h3>
+                      <p class="text-sm text-slate-500">Preview data</p>
+                    </div>
+                  </div>
+                  <div class="text-sm font-medium text-slate-500">12 items</div>
+                </div>
+
+                <div
+                  class="border-b border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)] px-6 py-6"
+                >
+                  <div class="flex flex-col gap-6">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div class="min-w-0 max-w-2xl">
+                        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">
+                          Diachronic view
+                        </p>
+                        <div class="mt-2 flex flex-wrap items-end gap-3">
+                          <h4 class="text-2xl font-semibold tracking-tight text-slate-900">LDL Cholesterol</h4>
+                          <span
+                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
+                            >5 readings</span
+                          >
+                        </div>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                          <span
+                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-sm backdrop-blur"
+                            >Lipid</span
+                          >
+                          <span
+                            class="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
+                            >Cardiovascular</span
+                          >
+                        </div>
+                      </div>
+
+                      <div class="w-full min-w-0 xl:max-w-[22rem]">
+                        <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
+                          >Metric</span
+                        >
+                        <div class="flex items-start gap-2">
+                          <button
+                            aria-label="Previous metric"
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)]"
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                              ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"
+                              ></path></svg
+                            >
+                          </button>
+                          <div class="min-w-0 flex-1 rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)]">
+                            LDL Cholesterol
+                          </div>
+                          <button
+                            aria-label="Next metric"
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)]"
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                              ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"
+                              ></path></svg
+                            >
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest</p>
+                        <div class="mt-2 flex flex-wrap items-center gap-3">
+                          <p class="text-3xl font-semibold tracking-tight text-slate-900">
+                            96 <span class="text-lg font-medium text-slate-500">mg/dL</span>
+                          </p>
+                          <span
+                            class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border-emerald-200"
+                            >Normal</span
+                          >
+                        </div>
+                        <p class="mt-2 text-sm text-slate-500">Measured on Dec 12</p>
+                      </div>
+
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Change</p>
+                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">-8.0</p>
+                        <p class="mt-2 text-sm text-slate-500">Compared previous</p>
+                      </div>
+
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reference range</p>
+                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">0-100</p>
+                        <p class="mt-2 text-sm text-slate-500">Optimal range</p>
+                      </div>
+                    </div>
+
+                    <div class="overflow-x-auto rounded-[28px] border border-white/80 bg-slate-950/[0.03] p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                      <svg viewBox="0 0 640 220" class="h-56 min-w-[40rem] w-full sm:h-64">
+                        <defs>
+                          <linearGradient id="landing-real-line" x1="0%" x2="100%" y1="0%" y2="0%">
+                            <stop offset="0%" stop-color="#14b8a6"></stop>
+                            <stop offset="100%" stop-color="#2563eb"></stop>
+                          </linearGradient>
+                          <linearGradient id="landing-real-area" x1="0%" x2="0%" y1="0%" y2="100%">
+                            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
+                            <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
+                          </linearGradient>
+                        </defs>
+                        <polygon points="20,126 620,126 620,92 20,92" fill="rgba(16,185,129,0.12)"></polygon>
+                        <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"
+                        ></line>
+                        <polygon
+                          points="40,112 180,124 320,138 460,118 600,100 600,184 40,184"
+                          fill="url(#landing-real-area)"
+                        ></polygon>
+                        <polyline
+                          points="40,112 180,124 320,138 460,118 600,100"
+                          fill="none"
+                          stroke="url(#landing-real-line)"
+                          stroke-width="4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        ></polyline>
+                        <g>
+                          <circle cx="40" cy="112" r="7" fill="white" fill-opacity="0.95"></circle><circle
+                            cx="40"
+                            cy="112"
+                            r="4.5"
+                            fill="#0f766e"
+                          ></circle><text
+                            x="40"
+                            y="98"
+                            text-anchor="middle"
+                            class="fill-slate-700 text-[11px] font-semibold">112</text
+                          ><text x="40" y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">Jan</text>
+                          <circle cx="180" cy="124" r="7" fill="white" fill-opacity="0.95"></circle><circle
+                            cx="180"
+                            cy="124"
+                            r="4.5"
+                            fill="#0f766e"
+                          ></circle><text
+                            x="180"
+                            y="110"
+                            text-anchor="middle"
+                            class="fill-slate-700 text-[11px] font-semibold">108</text
+                          ><text x="180" y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">Mar</text>
+                          <circle cx="320" cy="138" r="7" fill="white" fill-opacity="0.95"></circle><circle
+                            cx="320"
+                            cy="138"
+                            r="4.5"
+                            fill="#0f766e"
+                          ></circle><text
+                            x="320"
+                            y="124"
+                            text-anchor="middle"
+                            class="fill-slate-700 text-[11px] font-semibold">103</text
+                          ><text x="320" y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">Jun</text>
+                          <circle cx="460" cy="118" r="7" fill="white" fill-opacity="0.95"></circle><circle
+                            cx="460"
+                            cy="118"
+                            r="4.5"
+                            fill="#0f766e"
+                          ></circle><text
+                            x="460"
+                            y="104"
+                            text-anchor="middle"
+                            class="fill-slate-700 text-[11px] font-semibold">104</text
+                          ><text x="460" y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">Sep</text>
+                          <circle cx="600" cy="100" r="7" fill="white" fill-opacity="0.95"></circle><circle
+                            cx="600"
+                            cy="100"
+                            r="4.5"
+                            fill="#0f766e"
+                          ></circle><text
+                            x="600"
+                            y="86"
+                            text-anchor="middle"
+                            class="fill-slate-700 text-[11px] font-semibold">96</text
+                          ><text x="600" y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">Dec</text>
+                        </g>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex-1 overflow-x-auto bg-white">
+                  <div class="border-t border-slate-100">
+                    <div
+                      class="flex items-center gap-3 px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-50/50"
+                    >
+                      <span>Select records</span>
+                    </div>
+                    <div class="px-4 py-5 sm:px-6 border-t border-slate-100">
+                      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h4 class="truncate text-lg font-semibold tracking-tight text-slate-900">
+                            Lipid panel - Dec 12
+                          </h4>
+                          <p class="mt-1 text-sm text-slate-500">Dec 12, 2025 - 4 records</p>
+                        </div>
+                        <span
+                          class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                          >Labcorp</span
+                        >
+                      </div>
+                      <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <table class="min-w-full divide-y divide-slate-200">
+                          <thead class="bg-slate-50/70">
+                            <tr>
+                              <th
+                                class="px-2 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                >Type</th
+                              >
+                              <th
+                                class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                >Value</th
+                              >
+                              <th
+                                class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                >Status</th
+                              >
+                            </tr>
+                          </thead>
+                          <tbody class="bg-white divide-y divide-slate-100">
+                            <tr
+                              ><td class="px-2 py-4 whitespace-nowrap text-sm font-semibold text-slate-800"
+                                >LDL Cholesterol</td
+                              ><td class="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-medium"
+                                >96 <span class="text-slate-500 ml-1">mg/dL</span></td
+                              ><td class="px-6 py-4 whitespace-nowrap"
+                                ><span
+                                  class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  >Normal</span
+                                ></td
+                              ></tr
+                            >
+                            <tr
+                              ><td class="px-2 py-4 whitespace-nowrap text-sm font-semibold text-slate-800"
+                                >HDL Cholesterol</td
+                              ><td class="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-medium"
+                                >58 <span class="text-slate-500 ml-1">mg/dL</span></td
+                              ><td class="px-6 py-4 whitespace-nowrap"
+                                ><span
+                                  class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border bg-blue-50 text-blue-700 border-blue-200"
+                                  >Optimal</span
+                                ></td
+                              ></tr
+                            >
+                            <tr
+                              ><td class="px-2 py-4 whitespace-nowrap text-sm font-semibold text-slate-800"
+                                >Triglycerides</td
+                              ><td class="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-medium"
+                                >122 <span class="text-slate-500 ml-1">mg/dL</span></td
+                              ><td class="px-6 py-4 whitespace-nowrap"
+                                ><span
+                                  class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border bg-slate-50 text-slate-700 border-slate-200"
+                                  >Stable</span
+                                ></td
+                              ></tr
+                            >
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+  </div>
+{:else}
+  <div class="min-h-screen bg-slate-50 font-sans text-slate-800 pb-10">
+    <!-- Top Navigation -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-9 h-9 bg-teal-600 rounded-lg flex items-center justify-center text-white shadow-sm ring-1 ring-teal-700/50"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1534,118 +1745,367 @@
                 viewBox="0 0 24 24"
                 stroke-width="2.5"
                 stroke="currentColor"
-                class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
+                class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
               >
-              {isSavingReport ? m.saving() : m.confirm_save()}
-            </button>
+            </div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900">
+              {m.app_title()} <span class="text-teal-600 font-bold">{m.app_pro()}</span>
+            </h1>
           </div>
-        </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <!-- Left Panel: Preview -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[700px]">
-            <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center">
-              <svg class="w-5 h-5 text-slate-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          <div class="flex items-center gap-3 sm:gap-4 lg:gap-6">
+            <a
+              href="/admin"
+              class="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900 sm:inline-flex"
+            >
+              {m.admin()}
+            </a>
+            <!-- Patient Selector -->
+            <div class="flex items-center space-x-3">
+              <form method="GET" action="/" class="flex flex-row items-center gap-2">
+                <select
+                  name="patientId"
+                  onchange={(e) => e.currentTarget.form?.submit()}
+                  class="block w-full pl-3 pr-8 py-1.5 text-sm border-slate-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md bg-slate-50 font-medium"
+                >
+                  {#if data.patients.length === 0}
+                    <option disabled>{m.no_patients()}</option>
+                  {/if}
+                  {#each data.patients as p}
+                    <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
+                  {/each}
+                </select>
+              </form>
+              <button
+                onclick={() => (showPatientModal = true)}
+                class="flex items-center justify-center w-7 h-7 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-teal-700 border border-slate-200 transition-colors"
+                aria-label={m.nav_add_patient()}
+                title={m.nav_add_patient()}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="2"
+                  stroke="currentColor"
+                  class="w-4 h-4"
+                  ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
+                >
+              </button>
+            </div>
+
+            <div class="hidden md:block">
+              <LanguageSwitcher />
+            </div>
+
+            <div class="hidden xl:block">
+              <AuthStatus user={data.session?.user} />
+            </div>
+
+            <div class="w-px h-6 bg-slate-200 hidden sm:block"></div>
+
+            <button
+              class="text-slate-400 hover:text-teal-600 transition-colors pointer relative"
+              aria-label={m.notifications()}
+            >
+              <span
+                class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white translate-x-1/2 -translate-y-1/2"
+              ></span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6"
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                ></path></svg
+                  d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+                /></svg
               >
-              <h3 class="font-semibold text-slate-800">{m.original_document()}</h3>
-            </div>
-            <div class="flex-1 overflow-auto bg-slate-100/50 p-6 flex justify-center items-start">
-              {#if previewFileURL && previewFileType?.startsWith('image/')}
-                <img
-                  src={previewFileURL}
-                  alt={m.uploaded_document_alt()}
-                  class="max-w-full h-auto rounded-lg shadow border border-slate-200"
+            </button>
+
+            {#if data.currentPatient}
+              <div
+                class="hidden sm:flex w-9 h-9 rounded-full bg-teal-100 border border-teal-200 shadow-sm overflow-hidden items-center justify-center text-teal-700 font-bold text-sm uppercase"
+              >
+                {data.currentPatient.name.substring(0, 2)}
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="border-t border-slate-100 px-4 py-3 md:hidden sm:px-6 lg:px-8">
+          <div class="flex flex-col gap-3">
+            <LanguageSwitcher />
+            <AuthStatus user={data.session?.user} compact={true} />
+          </div>
+        </div>
+      </div>
+    </header>
+
+    {#if showPatientModal}
+      <AddPatientModal onClose={() => (showPatientModal = false)} />
+    {/if}
+
+    {#if showDeleteModal && data.currentPatient}
+      <DangerZoneModal patient={data.currentPatient} records={data.records} onClose={() => (showDeleteModal = false)} />
+    {/if}
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <form
+        id="edit-form"
+        method="POST"
+        action="?/updateRecord"
+        use:enhance={() => {
+          return async ({ update }) => {
+            await update({ invalidateAll: true, reset: false });
+            cancelEdit();
+          };
+        }}
+        class="hidden"
+      >
+        <input type="hidden" name="id" value={editingRecordId} />
+        <input type="hidden" name="metricName" value={editMetricName} />
+        <input type="hidden" name="value" value={editValue} />
+        <input type="hidden" name="status" value={editStatus} />
+      </form>
+
+      {#if data.currentPatient}
+        <form
+          bind:this={addReportForm}
+          method="POST"
+          action="?/addReport"
+          use:enhance={enhanceAddReport}
+          class="hidden"
+        >
+          <input type="hidden" name="patientId" value={data.currentPatient.id} />
+          <input type="hidden" name="metrics" bind:this={hiddenMetricsInput} />
+          <input type="hidden" name="reportFacility" value={reportFacilityName} />
+          <input type="hidden" name="reportTestDate" value={reportTestDate} />
+          <input type="hidden" name="reportRawSource" value={reportRawSource} />
+          <input
+            type="hidden"
+            name="targetReportId"
+            value={reviewTargetReportId === 'new' ? '' : reviewTargetReportId}
+          />
+        </form>
+        <datalist id="metric-parsed-label-suggestions">
+          {#each metricSuggestions as suggestion}
+            <option value={suggestion}></option>
+          {/each}
+        </datalist>
+      {/if}
+
+      {#if !data.currentPatient}
+        <WelcomeWizard onCreateProfile={() => (showPatientModal = true)} />
+      {:else if pendingMetrics}
+        <!-- Review UI -->
+        <div class="mb-8">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900 tracking-tight">{m.review_extracted_records()}</h2>
+              <p class="text-slate-500 mt-1">{m.review_extracted_subtitle()}</p>
+              <p class="mt-2 text-sm text-slate-500">{m.review_edit_hint()}</p>
+              {#if reviewRequiredCount > 0}
+                <div
+                  class="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800"
+                >
+                  <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+                  {m.review_required_count({ count: reviewRequiredCount })}
+                </div>
+              {/if}
+              <label for="review-facility" class="mt-4 block max-w-md">
+                <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  >{m.lab_or_hospital()}</span
+                >
+                <input
+                  id="review-facility"
+                  type="text"
+                  bind:value={reportFacilityName}
+                  placeholder={m.enter_testing_facility()}
+                  class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                 />
-              {:else if previewFileURL && previewFileType === 'application/pdf'}
-                <div class="w-full h-full bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                  <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
-                    <p class="font-medium text-slate-700 truncate">{extractFile?.name || parseRawReportSource(reportRawSource)?.fileName || m.uploaded_document_alt()}</p>
-                    <a
-                      href={previewFileURL}
-                      target="_blank"
-                      rel="noreferrer"
-                      class="text-sm font-semibold text-teal-700 hover:text-teal-800 transition-colors"
-                    >
-                      {m.open_full_pdf()}
-                    </a>
-                  </div>
-                  <iframe
-                    src={previewFileURL}
-                    title={m.uploaded_pdf_preview()}
-                    class="w-full h-[calc(100%-57px)] bg-white"
-                  ></iframe>
-                </div>
-              {:else if extractText}
-                <div class="bg-white p-6 rounded-lg shadow border border-slate-200 w-full h-auto min-h-full">
-                  <pre
-                    class="text-xs text-slate-700 whitespace-pre-wrap font-mono uppercase tracking-tight">{extractText}</pre>
-                </div>
-              {:else}
-                <div class="w-full rounded-lg border border-dashed border-slate-300 bg-white/80 p-8 text-center text-sm text-slate-500">
-                  {m.no_source_preview()}
+              </label>
+              <label for="review-report-date" class="mt-4 block max-w-xs">
+                <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  >{m.check_date()}</span
+                >
+                <input
+                  id="review-report-date"
+                  type="datetime-local"
+                  bind:value={reportTestDate}
+                  class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                />
+              </label>
+              <label for="review-target-report" class="mt-4 block max-w-md">
+                <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  >{m.new_records_destination()}</span
+                >
+                <select
+                  id="review-target-report"
+                  bind:value={reviewTargetReportId}
+                  class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                >
+                  <option value="new">{m.create_new_report()}</option>
+                  {#each groupedReports as group}
+                    <option value={group.report.id}>{group.title}</option>
+                  {/each}
+                </select>
+              </label>
+              {#if getReviewTargetReport()}
+                <div
+                  class="mt-3 max-w-xl rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-900"
+                >
+                  <div class="font-semibold">{m.add_records_to_existing_report()}</div>
+                  <div class="mt-1">{getReportTitle(getReviewTargetReport()!)}</div>
+                  <div class="mt-1">{m.check_date()}: {formatDate(getReviewTargetReport()!.testDate)}</div>
                 </div>
               {/if}
             </div>
+            <div class="flex items-center gap-3">
+              <button
+                onclick={cancelReview}
+                disabled={isSavingReport}
+                class="px-5 py-2.5 border border-slate-300 text-slate-700 bg-white rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+              >
+                {m.cancel()}
+              </button>
+              <button
+                onclick={confirmAndSave}
+                disabled={isSavingReport}
+                class="px-5 py-2.5 flex items-center gap-2 border border-transparent text-white bg-teal-600 rounded-lg text-sm font-semibold hover:bg-teal-700 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="2.5"
+                  stroke="currentColor"
+                  class="w-4 h-4"
+                  ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
+                >
+                {isSavingReport ? m.saving() : m.confirm_save()}
+              </button>
+            </div>
           </div>
 
-          <!-- Right Panel: Edit Records -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[700px]">
-            <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-              <div class="flex items-center">
-                <svg class="w-5 h-5 text-teal-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Left Panel: Preview -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[700px]">
+              <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center">
+                <svg class="w-5 h-5 text-slate-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                   ><path
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                    d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
                   ></path></svg
                 >
-                <h3 class="font-semibold text-slate-800">{m.extracted_metrics()}</h3>
+                <h3 class="font-semibold text-slate-800">{m.original_document()}</h3>
               </div>
-              <div class="flex items-center gap-2">
-                {#if reviewRequiredCount > 0}
-                  <span class="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full">
-                    {m.review_required_count({ count: reviewRequiredCount })}
-                  </span>
+              <div class="flex-1 overflow-auto bg-slate-100/50 p-6 flex justify-center items-start">
+                {#if previewFileURL && previewFileType?.startsWith('image/')}
+                  <img
+                    src={previewFileURL}
+                    alt={m.uploaded_document_alt()}
+                    class="max-w-full h-auto rounded-lg shadow border border-slate-200"
+                  />
+                {:else if previewFileURL && previewFileType === 'application/pdf'}
+                  <div class="w-full h-full bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                    <div
+                      class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3"
+                    >
+                      <p class="font-medium text-slate-700 truncate">
+                        {extractFile?.name ||
+                          parseRawReportSource(reportRawSource)?.fileName ||
+                          m.uploaded_document_alt()}
+                      </p>
+                      <a
+                        href={previewFileURL}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-sm font-semibold text-teal-700 hover:text-teal-800 transition-colors"
+                      >
+                        {m.open_full_pdf()}
+                      </a>
+                    </div>
+                    <iframe
+                      src={previewFileURL}
+                      title={m.uploaded_pdf_preview()}
+                      class="w-full h-[calc(100%-57px)] bg-white"
+                    ></iframe>
+                  </div>
+                {:else if extractText}
+                  <div class="bg-white p-6 rounded-lg shadow border border-slate-200 w-full h-auto min-h-full">
+                    <pre
+                      class="text-xs text-slate-700 whitespace-pre-wrap font-mono uppercase tracking-tight">{extractText}</pre>
+                  </div>
+                {:else}
+                  <div
+                    class="w-full rounded-lg border border-dashed border-slate-300 bg-white/80 p-8 text-center text-sm text-slate-500"
+                  >
+                    {m.no_source_preview()}
+                  </div>
                 {/if}
-                <span class="text-xs font-bold bg-teal-100 text-teal-800 px-2.5 py-1 rounded-full"
-                  >{getItemCountLabel(pendingMetrics.length)}</span
-                >
               </div>
             </div>
-            <div class="flex-1 overflow-auto p-4 space-y-4 bg-slate-50/50">
-              {#each pendingMetrics as metric, i}
-                <div
-                  class={`p-5 border rounded-xl transition-colors bg-white shadow-sm group ${metric.status === 'Review Required'
-                    ? 'border-amber-300 bg-amber-50/40 shadow-amber-100/60'
-                    : 'border-slate-200 hover:border-teal-400'}`}
-                >
-                  <div class="grid grid-cols-1 gap-5 mb-4 lg:grid-cols-2">
-                    <div>
-                      <label
-                        for="metric-original-label-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
-                        >{m.original_label()}</label
-                      >
+
+            <!-- Right Panel: Edit Records -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[700px]">
+              <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <div class="flex items-center">
+                  <svg class="w-5 h-5 text-teal-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                    ></path></svg
+                  >
+                  <h3 class="font-semibold text-slate-800">{m.extracted_metrics()}</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                  {#if reviewRequiredCount > 0}
+                    <span class="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full">
+                      {m.review_required_count({ count: reviewRequiredCount })}
+                    </span>
+                  {/if}
+                  <span class="text-xs font-bold bg-teal-100 text-teal-800 px-2.5 py-1 rounded-full"
+                    >{getItemCountLabel(pendingMetrics.length)}</span
+                  >
+                </div>
+              </div>
+              <div class="flex-1 overflow-auto p-4 space-y-4 bg-slate-50/50">
+                {#each pendingMetrics as metric, i}
+                  <div
+                    class={`p-5 border rounded-xl transition-colors bg-white shadow-sm group ${
+                      metric.status === 'Review Required'
+                        ? 'border-amber-300 bg-amber-50/40 shadow-amber-100/60'
+                        : 'border-slate-200 hover:border-teal-400'
+                    }`}
+                  >
+                    <div class="grid grid-cols-1 gap-5 mb-4 lg:grid-cols-2">
+                      <div>
+                        <label
+                          for="metric-original-label-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.original_label()}</label
+                        >
                         <input
                           id="metric-original-label-{i}"
                           type="text"
                           bind:value={metric.originalLabel}
                           class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
                         />
-                    </div>
-                    <div>
-                      <label
-                        for="metric-parsed-label-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
-                        >{m.parsed_label()}</label
-                      >
+                      </div>
+                      <div>
+                        <label
+                          for="metric-parsed-label-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.parsed_label()}</label
+                        >
                         <input
                           id="metric-parsed-label-{i}"
                           type="text"
@@ -1653,79 +2113,99 @@
                           list="metric-parsed-label-suggestions"
                           class="w-full text-sm font-semibold text-slate-900 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
                         />
+                      </div>
                     </div>
-                  </div>
 
-                  <div class="grid grid-cols-1 gap-5 mb-4 lg:grid-cols-2">
-                    <div>
-                      <label
-                        for="metric-type-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.category()}</label
-                      >
+                    <div class="grid grid-cols-1 gap-5 mb-4 lg:grid-cols-2">
+                      <div>
+                        <label
+                          for="metric-type-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.category()}</label
+                        >
                         <select
                           id="metric-type-{i}"
                           bind:value={metric.type}
                           class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
                         >
-                        <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
-                        <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
-                        <option value="Weight">{getMetricLabel('Weight')}</option>
-                        <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
-                        <option value="Other">{m.other()}</option>
-                      </select>
+                          <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
+                          <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
+                          <option value="Weight">{getMetricLabel('Weight')}</option>
+                          <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
+                          <option value="Other">{m.other()}</option>
+                        </select>
+                      </div>
+                      <div
+                        class="flex items-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500"
+                      >
+                        {m.parsed_label_help()}
+                      </div>
                     </div>
-                    <div class="flex items-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
-                       {m.parsed_label_help()}
-                     </div>
-                   </div>
 
-                  <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div>
-                      <label
-                        for="metric-save-mode-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.save_action()}</label
-                      >
-                      <select
-                        id="metric-save-mode-{i}"
-                        bind:value={metric.saveMode}
-                        class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
-                      >
-                        <option value="create">{m.save_as_new_record()}</option>
+                    <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div>
+                        <label
+                          for="metric-save-mode-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.save_action()}</label
+                        >
+                        <select
+                          id="metric-save-mode-{i}"
+                          bind:value={metric.saveMode}
+                          class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors bg-white"
+                        >
+                          <option value="create">{m.save_as_new_record()}</option>
+                          {#if getMatchedRecord(metric)}
+                            <option value="update">{m.update_matched_record()}</option>
+                          {/if}
+                        </select>
+                      </div>
+                      <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                         {#if getMatchedRecord(metric)}
-                          <option value="update">{m.update_matched_record()}</option>
+                          <div class="font-semibold text-slate-800">{m.matched_existing_record()}</div>
+                          <div class="mt-1">
+                            {getMatchedRecord(metric)?.metricName}: {getMatchedRecord(metric)?.value}{getMatchedRecord(
+                              metric,
+                            )?.unit
+                              ? ` ${getMatchedRecord(metric)?.unit}`
+                              : ''}
+                          </div>
+                          <div class="mt-1">
+                            {m.check_date()}: {formatDate(
+                              reportLookup[getMatchedRecord(metric)?.reportId || '']?.testDate,
+                            )}
+                          </div>
+                        {:else}
+                          <div class="font-semibold text-slate-800">{m.save_as_new_record()}</div>
+                          <div class="mt-1">
+                            {reviewTargetReportId === 'new'
+                              ? m.create_new_report()
+                              : m.add_records_to_existing_report()}
+                          </div>
                         {/if}
-                      </select>
+                      </div>
                     </div>
-                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                      {#if getMatchedRecord(metric)}
-                        <div class="font-semibold text-slate-800">{m.matched_existing_record()}</div>
-                        <div class="mt-1">{getMatchedRecord(metric)?.metricName}: {getMatchedRecord(metric)?.value}{getMatchedRecord(metric)?.unit ? ` ${getMatchedRecord(metric)?.unit}` : ''}</div>
-                        <div class="mt-1">{m.check_date()}: {formatDate(reportLookup[getMatchedRecord(metric)?.reportId || '']?.testDate)}</div>
-                      {:else}
-                        <div class="font-semibold text-slate-800">{m.save_as_new_record()}</div>
-                        <div class="mt-1">{reviewTargetReportId === 'new' ? m.create_new_report() : m.add_records_to_existing_report()}</div>
-                      {/if}
-                    </div>
-                  </div>
 
-                   <div class="grid grid-cols-6 gap-4 mb-4">
-                    <div class="col-span-2">
-                      <label
-                        for="metric-val-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.value()}</label
-                      >
+                    <div class="grid grid-cols-6 gap-4 mb-4">
+                      <div class="col-span-2">
+                        <label
+                          for="metric-val-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.value()}</label
+                        >
                         <input
                           id="metric-val-{i}"
                           type="text"
                           bind:value={metric.value}
                           class="w-full text-sm font-medium text-slate-900 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors"
                         />
-                    </div>
-                    <div class="col-span-2">
-                      <label
-                        for="metric-unit-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.unit()}</label
-                      >
+                      </div>
+                      <div class="col-span-2">
+                        <label
+                          for="metric-unit-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.unit()}</label
+                        >
                         <input
                           id="metric-unit-{i}"
                           type="text"
@@ -1733,39 +2213,43 @@
                           placeholder={m.unit_example()}
                           class="w-full text-sm text-slate-600 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
                         />
-                    </div>
-                    <div class="col-span-2">
-                      <label
-                        for="metric-status-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.status()}</label
-                      >
-                      <select
-                        id="metric-status-{i}"
-                        bind:value={metric.status}
-                        class="w-full text-sm font-medium border rounded-md px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-colors bg-white
-                         {metric.status === 'Review Required' ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400' : 'border-slate-300 hover:border-slate-400'}
+                      </div>
+                      <div class="col-span-2">
+                        <label
+                          for="metric-status-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.status()}</label
+                        >
+                        <select
+                          id="metric-status-{i}"
+                          bind:value={metric.status}
+                          class="w-full text-sm font-medium border rounded-md px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-colors bg-white
+                         {metric.status === 'Review Required'
+                            ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400'
+                            : 'border-slate-300 hover:border-slate-400'}
                          {metric.status === 'High' ? 'text-rose-600' : ''}
                          {metric.status === 'Low' ? 'text-orange-600' : ''}
                          {metric.status === 'Normal' ? 'text-emerald-600' : ''}
                          {metric.status === 'Optimal' ? 'text-blue-600' : ''}
                        "
-                      >
-                        <option value="Normal">{m.status_normal()}</option>
-                        <option value="High">{m.status_high()}</option>
-                        <option value="Low">{m.status_low()}</option>
-                        <option value="Optimal">{m.status_optimal()}</option>
-                        <option value="Stable">{m.status_stable()}</option>
-                        <option value="Review Required">{m.status_review_required()}</option>
-                      </select>
+                        >
+                          <option value="Normal">{m.status_normal()}</option>
+                          <option value="High">{m.status_high()}</option>
+                          <option value="Low">{m.status_low()}</option>
+                          <option value="Optimal">{m.status_optimal()}</option>
+                          <option value="Stable">{m.status_stable()}</option>
+                          <option value="Review Required">{m.status_review_required()}</option>
+                        </select>
+                      </div>
                     </div>
-                  </div>
 
-                  <div class="grid grid-cols-6 gap-4">
-                    <div class="col-span-2">
-                      <label
-                        for="metric-ref-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.ref_range()}</label
-                      >
+                    <div class="grid grid-cols-6 gap-4">
+                      <div class="col-span-2">
+                        <label
+                          for="metric-ref-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.ref_range()}</label
+                        >
                         <input
                           id="metric-ref-{i}"
                           type="text"
@@ -1773,12 +2257,13 @@
                           placeholder={m.ref_range_example()}
                           class="w-full text-sm font-medium text-slate-700 border border-slate-300 rounded-md px-3 py-2 text-center focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none hover:border-slate-400 transition-colors placeholder:text-slate-300"
                         />
-                    </div>
-                    <div class="col-span-4">
-                      <label
-                        for="metric-notes-{i}"
-                        class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">{m.notes()}</label
-                      >
+                      </div>
+                      <div class="col-span-4">
+                        <label
+                          for="metric-notes-{i}"
+                          class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide"
+                          >{m.notes()}</label
+                        >
                         <input
                           id="metric-notes-{i}"
                           type="text"
@@ -1789,845 +2274,1026 @@
                       </div>
                     </div>
 
-                  {#if metric.comparableValue !== '' && metric.comparableValue !== null && metric.comparableValue !== undefined && (String(metric.comparableValue) !== String(metric.value) || (metric.comparableUnit || '') !== (metric.unit || '') || (metric.comparableReferenceRange || '') !== (metric.referenceRange || ''))}
-                    <div class="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm text-teal-900">
-                      <div class="font-semibold">{m.comparable_normalization()}</div>
-                      <div class="mt-1">
-                        {m.value()}: {metric.comparableValue} {metric.comparableUnit || ''}
+                    {#if metric.comparableValue !== '' && metric.comparableValue !== null && metric.comparableValue !== undefined && (String(metric.comparableValue) !== String(metric.value) || (metric.comparableUnit || '') !== (metric.unit || '') || (metric.comparableReferenceRange || '') !== (metric.referenceRange || ''))}
+                      <div class="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm text-teal-900">
+                        <div class="font-semibold">{m.comparable_normalization()}</div>
+                        <div class="mt-1">
+                          {m.value()}: {metric.comparableValue}
+                          {metric.comparableUnit || ''}
+                        </div>
+                        {#if metric.comparableReferenceRange}
+                          <div class="mt-1">{m.reference()}: {metric.comparableReferenceRange}</div>
+                        {/if}
                       </div>
-                      {#if metric.comparableReferenceRange}
-                        <div class="mt-1">{m.reference()}: {metric.comparableReferenceRange}</div>
-                      {/if}
-                    </div>
-                  {/if}
-
-                  <div class="mt-4 pt-3 border-t border-slate-100 flex justify-end">
-                    <button
-                      type="button"
-                      onclick={() => {
-                        pendingMetrics = pendingMetrics?.filter((_, idx) => idx !== i) || null;
-                        if (pendingMetrics?.length === 0) cancelReview();
-                      }}
-                      class="text-xs font-semibold text-rose-500 hover:text-rose-700 transition-colors bg-rose-50 px-3 py-1.5 rounded-md hover:bg-rose-100"
-                    >
-                      {m.remove_item()}
-                    </button>
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-        </div>
-      </div>
-    {:else}
-      <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 class="text-2xl font-bold text-slate-900 tracking-tight">
-            {m.patient_dashboard()} <span class="text-slate-400 font-light mx-2">|</span>
-            <span class="text-teal-700">{data.currentPatient.name}</span>
-          </h2>
-          <p class="text-slate-500 mt-1">{m.dashboard_subtitle()}</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button
-            onclick={() => (showDeleteModal = true)}
-            class="flex items-center gap-2 bg-white border border-rose-200 text-rose-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-4 h-4"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
-              /></svg
-            >
-            {m.delete_profile()}
-          </button>
-          <button
-            class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-4 h-4"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-              /></svg
-            >
-            {m.export_report()}
-          </button>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6">
-        <div class="xl:col-span-1 border-slate-200">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 sticky top-24">
-            <div class="px-6 py-4 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50 rounded-t-xl">
-              <div class="flex items-center">
-                <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
-                <h3 class="text-lg font-semibold text-slate-800">{m.add_clinical_record()}</h3>
-              </div>
-              <div class="flex bg-slate-200/50 p-1 rounded-lg">
-                <button
-                  class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {!smartUploadActive
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'}"
-                  onclick={() => (smartUploadActive = false)}
-                >
-                  {m.manual()}
-                </button>
-                <button
-                  class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {smartUploadActive
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'}"
-                  onclick={() => (smartUploadActive = true)}
-                >
-                  {m.test_result()}
-                </button>
-              </div>
-            </div>
-            <div class="p-6">
-              {#if !smartUploadActive}
-                <form method="POST" action="?/addManualRecord" use:enhance class="space-y-5">
-                  <input type="hidden" name="patientId" value={data.currentPatient.id} />
-                  <div>
-                    <label for="manual-facility" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{m.lab_or_hospital()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
-                    >
-                    <input
-                      type="text"
-                      name="facilityName"
-                      id="manual-facility"
-                       placeholder={m.facility_example()}
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label for="metric-type" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{m.metric_type()}</label
-                    >
-                    <div class="relative">
-                      <select
-                        id="metric-type"
-                        name="type"
-                        bind:value={recordType}
-                        class="appearance-none w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 pl-3 pr-10 border outline-none transition-colors"
-                      >
-                         <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
-                         <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
-                         <option value="Weight">{m.body_weight()}</option>
-                         <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
-                         <option value="Other">{m.other_lab_metric()}</option>
-                      </select>
-                      <div
-                        class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500"
-                      >
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                          ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"
-                          ></path></svg
-                        >
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <label for="metric-value" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{valueLabel}</label
-                    >
-                    <input
-                      type="text"
-                      name="value"
-                      id="metric-value"
-                      placeholder={valuePlaceholder}
-                      required
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label for="date-time" class="block text-sm font-semibold text-slate-700 mb-1.5">{m.date_time()}</label>
-                    <input
-                      type="datetime-local"
-                      name="date"
-                      id="date-time"
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label for="notes" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                      >{m.clinical_notes()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
-                    >
-                    <textarea
-                      name="notes"
-                      id="notes"
-                      rows="3"
-                        placeholder={m.condition_details()}
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
-                    ></textarea>
-                  </div>
-                  <div class="pt-2">
-                    <button
-                      type="submit"
-                      class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke-width="2.5"
-                        stroke="currentColor"
-                        class="w-4 h-4 mr-2"
-                        ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
-                      >
-                      {m.save_record()}
-                    </button>
-                  </div>
-                </form>
-              {:else}
-                <form method="POST" action={`/extract?/extract&patientId=${data.currentPatient.id}`} enctype="multipart/form-data" class="space-y-5" onsubmit={startHomepageExtractSubmit}>
-                  <div>
-                    <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
-                    <label class="mt-1 flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 pb-6 pt-5 transition-colors hover:border-teal-500">
-                      <div class="space-y-1 text-center">
-                        <svg class="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-                        <div class="text-sm font-medium text-teal-600">{m.upload_file()}</div>
-                        <p class="text-xs text-slate-500">{m.file_size_hint()}</p>
-                      </div>
-                      <input bind:this={homepageExtractInput} name="file" type="file" accept="image/*,application/pdf" class="sr-only" onchange={handleHomepageExtractFileChange} />
-                    </label>
-                    {#if homepageExtractFile}
-                      <p class="mt-2 text-sm font-medium text-teal-600">{m.selected_file({ name: homepageExtractFile.name })}</p>
                     {/if}
-                  </div>
-                  <div>
-                    <label for="homepage-extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5">{m.paste_raw_text()}</label>
-                    <textarea
-                      id="homepage-extract-text"
-                      name="text"
-                      rows="3"
-                      placeholder={m.paste_lab_results()}
-                      class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
-                    ></textarea>
-                  </div>
-                  <div class="pt-2">
-                    <button
-                      type="submit"
-                      disabled={homepageExtractSubmitting}
-                      class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
-                    >
-                      {#if homepageExtractSubmitting}
-                        <svg class="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Preparing review...
-                      {:else}
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 mr-2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"></path></svg>
-                        {m.smart_extract()}
-                      {/if}
-                    </button>
-                  </div>
-                  {#if homepageExtractSubmitting}
-                    <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-                      Uploading the document and extracting metrics. This can take a little while for larger files.
+
+                    <div class="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onclick={() => {
+                          pendingMetrics = pendingMetrics?.filter((_, idx) => idx !== i) || null;
+                          if (pendingMetrics?.length === 0) cancelReview();
+                        }}
+                        class="text-xs font-semibold text-rose-500 hover:text-rose-700 transition-colors bg-rose-50 px-3 py-1.5 rounded-md hover:bg-rose-100"
+                      >
+                        {m.remove_item()}
+                      </button>
                     </div>
-                  {/if}
-                </form>
-              {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
         </div>
+      {:else}
+        <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div>
+            <h2 class="text-2xl font-bold text-slate-900 tracking-tight">
+              {m.patient_dashboard()} <span class="text-slate-400 font-light mx-2">|</span>
+              <span class="text-teal-700">{data.currentPatient.name}</span>
+            </h2>
+            <p class="text-slate-500 mt-1">{m.dashboard_subtitle()}</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              onclick={() => (showDeleteModal = true)}
+              class="flex items-center gap-2 bg-white border border-rose-200 text-rose-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="2"
+                stroke="currentColor"
+                class="w-4 h-4"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                /></svg
+              >
+              {m.delete_profile()}
+            </button>
+            <button
+              class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="2"
+                stroke="currentColor"
+                class="w-4 h-4"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+                /></svg
+              >
+              {m.export_report()}
+            </button>
+          </div>
+        </div>
 
-        <div class="xl:col-span-3 space-y-6">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col"
-          >
-            <div class="px-6 py-5 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50 lg:flex-row lg:items-center lg:justify-between">
-              <div class="flex items-center">
-                <div class="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
-                <div>
-                  <h3 class="text-lg font-semibold text-slate-800">{m.assessed_records()}</h3>
-                  <p class="text-sm text-slate-500">{m.assessed_records_subtitle()}</p>
+        <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6">
+          <div class="xl:col-span-1 border-slate-200">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 sticky top-24">
+              <div class="px-6 py-4 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50 rounded-t-xl">
+                <div class="flex items-center">
+                  <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
+                  <h3 class="text-lg font-semibold text-slate-800">{m.add_clinical_record()}</h3>
+                </div>
+                <div class="flex bg-slate-200/50 p-1 rounded-lg">
+                  <button
+                    class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {!smartUploadActive
+                      ? 'bg-white text-slate-800 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'}"
+                    onclick={() => (smartUploadActive = false)}
+                  >
+                    {m.manual()}
+                  </button>
+                  <button
+                    class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {smartUploadActive
+                      ? 'bg-white text-slate-800 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'}"
+                    onclick={() => (smartUploadActive = true)}
+                  >
+                    {m.test_result()}
+                  </button>
                 </div>
               </div>
-              <div class="flex items-center gap-4">
-                {#if selectedRecordIds.length > 0}
+              <div class="p-6">
+                {#if !smartUploadActive}
+                  <form method="POST" action="?/addManualRecord" use:enhance class="space-y-5">
+                    <input type="hidden" name="patientId" value={data.currentPatient.id} />
+                    <div>
+                      <label for="manual-facility" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{m.lab_or_hospital()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
+                      >
+                      <input
+                        type="text"
+                        name="facilityName"
+                        id="manual-facility"
+                        placeholder={m.facility_example()}
+                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label for="metric-type" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{m.metric_type()}</label
+                      >
+                      <div class="relative">
+                        <select
+                          id="metric-type"
+                          name="type"
+                          bind:value={recordType}
+                          class="appearance-none w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 pl-3 pr-10 border outline-none transition-colors"
+                        >
+                          <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
+                          <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
+                          <option value="Weight">{m.body_weight()}</option>
+                          <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
+                          <option value="Other">{m.other_lab_metric()}</option>
+                        </select>
+                        <div
+                          class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500"
+                        >
+                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"
+                            ></path></svg
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label for="metric-value" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{valueLabel}</label
+                      >
+                      <input
+                        type="text"
+                        name="value"
+                        id="metric-value"
+                        placeholder={valuePlaceholder}
+                        required
+                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label for="date-time" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{m.date_time()}</label
+                      >
+                      <input
+                        type="datetime-local"
+                        name="date"
+                        id="date-time"
+                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label for="notes" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{m.clinical_notes()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
+                      >
+                      <textarea
+                        name="notes"
+                        id="notes"
+                        rows="3"
+                        placeholder={m.condition_details()}
+                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
+                      ></textarea>
+                    </div>
+                    <div class="pt-2">
+                      <button
+                        type="submit"
+                        class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke-width="2.5"
+                          stroke="currentColor"
+                          class="w-4 h-4 mr-2"
+                          ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
+                        >
+                        {m.save_record()}
+                      </button>
+                    </div>
+                  </form>
+                {:else}
                   <form
                     method="POST"
-                    action="?/batchDeleteRecords"
-                    use:enhance={(e) => {
-                      if (!confirm(selectedRecordIds.length === 1 ? m.delete_records_confirm_one({ count: selectedRecordIds.length }) : m.delete_records_confirm_other({ count: selectedRecordIds.length }))) {
-                        e.cancel();
-                      } else {
-                        return async ({ update }) => {
-                          await update();
-                        };
-                      }
-                    }}
-                    class="flex items-center"
+                    action={`/extract?/extract&patientId=${data.currentPatient.id}`}
+                    enctype="multipart/form-data"
+                    class="space-y-5"
+                    onsubmit={startHomepageExtractSubmit}
                   >
-                    <input type="hidden" name="ids" value={JSON.stringify(selectedRecordIds)} />
-                    <button
-                      type="submit"
-                      class="flex items-center gap-1.5 bg-rose-50 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-md text-sm font-medium hover:bg-rose-100 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke-width="2"
-                        stroke="currentColor"
-                        class="w-4 h-4"
+                    <div>
+                      <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
+                      <label
+                        class="mt-1 flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 pb-6 pt-5 transition-colors hover:border-teal-500"
                       >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                        <div class="space-y-1 text-center">
+                          <svg
+                            class="mx-auto h-12 w-12 text-slate-400"
+                            stroke="currentColor"
+                            fill="none"
+                            viewBox="0 0 48 48"
+                            aria-hidden="true"
+                            ><path
+                              d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            ></path></svg
+                          >
+                          <div class="text-sm font-medium text-teal-600">{m.upload_file()}</div>
+                          <p class="text-xs text-slate-500">{m.file_size_hint()}</p>
+                        </div>
+                        <input
+                          bind:this={homepageExtractInput}
+                          name="file"
+                          type="file"
+                          accept="image/*,application/pdf"
+                          class="sr-only"
+                          onchange={handleHomepageExtractFileChange}
                         />
-                      </svg>
-                      {m.delete_selected({ count: selectedRecordIds.length })}
-                    </button>
+                      </label>
+                      {#if homepageExtractFile}
+                        <p class="mt-2 text-sm font-medium text-teal-600">
+                          {m.selected_file({ name: homepageExtractFile.name })}
+                        </p>
+                      {/if}
+                    </div>
+                    <div>
+                      <label for="homepage-extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5"
+                        >{m.paste_raw_text()}</label
+                      >
+                      <textarea
+                        id="homepage-extract-text"
+                        name="text"
+                        rows="3"
+                        placeholder={m.paste_lab_results()}
+                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
+                      ></textarea>
+                    </div>
+                    <div class="pt-2">
+                      <button
+                        type="submit"
+                        disabled={homepageExtractSubmitting}
+                        class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
+                      >
+                        {#if homepageExtractSubmitting}
+                          <svg
+                            class="-ml-1 mr-2 h-4 w-4 animate-spin text-white"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            ><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+                            ></circle><path
+                              class="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path></svg
+                          >
+                          Preparing review...
+                        {:else}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke-width="2.5"
+                            stroke="currentColor"
+                            class="w-4 h-4 mr-2"
+                            ><path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"
+                            ></path></svg
+                          >
+                          {m.smart_extract()}
+                        {/if}
+                      </button>
+                    </div>
+                    {#if homepageExtractSubmitting}
+                      <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
+                        Uploading the document and extracting metrics. This can take a little while for larger files.
+                      </div>
+                    {/if}
                   </form>
                 {/if}
-                <div class="text-sm font-medium text-slate-500">
-                  {getItemCountLabel(data.records.length)}
-                </div>
               </div>
             </div>
+          </div>
 
-            <div class="border-b border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)] px-6 py-6">
-              {#if trendMetrics.length > 0 && trendChart}
-                <div class="flex flex-col gap-6">
-                  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div class="max-w-2xl">
-                      <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">{m.diachronic_view()}</p>
-                      <div class="mt-2 flex flex-wrap items-end gap-3">
-                        <h4 class="text-2xl font-semibold tracking-tight text-slate-900">{selectedTrendLabel}</h4>
-                        <span class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur">
-                          {getReadingCountLabel(selectedTrend.points.length)}
-                        </span>
-                      </div>
-                      {#if selectedTrendLabel !== selectedTrend.metricName}
-                          <p class="mt-2 text-sm font-medium text-slate-500">{m.canonical()}: {selectedTrend.metricName}</p>
-                      {/if}
-                      <div class="mt-3 flex flex-wrap gap-2">
-                        <span class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-sm backdrop-blur">
-                          {getTestTypeLabel(selectedTrendTags.testType)}
-                        </span>
-                        {#each selectedTrendTags.categories as category}
-                          <span class="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur">
-                            {getCategoryLabel(category)}
-                          </span>
-                        {/each}
-                      </div>
-                      <p class="mt-2 text-sm text-slate-600">
-                        {getMetricDescription(selectedTrend.metricName)}
-                      </p>
-                      <div class="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                        {#if selectedTrendWikipediaUrl}
-                          <a
-                            href={selectedTrendWikipediaUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 font-medium text-teal-700 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                          >
-                            <WikipediaIcon class="h-4 w-4" />
-                            {m.open_wikipedia()}
-                          </a>
-                        {/if}
-                        {#if selectedTrendWikipediaFallbackUrl && selectedTrendWikipediaFallbackUrl !== selectedTrendWikipediaUrl}
-                          <a
-                            href={selectedTrendWikipediaFallbackUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                          >
-                            <WikipediaIcon class="h-4 w-4" />
-                            {m.english_wikipedia()}
-                          </a>
-                        {/if}
-                        {#if selectedTrendWikidataUrl}
-                          <a
-                            href={selectedTrendWikidataUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                          >
-                            <WikidataIcon class="h-4 w-4" />
-                            {m.wikidata()}
-                          </a>
-                        {/if}
-                      </div>
-                    </div>
-
-                    <div class="min-w-[24rem] max-w-[36rem] xl:min-w-[30rem]">
-                       <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{m.metric()}</span>
-                      <div class="flex items-start gap-2">
-                        <button
-                          type="button"
-                          onclick={() => stepTrendMetric(-1)}
-                          class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
-                          aria-label={m.previous_metric()}
-                        >
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                          </svg>
-                        </button>
-
-                        <div
-                          bind:this={trendComboboxContainer}
-                          class="relative flex-1"
-                          onfocusout={(event) => {
-                            const nextTarget = event.relatedTarget as Node | null;
-                            if (!nextTarget || !trendComboboxContainer?.contains(nextTarget)) {
-                              trendComboboxOpen = false;
-                              trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
-                            }
-                          }}
-                        >
-                        <input
-                          type="text"
-                          bind:value={trendSearchQuery}
-                          placeholder="Search biomarker"
-                          class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
-                          onclick={() => (trendComboboxOpen = true)}
-                          onfocus={() => (trendComboboxOpen = true)}
-                          oninput={() => (trendComboboxOpen = true)}
-                          onkeydown={handleTrendComboboxKeydown}
-                          role="combobox"
-                          aria-controls="trend-metric-listbox"
-                          aria-expanded={trendComboboxOpen}
-                          aria-label="Search biomarker"
-                        />
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                          </svg>
-                        </div>
-                        {#if trendComboboxOpen}
-                          <div id="trend-metric-listbox" class="absolute left-0 right-0 top-[calc(100%+0.65rem)] z-20 overflow-hidden rounded-[1.4rem] border border-white/80 bg-white/95 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.45)] backdrop-blur">
-                            <div class="max-h-[26rem] overflow-y-auto px-2 py-2">
-                              {#if groupedTrendMetricOptions.length === 0}
-                                <div class="px-4 py-6 text-sm text-slate-500">No biomarker found.</div>
-                              {:else}
-                                {#each groupedTrendMetricOptions as group}
-                                  <div class="px-2 py-2">
-                                    <div class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700/80">{group.label}</div>
-                                    {#each group.sections as section}
-                                      <div class="mb-2 rounded-2xl bg-slate-50/80 px-2 py-2">
-                                        <div class="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{section.label}</div>
-                                        <div class="space-y-1">
-                                          {#each section.options as option}
-                                            <button
-                                              type="button"
-                                              bind:this={trendOptionButtons[option.metricName]}
-                                              onclick={() => selectTrendMetric(option.metricName)}
-                                              class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? 'bg-teal-50 text-teal-900 ring-1 ring-teal-200' : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
-                                            >
-                                              <div class="min-w-0 flex-1">
-                                                <div class="truncate text-sm font-semibold">{option.label}</div>
-                                                <div class="mt-1 flex flex-wrap gap-1.5">
-                                                  <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{option.testTypeLabel}</span>
-                                                  {#each option.categoryLabels as tag}
-                                                    <span class="inline-flex items-center rounded-full border border-teal-100 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">{tag}</span>
-                                                  {/each}
-                                                </div>
-                                              </div>
-                                              <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">{option.readingCount}</span>
-                                            </button>
-                                          {/each}
-                                        </div>
-                                      </div>
-                                    {/each}
-                                  </div>
-                                {/each}
-                              {/if}
-                            </div>
-                          </div>
-                        {/if}
-                        </div>
-
-                        <button
-                          type="button"
-                          onclick={() => stepTrendMetric(1)}
-                          class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
-                          aria-label={m.next_metric()}
-                        >
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
+          <div class="xl:col-span-3 space-y-6">
+            <div
+              class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col"
+            >
+              <div
+                class="px-6 py-5 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50 lg:flex-row lg:items-center lg:justify-between"
+              >
+                <div class="flex items-center">
+                  <div class="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
+                  <div>
+                    <h3 class="text-lg font-semibold text-slate-800">{m.assessed_records()}</h3>
+                    <p class="text-sm text-slate-500">{m.assessed_records_subtitle()}</p>
                   </div>
-
-                  <div class="grid gap-3 md:grid-cols-3">
-                    <div class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm">
-                      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.latest()}</p>
-                      <div class="mt-2 flex flex-wrap items-center gap-3">
-                        <p
-                          class={`text-3xl font-semibold tracking-tight ${trendChart.latestDisplayStatus === 'High'
-                            ? 'text-rose-700'
-                            : trendChart.latestDisplayStatus === 'Low'
-                              ? 'text-orange-700'
-                              : 'text-slate-900'}`}
+                </div>
+                <div class="flex items-center gap-4">
+                  {#if selectedRecordIds.length > 0}
+                    <form
+                      method="POST"
+                      action="?/batchDeleteRecords"
+                      use:enhance={(e) => {
+                        if (
+                          !confirm(
+                            selectedRecordIds.length === 1
+                              ? m.delete_records_confirm_one({ count: selectedRecordIds.length })
+                              : m.delete_records_confirm_other({ count: selectedRecordIds.length }),
+                          )
+                        ) {
+                          e.cancel();
+                        } else {
+                          return async ({ update }) => {
+                            await update();
+                          };
+                        }
+                      }}
+                      class="flex items-center"
+                    >
+                      <input type="hidden" name="ids" value={JSON.stringify(selectedRecordIds)} />
+                      <button
+                        type="submit"
+                        class="flex items-center gap-1.5 bg-rose-50 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-md text-sm font-medium hover:bg-rose-100 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke-width="2"
+                          stroke="currentColor"
+                          class="w-4 h-4"
                         >
-                          {#if trendChart.latestDisplayStatus === 'High'}↑{/if}{#if trendChart.latestDisplayStatus === 'Low'}↓{/if}{trendChart.latest.rawValue}
-                          {#if trendChart.latest.unit}
-                            <span class="text-lg font-medium text-slate-500">{trendChart.latest.unit}</span>
-                          {/if}
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                          />
+                        </svg>
+                        {m.delete_selected({ count: selectedRecordIds.length })}
+                      </button>
+                    </form>
+                  {/if}
+                  <div class="text-sm font-medium text-slate-500">
+                    {getItemCountLabel(data.records.length)}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="border-b border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)] px-6 py-6"
+              >
+                {#if trendMetrics.length > 0 && trendChart}
+                  <div class="flex flex-col gap-6">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div class="max-w-2xl">
+                        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">
+                          {m.diachronic_view()}
                         </p>
-                        {#if trendChart.latestDisplayStatus}
+                        <div class="mt-2 flex flex-wrap items-end gap-3">
+                          <h4 class="text-2xl font-semibold tracking-tight text-slate-900">{selectedTrendLabel}</h4>
                           <span
-                            class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(trendChart.latestDisplayStatus)}`}
+                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
                           >
-                            {getStatusLabel(trendChart.latestDisplayStatus)}
+                            {getReadingCountLabel(selectedTrend.points.length)}
                           </span>
+                        </div>
+                        {#if selectedTrendLabel !== selectedTrend.metricName}
+                          <p class="mt-2 text-sm font-medium text-slate-500">
+                            {m.canonical()}: {selectedTrend.metricName}
+                          </p>
                         {/if}
-                      </div>
-                      {#if String(trendChart.latest.value) !== String(trendChart.latest.rawValue) || trendChart.latest.unit !== trendChart.latest.rawUnit}
-                          <p class="mt-2 text-sm text-teal-700">{m.comparable_value({ value: trendChart.latest.value, unit: trendChart.latest.unit || '' })}</p>
-                      {/if}
-                       <p class="mt-2 text-sm text-slate-500">{m.measured_on({ date: trendChart.lastDate })}</p>
-                    </div>
-
-                    <div class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm">
-                      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.change()}</p>
-                      <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                        {#if trendChart.delta === null}
-                          --
-                        {:else if trendChart.delta > 0}
-                          +{trendChart.delta.toFixed(1)}
-                        {:else}
-                          {trendChart.delta.toFixed(1)}
-                        {/if}
-                      </p>
-                      <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
-                    </div>
-
-                    <div class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm">
-                      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.reference_range()}</p>
-                      <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                        {trendChart.refRange?.label || m.not_available()}
-                      </p>
-                      <p class="mt-2 text-sm text-slate-500">{m.reference_range_hint()}</p>
-                    </div>
-                  </div>
-
-                  <div class="overflow-hidden rounded-[28px] border border-white/80 bg-slate-950/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                    <svg viewBox={`0 0 ${trendChart.width} ${trendChart.height}`} class="h-64 w-full">
-                      <defs>
-                        <linearGradient id="trend-line" x1="0%" x2="100%" y1="0%" y2="0%">
-                          <stop offset="0%" stop-color="#14b8a6"></stop>
-                          <stop offset="100%" stop-color="#2563eb"></stop>
-                        </linearGradient>
-                        <linearGradient id="trend-area" x1="0%" x2="0%" y1="0%" y2="100%">
-                          <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
-                          <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
-                        </linearGradient>
-                      </defs>
-
-                      {#if trendChart.refRangePath}
-                        <polygon points={trendChart.refRangePath} fill="rgba(16,185,129,0.12)"></polygon>
-                      {/if}
-
-                      <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"></line>
-                      <polygon points={trendChart.area} fill="url(#trend-area)"></polygon>
-                      <polyline points={trendChart.line} fill="none" stroke="url(#trend-line)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-
-                      {#each trendChart.points as point, index}
-                        <g
-                          role="button"
-                          tabindex="0"
-                          class="cursor-pointer"
-                           aria-label={m.edit_trend_point({ metric: selectedTrendLabel, date: point.chartDate })}
-                          onclick={() => jumpToTrendPoint(point)}
-                          onkeydown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              jumpToTrendPoint(point);
-                            }
-                          }}
-                        >
-                          <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
-                          <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
-                          <text
-                            x={point.x}
-                            y={Math.max(point.y - 14, 16)}
-                            text-anchor="middle"
-                            class="fill-slate-700 text-[11px] font-semibold"
-                          >{point.rawValue}</text>
-                          {#if shouldShowTrendPointDate(index, trendChart.points.length)}
-                            <text x={point.x} y="208" text-anchor="middle" class="fill-slate-500 text-[11px]">{point.chartDate}</text>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                          <span
+                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-sm backdrop-blur"
+                          >
+                            {getTestTypeLabel(selectedTrendTags.testType)}
+                          </span>
+                          {#each selectedTrendTags.categories as category}
+                            <span
+                              class="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
+                            >
+                              {getCategoryLabel(category)}
+                            </span>
+                          {/each}
+                        </div>
+                        <p class="mt-2 text-sm text-slate-600">
+                          {getMetricDescription(selectedTrend.metricName)}
+                        </p>
+                        <div class="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                          {#if selectedTrendWikipediaUrl}
+                            <a
+                              href={selectedTrendWikipediaUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 font-medium text-teal-700 shadow-sm backdrop-blur transition-colors hover:bg-white"
+                            >
+                              <WikipediaIcon class="h-4 w-4" />
+                              {m.open_wikipedia()}
+                            </a>
                           {/if}
-                        </g>
-                      {/each}
-                    </svg>
-                  </div>
-                </div>
-              {:else}
-                <div class="rounded-[28px] border border-dashed border-slate-300/90 bg-white/70 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-sm">
-                  <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{m.diachronic_view()}</p>
-                  <h4 class="mt-3 text-xl font-semibold text-slate-900">{m.no_plot_title()}</h4>
-                  <p class="mx-auto mt-2 max-w-xl text-sm text-slate-600">
-                    {m.no_plot_description()}
-                  </p>
-                </div>
-              {/if}
-            </div>
+                          {#if selectedTrendWikipediaFallbackUrl && selectedTrendWikipediaFallbackUrl !== selectedTrendWikipediaUrl}
+                            <a
+                              href={selectedTrendWikipediaFallbackUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
+                            >
+                              <WikipediaIcon class="h-4 w-4" />
+                              {m.english_wikipedia()}
+                            </a>
+                          {/if}
+                          {#if selectedTrendWikidataUrl}
+                            <a
+                              href={selectedTrendWikidataUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
+                            >
+                              <WikidataIcon class="h-4 w-4" />
+                              {m.wikidata()}
+                            </a>
+                          {/if}
+                        </div>
+                      </div>
 
-            <div class="flex-1 overflow-x-auto">
-              {#if data.records.length === 0}
-                <div class="flex flex-col items-center justify-center p-12 text-slate-400">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke-width="1.5"
-                    stroke="currentColor"
-                    class="w-12 h-12 mb-4 opacity-50"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
-                    /></svg
-                  >
-                  <p class="text-sm font-medium">{m.no_records_for_patient()}</p>
-                  <p class="text-xs mt-1">{m.no_records_hint()}</p>
-                </div>
-              {:else}
-                <div class="border-t border-slate-100">
-                  <div class="flex items-center gap-3 px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-50/50">
-                    <input
-                      type="checkbox"
-                      checked={allRecordsSelected}
-                      onchange={toggleSelectAll}
-                      class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
-                    />
-                    <span>{m.select_all_records()}</span>
-                  </div>
+                      <div class="min-w-[24rem] max-w-[36rem] xl:min-w-[30rem]">
+                        <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
+                          >{m.metric()}</span
+                        >
+                        <div class="flex items-start gap-2">
+                          <button
+                            type="button"
+                            onclick={() => stepTrendMetric(-1)}
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
+                            aria-label={m.previous_metric()}
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"
+                              ></path>
+                            </svg>
+                          </button>
 
-                  {#each groupedReports as group}
-                    <section id={`report-${group.report.id}`} class="border-t border-slate-100 first:border-t-0">
-                      {#if isReportExpanded(group.report.id)}
-                        <div class="border-t border-slate-100 bg-white px-6 py-5">
-                          <form method="POST" action="?/updateReport" use:enhance class="space-y-4">
-                            <input type="hidden" name="id" value={group.report.id} />
-                            <div class="flex items-start justify-between gap-4">
-                              <div class="min-w-0 flex-1 space-y-3">
-                                <label class="block">
-                                  <span class="sr-only">{m.report_title()}</span>
-                                  <input
-                                    type="text"
-                                    name="title"
-                                    value={group.title}
-                                    placeholder={`${group.facilityName || m.report_fallback()} ${formatDate(group.report.testDate, { dateStyle: 'medium' })}`}
-                                    class="w-full border-0 bg-transparent px-0 py-0 text-lg font-semibold tracking-tight text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
-                                  />
-                                </label>
-                                <label class="block">
-                                  <span class="sr-only">{m.report_notes()}</span>
-                                  <textarea
-                                    name="notes"
-                                    rows="2"
-                                    placeholder={m.report_notes_placeholder()}
-                                    class="w-full resize-none border-0 bg-transparent px-0 py-0 text-sm text-slate-500 outline-none placeholder:text-slate-400 focus:ring-0"
-                                  >{group.notes}</textarea>
-                                </label>
-                              </div>
-
-                              <div class="flex items-center gap-2">
-                                <a
-                                  href={`/reports/${group.report.id}/review`}
-                                  data-sveltekit-reload
-                                  class="inline-flex items-center rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 transition-colors hover:bg-teal-100"
-                                >
-                                  {m.review_report()}
-                                </a>
-                                <button
-                                  type="button"
-                                  onclick={() => toggleReportExpanded(group.report.id)}
-                                  class="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                                  aria-label={m.collapse_report()}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 15l-7-7-7 7" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-
-                            <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                              <div class="flex flex-wrap items-center gap-3">
-                                <input
-                                  type="datetime-local"
-                                  name="testDate"
-                                  value={group.report.testDate ? group.report.testDate.slice(0, 16) : ''}
-                                  class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-                                />
-                                <input
-                                  type="text"
-                                  name="facilityName"
-                                  value={group.facilityName}
-                                  placeholder={m.facility()}
-                                  class="min-w-40 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-                                />
-                              </div>
-                              <button
-                                type="submit"
-                                class="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
-                              >
-                                {m.save()}
-                              </button>
-                            </div>
-                          </form>
-
-                          <form
-                            method="POST"
-                            action="?/deleteReport"
-                            use:enhance={(e) => {
-                              if (!confirm(group.records.length === 1 ? m.delete_report_confirm_one({ count: group.records.length }) : m.delete_report_confirm_other({ count: group.records.length }))) {
-                                e.cancel();
+                          <div
+                            bind:this={trendComboboxContainer}
+                            class="relative flex-1"
+                            onfocusout={(event) => {
+                              const nextTarget = event.relatedTarget as Node | null;
+                              if (!nextTarget || !trendComboboxContainer?.contains(nextTarget)) {
+                                trendComboboxOpen = false;
+                                trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
                               }
                             }}
-                            class="mt-3 flex justify-end"
                           >
-                            <input type="hidden" name="id" value={group.report.id} />
-                            <button
-                              type="submit"
-                              class="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
-                            >
-                              {m.remove_report()}
-                            </button>
-                          </form>
-
-                          <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-                            <table class="min-w-full divide-y divide-slate-200">
-                              <thead class="bg-slate-50/70">
-                                <tr>
-                                  <th scope="col" class="px-6 py-3.5 w-10 text-left">
-                                    <input
-                                      type="checkbox"
-                                      checked={allReportRecordsSelected(group.report.id)}
-                                      onchange={() => toggleSelectReport(group.report.id)}
-                                      class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
-                                    />
-                                  </th>
-                                  <th scope="col" class="px-2 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{m.type()}</th>
-                                  <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{m.value()}</th>
-                                  <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">{m.status()}</th>
-                                  <th scope="col" class="relative px-6 py-3.5 w-10 text-right"><span class="sr-only">{m.actions()}</span></th>
-                                </tr>
-                              </thead>
-                              <tbody class="bg-white divide-y divide-slate-100">
-                                {#each group.records as record}
-                      {#if editingRecordId === record.id}
-                        <tr id={`record-${record.id}`} class="bg-blue-50/50 border-l-[3px] border-l-blue-500 group">
-                          <td class="px-6 py-4 whitespace-nowrap">
-                            <!-- spacer for checkbox in edit view so UI doesn't jump -->
-                          </td>
-                          <td class="px-2 py-4 whitespace-nowrap">
-                            <div class="space-y-1">
-                              <input
-                                type="text"
-                                name="metricName"
-                                bind:value={editMetricName}
-                                list="metric-parsed-label-suggestions"
-                                required
-                                class="w-full text-sm font-semibold text-slate-900 border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                              />
-                              {#if getRecordOriginalLabel(record)}
-                                <div class="text-xs text-slate-400">{m.original_prefix({ value: getRecordOriginalLabel(record) })}</div>
-                              {/if}
-                            </div>
-                          </td>
-                          <td class="px-6 py-3 whitespace-nowrap">
                             <input
                               type="text"
-                              name="value"
-                              bind:value={editValue}
-                              required
-                              class="w-full text-sm font-medium text-slate-900 border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                              bind:value={trendSearchQuery}
+                              placeholder="Search biomarker"
+                              class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                              onclick={() => (trendComboboxOpen = true)}
+                              onfocus={() => (trendComboboxOpen = true)}
+                              oninput={() => (trendComboboxOpen = true)}
+                              onkeydown={handleTrendComboboxKeydown}
+                              role="combobox"
+                              aria-controls="trend-metric-listbox"
+                              aria-expanded={trendComboboxOpen}
+                              aria-label="Search biomarker"
                             />
-                          </td>
-                          <td class="px-6 py-3 whitespace-nowrap">
-                            <select
-                              name="status"
-                              bind:value={editStatus}
-                              class="w-full text-sm border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            <div
+                              class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400"
                             >
-                              <option value="Normal">{m.status_normal()}</option>
-                              <option value="High">{m.status_high()}</option>
-                              <option value="Low">{m.status_low()}</option>
-                              <option value="Optimal">{m.status_optimal()}</option>
-                              <option value="Stable">{m.status_stable()}</option>
-                              <option value="Review Required">{m.status_review_required()}</option>
-                              <option value="Manual">{m.status_manual()}</option>
-                            </select>
-                          </td>
-                          <td class="px-6 py-4 whitespace-nowrap text-right">
-                            <div class="flex items-center justify-end gap-2">
+                              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"
+                                ></path>
+                              </svg>
+                            </div>
+                            {#if trendComboboxOpen}
+                              <div
+                                id="trend-metric-listbox"
+                                class="absolute left-0 right-0 top-[calc(100%+0.65rem)] z-20 overflow-hidden rounded-[1.4rem] border border-white/80 bg-white/95 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.45)] backdrop-blur"
+                              >
+                                <div class="max-h-[26rem] overflow-y-auto px-2 py-2">
+                                  {#if groupedTrendMetricOptions.length === 0}
+                                    <div class="px-4 py-6 text-sm text-slate-500">No biomarker found.</div>
+                                  {:else}
+                                    {#each groupedTrendMetricOptions as group}
+                                      <div class="px-2 py-2">
+                                        <div
+                                          class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700/80"
+                                        >
+                                          {group.label}
+                                        </div>
+                                        {#each group.sections as section}
+                                          <div class="mb-2 rounded-2xl bg-slate-50/80 px-2 py-2">
+                                            <div
+                                              class="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500"
+                                            >
+                                              {section.label}
+                                            </div>
+                                            <div class="space-y-1">
+                                              {#each section.options as option}
+                                                <button
+                                                  type="button"
+                                                  bind:this={trendOptionButtons[option.metricName]}
+                                                  onclick={() => selectTrendMetric(option.metricName)}
+                                                  class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? 'bg-teal-50 text-teal-900 ring-1 ring-teal-200' : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
+                                                >
+                                                  <div class="min-w-0 flex-1">
+                                                    <div class="truncate text-sm font-semibold">{option.label}</div>
+                                                    <div class="mt-1 flex flex-wrap gap-1.5">
+                                                      <span
+                                                        class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                                                        >{option.testTypeLabel}</span
+                                                      >
+                                                      {#each option.categoryLabels as tag}
+                                                        <span
+                                                          class="inline-flex items-center rounded-full border border-teal-100 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700"
+                                                          >{tag}</span
+                                                        >
+                                                      {/each}
+                                                    </div>
+                                                  </div>
+                                                  <span
+                                                    class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500"
+                                                    >{option.readingCount}</span
+                                                  >
+                                                </button>
+                                              {/each}
+                                            </div>
+                                          </div>
+                                        {/each}
+                                      </div>
+                                    {/each}
+                                  {/if}
+                                </div>
+                              </div>
+                            {/if}
+                          </div>
+
+                          <button
+                            type="button"
+                            onclick={() => stepTrendMetric(1)}
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
+                            aria-label={m.next_metric()}
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"
+                              ></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid gap-3 md:grid-cols-3">
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.latest()}</p>
+                        <div class="mt-2 flex flex-wrap items-center gap-3">
+                          <p
+                            class={`text-3xl font-semibold tracking-tight ${
+                              trendChart.latestDisplayStatus === 'High'
+                                ? 'text-rose-700'
+                                : trendChart.latestDisplayStatus === 'Low'
+                                  ? 'text-orange-700'
+                                  : 'text-slate-900'
+                            }`}
+                          >
+                            {#if trendChart.latestDisplayStatus === 'High'}↑{/if}{#if trendChart.latestDisplayStatus === 'Low'}↓{/if}{trendChart
+                              .latest.rawValue}
+                            {#if trendChart.latest.unit}
+                              <span class="text-lg font-medium text-slate-500">{trendChart.latest.unit}</span>
+                            {/if}
+                          </p>
+                          {#if trendChart.latestDisplayStatus}
+                            <span
+                              class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(trendChart.latestDisplayStatus)}`}
+                            >
+                              {getStatusLabel(trendChart.latestDisplayStatus)}
+                            </span>
+                          {/if}
+                        </div>
+                        {#if String(trendChart.latest.value) !== String(trendChart.latest.rawValue) || trendChart.latest.unit !== trendChart.latest.rawUnit}
+                          <p class="mt-2 text-sm text-teal-700">
+                            {m.comparable_value({ value: trendChart.latest.value, unit: trendChart.latest.unit || '' })}
+                          </p>
+                        {/if}
+                        <p class="mt-2 text-sm text-slate-500">{m.measured_on({ date: trendChart.lastDate })}</p>
+                      </div>
+
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.change()}</p>
+                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                          {#if trendChart.delta === null}
+                            --
+                          {:else if trendChart.delta > 0}
+                            +{trendChart.delta.toFixed(1)}
+                          {:else}
+                            {trendChart.delta.toFixed(1)}
+                          {/if}
+                        </p>
+                        <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
+                      </div>
+
+                      <div
+                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
+                      >
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          {m.reference_range()}
+                        </p>
+                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                          {trendChart.refRange?.label || m.not_available()}
+                        </p>
+                        <p class="mt-2 text-sm text-slate-500">{m.reference_range_hint()}</p>
+                      </div>
+                    </div>
+
+                    <div
+                      class="overflow-hidden rounded-[28px] border border-white/80 bg-slate-950/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
+                    >
+                      <svg viewBox={`0 0 ${trendChart.width} ${trendChart.height}`} class="h-64 w-full">
+                        <defs>
+                          <linearGradient id="trend-line" x1="0%" x2="100%" y1="0%" y2="0%">
+                            <stop offset="0%" stop-color="#14b8a6"></stop>
+                            <stop offset="100%" stop-color="#2563eb"></stop>
+                          </linearGradient>
+                          <linearGradient id="trend-area" x1="0%" x2="0%" y1="0%" y2="100%">
+                            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
+                            <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
+                          </linearGradient>
+                        </defs>
+
+                        {#if trendChart.refRangePath}
+                          <polygon points={trendChart.refRangePath} fill="rgba(16,185,129,0.12)"></polygon>
+                        {/if}
+
+                        <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"
+                        ></line>
+                        <polygon points={trendChart.area} fill="url(#trend-area)"></polygon>
+                        <polyline
+                          points={trendChart.line}
+                          fill="none"
+                          stroke="url(#trend-line)"
+                          stroke-width="4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        ></polyline>
+
+                        {#each trendChart.points as point, index}
+                          <g
+                            role="button"
+                            tabindex="0"
+                            class="cursor-pointer"
+                            aria-label={m.edit_trend_point({ metric: selectedTrendLabel, date: point.chartDate })}
+                            onclick={() => jumpToTrendPoint(point)}
+                            onkeydown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                jumpToTrendPoint(point);
+                              }
+                            }}
+                          >
+                            <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
+                            <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
+                            <text
+                              x={point.x}
+                              y={Math.max(point.y - 14, 16)}
+                              text-anchor="middle"
+                              class="fill-slate-700 text-[11px] font-semibold">{point.rawValue}</text
+                            >
+                            {#if shouldShowTrendPointDate(index, trendChart.points.length)}
+                              <text x={point.x} y="208" text-anchor="middle" class="fill-slate-500 text-[11px]"
+                                >{point.chartDate}</text
+                              >
+                            {/if}
+                          </g>
+                        {/each}
+                      </svg>
+                    </div>
+                  </div>
+                {:else}
+                  <div
+                    class="rounded-[28px] border border-dashed border-slate-300/90 bg-white/70 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-sm"
+                  >
+                    <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                      {m.diachronic_view()}
+                    </p>
+                    <h4 class="mt-3 text-xl font-semibold text-slate-900">{m.no_plot_title()}</h4>
+                    <p class="mx-auto mt-2 max-w-xl text-sm text-slate-600">
+                      {m.no_plot_description()}
+                    </p>
+                  </div>
+                {/if}
+              </div>
+
+              <div class="flex-1 overflow-x-auto">
+                {#if data.records.length === 0}
+                  <div class="flex flex-col items-center justify-center p-12 text-slate-400">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="1.5"
+                      stroke="currentColor"
+                      class="w-12 h-12 mb-4 opacity-50"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+                      /></svg
+                    >
+                    <p class="text-sm font-medium">{m.no_records_for_patient()}</p>
+                    <p class="text-xs mt-1">{m.no_records_hint()}</p>
+                  </div>
+                {:else}
+                  <div class="border-t border-slate-100">
+                    <div
+                      class="flex items-center gap-3 px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-50/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allRecordsSelected}
+                        onchange={toggleSelectAll}
+                        class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
+                      />
+                      <span>{m.select_all_records()}</span>
+                    </div>
+
+                    {#each groupedReports as group}
+                      <section id={`report-${group.report.id}`} class="border-t border-slate-100 first:border-t-0">
+                        {#if isReportExpanded(group.report.id)}
+                          <div class="border-t border-slate-100 bg-white px-6 py-5">
+                            <form method="POST" action="?/updateReport" use:enhance class="space-y-4">
+                              <input type="hidden" name="id" value={group.report.id} />
+                              <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0 flex-1 space-y-3">
+                                  <label class="block">
+                                    <span class="sr-only">{m.report_title()}</span>
+                                    <input
+                                      type="text"
+                                      name="title"
+                                      value={group.title}
+                                      placeholder={`${group.facilityName || m.report_fallback()} ${formatDate(group.report.testDate, { dateStyle: 'medium' })}`}
+                                      class="w-full border-0 bg-transparent px-0 py-0 text-lg font-semibold tracking-tight text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
+                                    />
+                                  </label>
+                                  <label class="block">
+                                    <span class="sr-only">{m.report_notes()}</span>
+                                    <textarea
+                                      name="notes"
+                                      rows="2"
+                                      placeholder={m.report_notes_placeholder()}
+                                      class="w-full resize-none border-0 bg-transparent px-0 py-0 text-sm text-slate-500 outline-none placeholder:text-slate-400 focus:ring-0"
+                                      >{group.notes}</textarea
+                                    >
+                                  </label>
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                  <a
+                                    href={`/reports/${group.report.id}/review`}
+                                    data-sveltekit-reload
+                                    class="inline-flex items-center rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700 transition-colors hover:bg-teal-100"
+                                  >
+                                    {m.review_report()}
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onclick={() => toggleReportExpanded(group.report.id)}
+                                    class="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                                    aria-label={m.collapse_report()}
+                                  >
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke-width="2"
+                                      stroke="currentColor"
+                                      class="h-5 w-5"
+                                    >
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 15l-7-7-7 7" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div
+                                class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3"
+                              >
+                                <div class="flex flex-wrap items-center gap-3">
+                                  <input
+                                    type="datetime-local"
+                                    name="testDate"
+                                    value={group.report.testDate ? group.report.testDate.slice(0, 16) : ''}
+                                    class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                                  />
+                                  <input
+                                    type="text"
+                                    name="facilityName"
+                                    value={group.facilityName}
+                                    placeholder={m.facility()}
+                                    class="min-w-40 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                                  />
+                                </div>
+                                <button
+                                  type="submit"
+                                  class="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                >
+                                  {m.save()}
+                                </button>
+                              </div>
+                            </form>
+
+                            <form
+                              method="POST"
+                              action="?/deleteReport"
+                              use:enhance={(e) => {
+                                if (
+                                  !confirm(
+                                    group.records.length === 1
+                                      ? m.delete_report_confirm_one({ count: group.records.length })
+                                      : m.delete_report_confirm_other({ count: group.records.length }),
+                                  )
+                                ) {
+                                  e.cancel();
+                                }
+                              }}
+                              class="mt-3 flex justify-end"
+                            >
+                              <input type="hidden" name="id" value={group.report.id} />
                               <button
                                 type="submit"
-                                form="edit-form"
-                                class="text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded-md text-xs font-medium transition-colors shadow-sm"
-                                aria-label={m.save_record()}>{m.save_record_short()}</button
+                                class="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                               >
-                              <button
-                                type="button"
-                                onclick={cancelEdit}
-                                class="text-slate-500 hover:text-slate-700 hover:bg-slate-200 px-2 py-1 rounded-md text-xs font-medium transition-colors"
-                                aria-label={m.cancel_editing()}>{m.cancel()}</button
-                              >
-                            </div>
-                          </td>
-                        </tr>
-                      {:else}
-                        <tr
-                          id={`record-${record.id}`}
-                          class="hover:bg-slate-50/70 transition-colors group {selectedRecordIds.includes(record.id)
-                            ? 'bg-teal-50/30'
-                            : ''}"
-                        >
-                          <td class="px-6 py-4 whitespace-nowrap">
-                            <input
-                              type="checkbox"
-                              bind:group={selectedRecordIds}
-                              value={record.id}
-                              class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td class="px-2 py-4 whitespace-nowrap">
-                            <div class="flex items-center">
-                              <div>
-                                <div class="text-sm font-semibold text-slate-800">{record.metricName}</div>
-                                {#if getRecordOriginalLabel(record)}
-                                  <div class="mt-1 text-xs text-slate-400">{getRecordOriginalLabel(record)}</div>
-                                {/if}
-                              </div>
-                            </div>
-                          </td>
-                          <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-slate-700 font-medium">
-                              {record.value} <span class="text-slate-500 ml-1">{record.unit || ''}</span>
-                            </div>
-                            {#if getRecordComparableValue(record) !== null && (String(getRecordComparableValue(record)) !== String(record.value) || getRecordComparableUnit(record) !== (record.unit || null))}
-                              <div class="text-xs text-teal-700 mt-1">
-                                {m.comparable_prefix({ value: String(getRecordComparableValue(record) ?? ''), unit: getRecordComparableUnit(record) || '' })}
-                              </div>
-                            {/if}
-                            {#if record.refRange}
-                              <div class="text-xs text-slate-400 mt-1">{m.ref_prefix({ value: record.refRange })}</div>
-                            {/if}
-                          </td>
-                          <td class="px-6 py-4 whitespace-nowrap">
-                            <span
-                              class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border
+                                {m.remove_report()}
+                              </button>
+                            </form>
+
+                            <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+                              <table class="min-w-full divide-y divide-slate-200">
+                                <thead class="bg-slate-50/70">
+                                  <tr>
+                                    <th scope="col" class="px-6 py-3.5 w-10 text-left">
+                                      <input
+                                        type="checkbox"
+                                        checked={allReportRecordsSelected(group.report.id)}
+                                        onchange={() => toggleSelectReport(group.report.id)}
+                                        class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
+                                      />
+                                    </th>
+                                    <th
+                                      scope="col"
+                                      class="px-2 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                      >{m.type()}</th
+                                    >
+                                    <th
+                                      scope="col"
+                                      class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                      >{m.value()}</th
+                                    >
+                                    <th
+                                      scope="col"
+                                      class="px-6 py-3.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider"
+                                      >{m.status()}</th
+                                    >
+                                    <th scope="col" class="relative px-6 py-3.5 w-10 text-right"
+                                      ><span class="sr-only">{m.actions()}</span></th
+                                    >
+                                  </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-slate-100">
+                                  {#each group.records as record}
+                                    {#if editingRecordId === record.id}
+                                      <tr
+                                        id={`record-${record.id}`}
+                                        class="bg-blue-50/50 border-l-[3px] border-l-blue-500 group"
+                                      >
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                          <!-- spacer for checkbox in edit view so UI doesn't jump -->
+                                        </td>
+                                        <td class="px-2 py-4 whitespace-nowrap">
+                                          <div class="space-y-1">
+                                            <input
+                                              type="text"
+                                              name="metricName"
+                                              bind:value={editMetricName}
+                                              list="metric-parsed-label-suggestions"
+                                              required
+                                              class="w-full text-sm font-semibold text-slate-900 border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                            />
+                                            {#if getRecordOriginalLabel(record)}
+                                              <div class="text-xs text-slate-400">
+                                                {m.original_prefix({ value: getRecordOriginalLabel(record) })}
+                                              </div>
+                                            {/if}
+                                          </div>
+                                        </td>
+                                        <td class="px-6 py-3 whitespace-nowrap">
+                                          <input
+                                            type="text"
+                                            name="value"
+                                            bind:value={editValue}
+                                            required
+                                            class="w-full text-sm font-medium text-slate-900 border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                          />
+                                        </td>
+                                        <td class="px-6 py-3 whitespace-nowrap">
+                                          <select
+                                            name="status"
+                                            bind:value={editStatus}
+                                            class="w-full text-sm border border-blue-300 bg-white rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                          >
+                                            <option value="Normal">{m.status_normal()}</option>
+                                            <option value="High">{m.status_high()}</option>
+                                            <option value="Low">{m.status_low()}</option>
+                                            <option value="Optimal">{m.status_optimal()}</option>
+                                            <option value="Stable">{m.status_stable()}</option>
+                                            <option value="Review Required">{m.status_review_required()}</option>
+                                            <option value="Manual">{m.status_manual()}</option>
+                                          </select>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right">
+                                          <div class="flex items-center justify-end gap-2">
+                                            <button
+                                              type="submit"
+                                              form="edit-form"
+                                              class="text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded-md text-xs font-medium transition-colors shadow-sm"
+                                              aria-label={m.save_record()}>{m.save_record_short()}</button
+                                            >
+                                            <button
+                                              type="button"
+                                              onclick={cancelEdit}
+                                              class="text-slate-500 hover:text-slate-700 hover:bg-slate-200 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                                              aria-label={m.cancel_editing()}>{m.cancel()}</button
+                                            >
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    {:else}
+                                      <tr
+                                        id={`record-${record.id}`}
+                                        class="hover:bg-slate-50/70 transition-colors group {selectedRecordIds.includes(
+                                          record.id,
+                                        )
+                                          ? 'bg-teal-50/30'
+                                          : ''}"
+                                      >
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                          <input
+                                            type="checkbox"
+                                            bind:group={selectedRecordIds}
+                                            value={record.id}
+                                            class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-4 w-4 cursor-pointer"
+                                          />
+                                        </td>
+                                        <td class="px-2 py-4 whitespace-nowrap">
+                                          <div class="flex items-center">
+                                            <div>
+                                              <div class="text-sm font-semibold text-slate-800">
+                                                {record.metricName}
+                                              </div>
+                                              {#if getRecordOriginalLabel(record)}
+                                                <div class="mt-1 text-xs text-slate-400">
+                                                  {getRecordOriginalLabel(record)}
+                                                </div>
+                                              {/if}
+                                            </div>
+                                          </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                          <div class="text-sm text-slate-700 font-medium">
+                                            {record.value} <span class="text-slate-500 ml-1">{record.unit || ''}</span>
+                                          </div>
+                                          {#if getRecordComparableValue(record) !== null && (String(getRecordComparableValue(record)) !== String(record.value) || getRecordComparableUnit(record) !== (record.unit || null))}
+                                            <div class="text-xs text-teal-700 mt-1">
+                                              {m.comparable_prefix({
+                                                value: String(getRecordComparableValue(record) ?? ''),
+                                                unit: getRecordComparableUnit(record) || '',
+                                              })}
+                                            </div>
+                                          {/if}
+                                          {#if record.refRange}
+                                            <div class="text-xs text-slate-400 mt-1">
+                                              {m.ref_prefix({ value: record.refRange })}
+                                            </div>
+                                          {/if}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                          <span
+                                            class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border
                             {record.status === 'Normal' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ''}
                             {record.status === 'Optimal' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
                             {record.status === 'High' ? 'bg-rose-50 text-rose-700 border-rose-200' : ''}
@@ -2635,113 +3301,121 @@
                             {record.status === 'Stable' ? 'bg-slate-50 text-slate-700 border-slate-200' : ''}
                             {record.status === 'Review Required' ? 'bg-amber-50 text-amber-700 border-amber-200' : ''}
                             {record.status === 'Manual' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : ''}"
-                            >
-                              {getStatusLabel(record.status)}
-                            </span>
-                          </td>
-                          <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div class="flex items-center justify-end gap-2">
-                              <button
-                                onclick={() => startEdit(record)}
-                                class="text-slate-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                aria-label={m.edit_record()}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke-width="2"
-                                  stroke="currentColor"
-                                  class="w-4 h-4"
-                                  ><path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
-                                  /></svg
-                                >
-                              </button>
-                              <form
-                                method="POST"
-                                action="?/deleteRecord"
-                                use:enhance={(e) => {
-                                  if (!confirm(m.delete_record_confirm())) {
-                                    e.cancel();
-                                  }
-                                }}
-                                class="contents"
-                              >
-                                <input type="hidden" name="id" value={record.id} />
-                                <button
-                                  type="submit"
-                                  class="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-md hover:bg-rose-50 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                  aria-label={m.delete_record()}
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke-width="2"
-                                    stroke="currentColor"
-                                    class="w-4 h-4"
-                                    ><path
-                                      stroke-linecap="round"
-                                      stroke-linejoin="round"
-                                      d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
-                                    /></svg
-                                  >
-                                </button>
-                              </form>
+                                          >
+                                            {getStatusLabel(record.status)}
+                                          </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                          <div class="flex items-center justify-end gap-2">
+                                            <button
+                                              onclick={() => startEdit(record)}
+                                              class="text-slate-400 hover:text-blue-600 transition-colors p-1.5 rounded-md hover:bg-blue-50 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                              aria-label={m.edit_record()}
+                                            >
+                                              <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke-width="2"
+                                                stroke="currentColor"
+                                                class="w-4 h-4"
+                                                ><path
+                                                  stroke-linecap="round"
+                                                  stroke-linejoin="round"
+                                                  d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
+                                                /></svg
+                                              >
+                                            </button>
+                                            <form
+                                              method="POST"
+                                              action="?/deleteRecord"
+                                              use:enhance={(e) => {
+                                                if (!confirm(m.delete_record_confirm())) {
+                                                  e.cancel();
+                                                }
+                                              }}
+                                              class="contents"
+                                            >
+                                              <input type="hidden" name="id" value={record.id} />
+                                              <button
+                                                type="submit"
+                                                class="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-md hover:bg-rose-50 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                                aria-label={m.delete_record()}
+                                              >
+                                                <svg
+                                                  xmlns="http://www.w3.org/2000/svg"
+                                                  fill="none"
+                                                  viewBox="0 0 24 24"
+                                                  stroke-width="2"
+                                                  stroke="currentColor"
+                                                  class="w-4 h-4"
+                                                  ><path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                                                  /></svg
+                                                >
+                                              </button>
+                                            </form>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    {/if}
+                                  {/each}
+                                </tbody>
+                              </table>
                             </div>
-                          </td>
-                        </tr>
-                      {/if}
-                                {/each}
-                              </tbody>
-                            </table>
                           </div>
-                        </div>
-                      {:else}
-                        <button
-                          type="button"
-                          onclick={() => toggleReportExpanded(group.report.id)}
-                          class="flex w-full items-start justify-between gap-4 px-6 py-5 text-left transition-colors hover:bg-slate-50/70"
-                        >
-                          <div class="min-w-0 flex-1">
-                            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                              <div class="min-w-0">
-                                <h4 class="truncate text-lg font-semibold tracking-tight text-slate-900">{group.title}</h4>
-                                <p class="mt-1 text-sm text-slate-500">{formatDate(group.report.testDate)} - {getRecordCountLabel(group.records.length)}</p>
+                        {:else}
+                          <button
+                            type="button"
+                            onclick={() => toggleReportExpanded(group.report.id)}
+                            class="flex w-full items-start justify-between gap-4 px-6 py-5 text-left transition-colors hover:bg-slate-50/70"
+                          >
+                            <div class="min-w-0 flex-1">
+                              <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div class="min-w-0">
+                                  <h4 class="truncate text-lg font-semibold tracking-tight text-slate-900">
+                                    {group.title}
+                                  </h4>
+                                  <p class="mt-1 text-sm text-slate-500">
+                                    {formatDate(group.report.testDate)} - {getRecordCountLabel(group.records.length)}
+                                  </p>
+                                </div>
+                                {#if group.facilityName}
+                                  <span
+                                    class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                                  >
+                                    {group.facilityName}
+                                  </span>
+                                {/if}
                               </div>
-                              {#if group.facilityName}
-                                <span class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                                  {group.facilityName}
-                                </span>
+                              {#if group.notes}
+                                <p class="mt-2 line-clamp-2 max-w-3xl text-sm text-slate-500">{group.notes}</p>
                               {/if}
                             </div>
-                            {#if group.notes}
-                              <p class="mt-2 line-clamp-2 max-w-3xl text-sm text-slate-500">{group.notes}</p>
-                            {/if}
-                          </div>
-                          <div class="flex items-center gap-3 pt-1">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke-width="2"
-                              stroke="currentColor"
-                              class="h-5 w-5 text-slate-400"
-                            ><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
-                          </div>
-                        </button>
-                      {/if}
-                    </section>
-                  {/each}
-                </div>
-              {/if}
+                            <div class="flex items-center gap-3 pt-1">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke-width="2"
+                                stroke="currentColor"
+                                class="h-5 w-5 text-slate-400"
+                                ><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg
+                              >
+                            </div>
+                          </button>
+                        {/if}
+                      </section>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    {/if}
-  </main>
-</div>
+      {/if}
+    </main>
+  </div>
+{/if}
