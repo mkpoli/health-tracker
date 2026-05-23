@@ -43,7 +43,13 @@ function getSessionKey() {
   return new TextEncoder().encode(requireEnv('AUTH0_SESSION_SECRET'));
 }
 
-const jwks = createRemoteJWKSet(new URL('.well-known/jwks.json', getIssuer()));
+let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+function getJwks() {
+  if (!_jwks) {
+    _jwks = createRemoteJWKSet(new URL('.well-known/jwks.json', getIssuer()));
+  }
+  return _jwks;
+}
 
 function cookieOptions(maxAge: number) {
   return {
@@ -185,7 +191,7 @@ export async function completeAuthFlow(cookies: Cookies, url: URL): Promise<neve
     throw redirect(302, '/auth/login');
   }
 
-  const verified = await jwtVerify(tokens.id_token, jwks, {
+  const verified = await jwtVerify(tokens.id_token, getJwks(), {
     issuer: getIssuer(),
     audience: requireEnv('AUTH0_CLIENT_ID'),
   });
