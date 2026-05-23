@@ -408,50 +408,27 @@
     }
 
     const metricName = selectedTrend?.metricName ?? '';
-    const mode = trendUnitDisplay[metricName] || 'asRecorded';
     const latest = series[series.length - 1];
 
-    // The chart's plotted Y value must agree with what the user sees in labels.
-    // For 'asRecorded', plot by raw value; for a chosen unit, plot by the value
-    // converted into that unit. Falls back to the comparable value if a raw
-    // value can't be parsed and isn't convertible.
-    function plotValueFor(point: TrendPoint): number {
-      if (mode === 'asRecorded') {
-        const n = Number(point.rawValue);
-        return Number.isFinite(n) ? n : point.value;
-      }
-      const source = canonicalUnitForm(point.rawUnit);
-      const n = Number(point.rawValue);
-      const sourceValue = Number.isFinite(n) ? n : point.value;
-      if (source === mode) return sourceValue;
-      const converted = convertValueBetweenUnits(sourceValue, source, mode);
-      return converted ?? sourceValue;
-    }
-
-    const plotValues = series.map(plotValueFor);
+    // Y is always plotted in the canonical comparable-unit space (so points
+    // with different rawUnits land at heights you can actually compare). Labels
+    // are rendered separately, in whichever display unit the user picked.
+    const plotValues = series.map((p) => p.value);
 
     const override = trendRefRangeOverride[metricName] ?? null;
     const overrideRange = override ? parseReferenceRange(override) : null;
     const parsedRanges = series.map((point) => parseReferenceRange(point.refRange)).filter(Boolean) as ParsedRefRange[];
     const bounds: number[] = [...plotValues];
 
-    // For chart bounds, project the active ref range into the plotted unit too —
-    // otherwise the band can sit outside the visible y-range.
-    const refSourceUnit = canonicalUnitForm(latest.rawUnit);
-    const refTargetUnit = mode === 'asRecorded' ? refSourceUnit : mode;
-    function convertRefBound(value: number | null): number | null {
-      if (value === null) return null;
-      if (!refTargetUnit || !refSourceUnit || refTargetUnit === refSourceUnit) return value;
-      const converted = convertValueBetweenUnits(value, refSourceUnit, refTargetUnit);
-      return converted ?? value;
-    }
-
+    // The override range comes in as text typed against the picker's "current
+    // unit" (the latest record's comparable unit), so its numbers are already
+    // in the chart's comparable-unit space. Recorded ranges come from each
+    // point's raw refRange string and were normalized into comparable units in
+    // trendMetrics — same space.
     const rangesForBounds = overrideRange ? [overrideRange] : parsedRanges;
     for (const range of rangesForBounds) {
-      const low = convertRefBound(range.low);
-      const high = convertRefBound(range.high);
-      if (low !== null) bounds.push(low);
-      if (high !== null) bounds.push(high);
+      if (range.low !== null) bounds.push(range.low);
+      if (range.high !== null) bounds.push(range.high);
     }
 
     const rawMin = Math.min(...bounds);
@@ -476,7 +453,7 @@
     const area = `${line} ${xForIndex(series.length - 1)},${height - bottom} ${xForIndex(0)},${height - bottom}`;
 
     const previous = series.length > 1 ? series[series.length - 2] : null;
-    const delta = previous ? plotValueFor(latest) - plotValueFor(previous) : null;
+    const delta = previous ? latest.value - previous.value : null;
     const activeRange =
       overrideRange ||
       parseReferenceRange(latest.refRange) ||
@@ -487,8 +464,8 @@
     let refRangePath = '';
 
     if (activeRange && activeRange.low !== null && activeRange.high !== null) {
-      const low = convertRefBound(activeRange.low)!;
-      const high = convertRefBound(activeRange.high)!;
+      const low = activeRange.low;
+      const high = activeRange.high;
       const upper = `${left},${yForValue(high)} ${width - right},${yForValue(high)}`;
       const lower = `${width - right},${yForValue(low)} ${left},${yForValue(low)}`;
       refRangePath = `${upper} ${lower}`;
@@ -761,32 +738,20 @@
     return parseJsonLike(record.extraData) || {};
   }
 
+  // Always recompute the comparable view from raw value + unit. Earlier records
+  // have stale or wrong comparableValue baked into extraData (extraction stored
+  // the raw value without scaling), so trusting metadata.comparableValue caused
+  // the chart to plot values that disagreed with their own labels.
   function getRecordComparableValue(record: (typeof data.records)[number]) {
-    const metadata = getRecordMetadata(record);
-    const candidate = metadata.comparableValue;
-
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
-    if (typeof candidate === 'string' && candidate.trim()) {
-      const parsed = Number(candidate);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-
     return normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableValue;
   }
 
   function getRecordComparableUnit(record: (typeof data.records)[number]) {
-    const metadata = getRecordMetadata(record);
-    const candidate = typeof metadata.comparableUnit === 'string' ? metadata.comparableUnit.trim() : '';
-    return candidate || normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableUnit;
+    return normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableUnit;
   }
 
   function getRecordComparableRange(record: (typeof data.records)[number]) {
-    const metadata = getRecordMetadata(record);
-    const candidate =
-      typeof metadata.comparableReferenceRange === 'string' ? metadata.comparableReferenceRange.trim() : '';
-    return (
-      candidate || normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableReferenceRange
-    );
+    return normalizeComparableMeasurement(record.value, record.unit, record.refRange).comparableReferenceRange;
   }
 
   function getRecordOriginalLabel(record: (typeof data.records)[number]) {
