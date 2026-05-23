@@ -54,6 +54,8 @@
   let expandedReportIds = $state<string[]>([]);
   let trendComboboxContainer = $state<HTMLDivElement | null>(null);
   let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
+  let trendUnitDisplayMode = $state<'mixed' | 'normalized'>('normalized');
+  let trendRefRangeOverride = $state<Record<string, string>>({});
 
   const currentLocale = $derived(getLocale());
 
@@ -400,10 +402,14 @@
       return null;
     }
 
+    const latest = series[series.length - 1];
+    const override = trendRefRangeOverride[selectedTrend?.metricName ?? ''] ?? null;
+    const overrideRange = override ? parseReferenceRange(override) : null;
     const parsedRanges = series.map((point) => parseReferenceRange(point.refRange)).filter(Boolean) as ParsedRefRange[];
     const values = series.map((point) => point.value);
 
-    for (const range of parsedRanges) {
+    const rangesForBounds = overrideRange ? [overrideRange] : parsedRanges;
+    for (const range of rangesForBounds) {
       if (range.low !== null) values.push(range.low);
       if (range.high !== null) values.push(range.high);
     }
@@ -429,24 +435,28 @@
     const line = series.map((point, index) => `${xForIndex(index)},${yForValue(point.value)}`).join(' ');
     const area = `${line} ${xForIndex(series.length - 1)},${height - bottom} ${xForIndex(0)},${height - bottom}`;
 
-    const latest = series[series.length - 1];
     const previous = series.length > 1 ? series[series.length - 2] : null;
     const delta = previous ? latest.value - previous.value : null;
-    const latestRange =
+    const activeRange =
+      overrideRange ||
       parseReferenceRange(latest.refRange) ||
       parsedRanges.find((range) => range.low !== null || range.high !== null) ||
       null;
-    const latestDisplayStatus = getStatusFromRange(latest.value, latestRange, latest.status);
+    const latestDisplayStatus = getStatusFromRange(latest.value, activeRange, latest.status);
 
     let refRangePath = '';
 
-    if (latestRange && latestRange.low !== null && latestRange.high !== null) {
-      const low = latestRange.low;
-      const high = latestRange.high;
+    if (activeRange && activeRange.low !== null && activeRange.high !== null) {
+      const low = activeRange.low;
+      const high = activeRange.high;
       const upper = `${left},${yForValue(high)} ${width - right},${yForValue(high)}`;
       const lower = `${width - right},${yForValue(low)} ${left},${yForValue(low)}`;
       refRangePath = `${upper} ${lower}`;
     }
+
+    const rawUnits = new Set(series.map((point) => point.rawUnit || '').filter(Boolean));
+    const hasMixedUnits = rawUnits.size > 1;
+    const overrideActive = Boolean(overrideRange);
 
     return {
       width,
@@ -463,8 +473,10 @@
       latest,
       latestDisplayStatus,
       delta,
-      refRange: latestRange,
+      refRange: activeRange,
       refRangePath,
+      hasMixedUnits,
+      overrideActive,
     };
   });
 
@@ -2940,14 +2952,72 @@
                       <div
                         class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
                       >
-                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          {m.reference_range()}
-                        </p>
+                        <div class="flex items-start justify-between gap-2">
+                          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                            {m.reference_range()}
+                          </p>
+                          <RefRangePicker
+                            metricLabel={selectedTrend.metricName}
+                            patient={data.currentPatient}
+                            currentUnit={trendChart.latest.unit}
+                            onSelect={(rangeText) => {
+                              trendRefRangeOverride = { ...trendRefRangeOverride, [selectedTrend.metricName]: rangeText };
+                            }}
+                          />
+                        </div>
                         <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
                           {trendChart.refRange?.label || m.not_available()}
                         </p>
-                        <p class="mt-2 text-sm text-slate-500">{m.reference_range_hint()}</p>
+                        <div class="mt-2 flex items-center justify-between gap-2">
+                          <p class="text-sm text-slate-500">{m.reference_range_hint()}</p>
+                          {#if trendChart.overrideActive}
+                            <button
+                              type="button"
+                              class="text-xs font-semibold text-teal-700 hover:text-teal-900"
+                              onclick={() => {
+                                const next = { ...trendRefRangeOverride };
+                                delete next[selectedTrend.metricName];
+                                trendRefRangeOverride = next;
+                              }}
+                            >
+                              {m.reset_to_record_range()}
+                            </button>
+                          {/if}
+                        </div>
                       </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                      <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
+                      <div class="inline-flex rounded-lg border border-slate-200 bg-white/70 p-0.5 shadow-sm">
+                        <button
+                          type="button"
+                          onclick={() => (trendUnitDisplayMode = 'normalized')}
+                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                            trendUnitDisplayMode === 'normalized'
+                              ? 'bg-teal-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {m.unit_display_normalized()}
+                        </button>
+                        <button
+                          type="button"
+                          onclick={() => (trendUnitDisplayMode = 'mixed')}
+                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                            trendUnitDisplayMode === 'mixed'
+                              ? 'bg-teal-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {m.unit_display_mixed()}
+                        </button>
+                      </div>
+                      {#if trendChart.hasMixedUnits}
+                        <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                          {m.mixed_units_detected()}
+                        </span>
+                      {/if}
                     </div>
 
                     <div
@@ -2982,6 +3052,16 @@
                         ></polyline>
 
                         {#each trendChart.points as point, index}
+                          {@const pointLabel =
+                            trendUnitDisplayMode === 'mixed'
+                              ? `${point.rawValue}${trendChart.hasMixedUnits && point.rawUnit ? ` ${point.rawUnit}` : ''}`
+                              : `${point.value}`}
+                          {@const tooltipLabel =
+                            `${point.rawValue}${point.rawUnit ? ` ${point.rawUnit}` : ''}` +
+                            (point.unit && point.unit !== point.rawUnit
+                              ? ` (${point.value}${point.unit ? ` ${point.unit}` : ''})`
+                              : '') +
+                            ` — ${point.chartDate}`}
                           <g
                             role="button"
                             tabindex="0"
@@ -2995,13 +3075,14 @@
                               }
                             }}
                           >
+                            <title>{tooltipLabel}</title>
                             <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
                             <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
                             <text
                               x={point.x}
                               y={Math.max(point.y - 14, 16)}
                               text-anchor="middle"
-                              class="fill-slate-700 text-[11px] font-semibold">{point.rawValue}</text
+                              class="fill-slate-700 text-[11px] font-semibold">{pointLabel}</text
                             >
                             {#if shouldShowTrendPointDate(index, trendChart.points.length)}
                               <text x={point.x} y="208" text-anchor="middle" class="fill-slate-500 text-[11px]"
