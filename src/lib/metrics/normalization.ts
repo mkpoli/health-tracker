@@ -32,7 +32,10 @@ function normalizeUnitText(unit?: string | null) {
     .replace(/µ/g, 'u')
     .replace(/／/g, '/')
     .replace(/・/g, '')
-    .replace(/\*\*/g, '^');
+    .replace(/\*\*/g, '^')
+    // Canonicalize "L" (liter) casing in denominators: mg/dl → mg/dL, x10^6/uL stays.
+    // This is the single most common casing inconsistency in lab reports.
+    .replace(/(\/[a-zA-Z]*)l\b/g, '$1L');
 }
 
 function getUnitScale(unit?: string | null) {
@@ -85,7 +88,9 @@ function getUnitScale(unit?: string | null) {
     }
   }
 
-  return { multiplier: 1, comparableUnit: unit?.trim() || null };
+  // Use the normalized form (with canonical L casing) as the comparable unit
+  // so case-equivalent inputs ("mg/dl" + "mg/dL") collapse to one bucket.
+  return { multiplier: 1, comparableUnit: normalized };
 }
 
 function normalizeReferenceRange(refRange: string | null | undefined, multiplier: number) {
@@ -144,12 +149,11 @@ export function formatConvertedValue(value: number): string {
 }
 
 // Canonical display form of a unit string — collapses case-equivalent variants
-// (e.g. "mg/dl" + "mg/dL" → "mg/dL") so the UI doesn't show duplicates.
-// Picks the casing that matches the lab-conventional form by promoting "L" in
-// /L denominators, "G" → never (g is correct), but keeping the L convention.
+// (e.g. "mg/dl" + "mg/dL" → "mg/dL") so the UI doesn't show duplicates. Shares
+// the same liter-casing rule as normalizeUnitText so the comparable-unit path
+// and the display path stay in lockstep.
 export function canonicalUnitForm(unit?: string | null): string | null {
   const trimmed = (unit || '').trim();
   if (!trimmed) return null;
-  // Normalize the literal "/L" denominator casing — common offender for L vs l.
-  return trimmed.replace(/(\/)l\b/g, '$1L').replace(/(\/m)l\b/g, '$1L');
+  return trimmed.replace(/(\/[a-zA-Z]*)l\b/g, '$1L');
 }
