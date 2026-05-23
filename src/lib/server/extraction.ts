@@ -1,9 +1,16 @@
 import OpenAI from 'openai';
-import { OPENAI_API_KEY, OPENAI_API_MODEL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
 export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    if (!env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set');
+    _openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 const metricCatalogPrompt = metricSuggestions.map((label) => `- ${label}`).join('\n');
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -90,8 +97,8 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   messages.push({ role: 'user', content });
 
-  const response = await openai.chat.completions.create({
-    model: OPENAI_API_MODEL || 'gpt-5.4',
+  const response = await getOpenAI().chat.completions.create({
+    model: env.OPENAI_API_MODEL || 'gpt-5.4',
     messages,
     temperature: 0,
   });
