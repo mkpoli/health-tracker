@@ -14,6 +14,7 @@
 		"db:push": "drizzle-kit push",
 		"db:studio": "drizzle-kit studio",
 		"deploy": "bun run build && wrangler deploy",
+		"secrets:push": "bun scripts/push-secrets.ts",
 		"cf-typegen": "wrangler types ./src/worker-configuration.d.ts"
 	},
 	"devDependencies": {
