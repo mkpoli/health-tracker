@@ -462,13 +462,31 @@
     const latestDisplayStatus = getStatusFromRange(latest.value, activeRange, latest.status);
 
     let refRangePath = '';
+    // 'solid' = both bounds; 'fadeDown' = only upper bound (<X), fade toward
+    // chart bottom; 'fadeUp' = only lower bound (>X), fade toward chart top.
+    let refRangeFill: 'solid' | 'fadeDown' | 'fadeUp' = 'solid';
 
-    if (activeRange && activeRange.low !== null && activeRange.high !== null) {
-      const low = activeRange.low;
-      const high = activeRange.high;
-      const upper = `${left},${yForValue(high)} ${width - right},${yForValue(high)}`;
-      const lower = `${width - right},${yForValue(low)} ${left},${yForValue(low)}`;
-      refRangePath = `${upper} ${lower}`;
+    if (activeRange) {
+      const hasLow = activeRange.low !== null;
+      const hasHigh = activeRange.high !== null;
+      const chartTopY = top;
+      const chartBottomY = height - bottom;
+
+      if (hasLow && hasHigh) {
+        const upper = `${left},${yForValue(activeRange.high!)} ${width - right},${yForValue(activeRange.high!)}`;
+        const lower = `${width - right},${yForValue(activeRange.low!)} ${left},${yForValue(activeRange.low!)}`;
+        refRangePath = `${upper} ${lower}`;
+      } else if (hasHigh) {
+        // <X — band from chart bottom up to high; fade toward bottom.
+        const highY = yForValue(activeRange.high!);
+        refRangePath = `${left},${highY} ${width - right},${highY} ${width - right},${chartBottomY} ${left},${chartBottomY}`;
+        refRangeFill = 'fadeDown';
+      } else if (hasLow) {
+        // >X — band from low up to chart top; fade toward top.
+        const lowY = yForValue(activeRange.low!);
+        refRangePath = `${left},${chartTopY} ${width - right},${chartTopY} ${width - right},${lowY} ${left},${lowY}`;
+        refRangeFill = 'fadeUp';
+      }
     }
 
     const rawUnits = new Set(series.map((point) => point.rawUnit || '').filter(Boolean));
@@ -501,6 +519,7 @@
       delta,
       refRange: activeRange,
       refRangePath,
+      refRangeFill,
       hasMixedUnits,
       overrideActive,
       unitOptions,
@@ -3118,10 +3137,25 @@
                             <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
                             <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
                           </linearGradient>
+                          <linearGradient id="trend-ref-fade-down" x1="0%" x2="0%" y1="0%" y2="100%">
+                            <stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0.22"></stop>
+                            <stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>
+                          </linearGradient>
+                          <linearGradient id="trend-ref-fade-up" x1="0%" x2="0%" y1="0%" y2="100%">
+                            <stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>
+                            <stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0.22"></stop>
+                          </linearGradient>
                         </defs>
 
                         {#if trendChart.refRangePath}
-                          <polygon points={trendChart.refRangePath} fill="rgba(16,185,129,0.12)"></polygon>
+                          <polygon
+                            points={trendChart.refRangePath}
+                            fill={trendChart.refRangeFill === 'fadeDown'
+                              ? 'url(#trend-ref-fade-down)'
+                              : trendChart.refRangeFill === 'fadeUp'
+                                ? 'url(#trend-ref-fade-up)'
+                                : 'rgba(16,185,129,0.12)'}
+                          ></polygon>
                         {/if}
 
                         <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"
