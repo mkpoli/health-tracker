@@ -3,7 +3,12 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { tick } from 'svelte';
-  import { normalizeComparableMeasurement, convertValueBetweenUnits, formatConvertedValue } from '$lib/metrics/normalization';
+  import {
+    normalizeComparableMeasurement,
+    convertValueBetweenUnits,
+    formatConvertedValue,
+    canonicalUnitForm,
+  } from '$lib/metrics/normalization';
   import WikipediaIcon from '~icons/simple-icons/wikipedia';
   import WikidataIcon from '~icons/simple-icons/wikidata';
   import {
@@ -460,8 +465,10 @@
 
     const unitCandidateSet = new Set<string>();
     for (const point of series) {
-      if (point.rawUnit) unitCandidateSet.add(point.rawUnit);
-      if (point.unit) unitCandidateSet.add(point.unit);
+      const r = canonicalUnitForm(point.rawUnit);
+      if (r) unitCandidateSet.add(r);
+      const c = canonicalUnitForm(point.unit);
+      if (c) unitCandidateSet.add(c);
     }
     const unitOptions = Array.from(unitCandidateSet);
 
@@ -493,11 +500,40 @@
     return trendUnitDisplay[selectedTrend.metricName] || 'asRecorded';
   });
 
+  const trendDisplay = $derived.by(() => {
+    if (!trendChart || !selectedTrend) return null;
+    const mode = currentTrendUnitMode;
+    const latestRendered = renderTrendPointLabel(trendChart.latest, mode);
+
+    const points = selectedTrend.points;
+    let delta: number | null = null;
+    if (points.length > 1) {
+      const previousRendered = renderTrendPointLabel(points[points.length - 2], mode);
+      const latestNum = Number(latestRendered.value);
+      const previousNum = Number(previousRendered.value);
+      if (Number.isFinite(latestNum) && Number.isFinite(previousNum)) {
+        delta = latestNum - previousNum;
+      }
+    }
+
+    const refSourceUnit = canonicalUnitForm(trendChart.latest.rawUnit);
+    const refRangeLabel = trendChart.refRange
+      ? convertRefRangeText(trendChart.refRange.label, refSourceUnit, latestRendered.unit) || trendChart.refRange.label
+      : null;
+
+    return {
+      latestValue: latestRendered.value,
+      latestUnit: latestRendered.unit,
+      delta,
+      refRangeLabel,
+    };
+  });
+
   function renderTrendPointLabel(point: TrendPoint, mode: string): { value: string; unit: string | null } {
     if (mode === 'asRecorded') {
-      return { value: point.rawValue, unit: point.rawUnit ?? null };
+      return { value: point.rawValue, unit: canonicalUnitForm(point.rawUnit) };
     }
-    const source = point.rawUnit;
+    const source = canonicalUnitForm(point.rawUnit);
     const sourceValueRaw = Number(point.rawValue);
     const sourceValue = Number.isFinite(sourceValueRaw) ? sourceValueRaw : point.value;
     if (source === mode) {
@@ -505,9 +541,20 @@
     }
     const converted = convertValueBetweenUnits(sourceValue, source, mode);
     if (converted === null) {
-      return { value: point.rawValue, unit: point.rawUnit ?? null };
+      return { value: point.rawValue, unit: canonicalUnitForm(point.rawUnit) };
     }
     return { value: formatConvertedValue(converted), unit: mode };
+  }
+
+  function convertRefRangeText(refRange: string | null | undefined, fromUnit: string | null | undefined, toUnit: string | null | undefined): string | null {
+    if (!refRange) return null;
+    if (!toUnit || !fromUnit || canonicalUnitForm(fromUnit) === canonicalUnitForm(toUnit)) return refRange;
+    return refRange.replace(/(?<![\d.])[+-]?\d*\.?\d+/g, (match) => {
+      const parsed = Number(match);
+      if (!Number.isFinite(parsed)) return match;
+      const converted = convertValueBetweenUnits(parsed, fromUnit, toUnit);
+      return converted === null ? match : formatConvertedValue(converted);
+    });
   }
 
   let allRecordsSelected = $derived(data.records.length > 0 && selectedRecordIds.length === data.records.length);
@@ -2941,10 +2988,9 @@
                                   : 'text-slate-900'
                             }`}
                           >
-                            {#if trendChart.latestDisplayStatus === 'High'}↑{/if}{#if trendChart.latestDisplayStatus === 'Low'}↓{/if}{trendChart
-                              .latest.rawValue}
-                            {#if trendChart.latest.unit}
-                              <span class="text-lg font-medium text-slate-500">{trendChart.latest.unit}</span>
+                            {#if trendChart.latestDisplayStatus === 'High'}↑{/if}{#if trendChart.latestDisplayStatus === 'Low'}↓{/if}{trendDisplay?.latestValue ?? trendChart.latest.rawValue}
+                            {#if trendDisplay?.latestUnit}
+                              <span class="text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>
                             {/if}
                           </p>
                           {#if trendChart.latestDisplayStatus}
@@ -2955,9 +3001,9 @@
                             </span>
                           {/if}
                         </div>
-                        {#if String(trendChart.latest.value) !== String(trendChart.latest.rawValue) || trendChart.latest.unit !== trendChart.latest.rawUnit}
+                        {#if currentTrendUnitMode !== 'asRecorded' && trendChart.latest.rawUnit && canonicalUnitForm(trendChart.latest.rawUnit) !== trendDisplay?.latestUnit}
                           <p class="mt-2 text-sm text-teal-700">
-                            {m.comparable_value({ value: trendChart.latest.value, unit: trendChart.latest.unit || '' })}
+                            {m.original_prefix({ value: `${trendChart.latest.rawValue}${trendChart.latest.rawUnit ? ` ${trendChart.latest.rawUnit}` : ''}` })}
                           </p>
                         {/if}
                         <p class="mt-2 text-sm text-slate-500">{m.measured_on({ date: trendChart.lastDate })}</p>
@@ -2968,12 +3014,12 @@
                       >
                         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.change()}</p>
                         <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                          {#if trendChart.delta === null}
+                          {#if trendDisplay?.delta === null || trendDisplay?.delta === undefined}
                             --
-                          {:else if trendChart.delta > 0}
-                            +{trendChart.delta.toFixed(1)}
+                          {:else if trendDisplay.delta > 0}
+                            +{trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
                           {:else}
-                            {trendChart.delta.toFixed(1)}
+                            {trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
                           {/if}
                         </p>
                         <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
@@ -2996,7 +3042,10 @@
                           />
                         </div>
                         <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                          {trendChart.refRange?.label || m.not_available()}
+                          {trendDisplay?.refRangeLabel || m.not_available()}
+                          {#if trendDisplay?.refRangeLabel && trendDisplay?.latestUnit}
+                            <span class="text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>
+                          {/if}
                         </p>
                         <div class="mt-2 flex items-center justify-between gap-2">
                           <p class="text-sm text-slate-500">{m.reference_range_hint()}</p>
@@ -3018,22 +3067,37 @@
                     </div>
 
                     <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <label class="flex items-center gap-2">
-                        <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
-                        <select
-                          value={currentTrendUnitMode}
-                          onchange={(e) => {
-                            const target = e.currentTarget as HTMLSelectElement;
-                            trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: target.value };
+                      <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
+                      <div class="inline-flex flex-wrap gap-0.5 rounded-lg border border-slate-200 bg-white/70 p-0.5 shadow-sm">
+                        <button
+                          type="button"
+                          onclick={() => {
+                            trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: 'asRecorded' };
                           }}
-                          class="rounded-lg border border-slate-200 bg-white/80 px-2.5 py-1 font-medium text-slate-700 shadow-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                            currentTrendUnitMode === 'asRecorded'
+                              ? 'bg-teal-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
                         >
-                          <option value="asRecorded">{m.unit_display_mixed()}</option>
-                          {#each trendChart.unitOptions as unit}
-                            <option value={unit}>{unit}</option>
-                          {/each}
-                        </select>
-                      </label>
+                          {m.unit_display_mixed()}
+                        </button>
+                        {#each trendChart.unitOptions as unit}
+                          <button
+                            type="button"
+                            onclick={() => {
+                              trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: unit };
+                            }}
+                            class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                              currentTrendUnitMode === unit
+                                ? 'bg-teal-600 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            {unit}
+                          </button>
+                        {/each}
+                      </div>
                       {#if trendChart.hasMixedUnits}
                         <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                           {m.mixed_units_detected()}

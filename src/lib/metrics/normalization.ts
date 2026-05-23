@@ -142,3 +142,14 @@ export function formatConvertedValue(value: number): string {
   const rounded = Math.round(value * 1000) / 1000;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
+
+// Canonical display form of a unit string — collapses case-equivalent variants
+// (e.g. "mg/dl" + "mg/dL" → "mg/dL") so the UI doesn't show duplicates.
+// Picks the casing that matches the lab-conventional form by promoting "L" in
+// /L denominators, "G" → never (g is correct), but keeping the L convention.
+export function canonicalUnitForm(unit?: string | null): string | null {
+  const trimmed = (unit || '').trim();
+  if (!trimmed) return null;
+  // Normalize the literal "/L" denominator casing — common offender for L vs l.
+  return trimmed.replace(/(\/)l\b/g, '$1L').replace(/(\/m)l\b/g, '$1L');
+}
