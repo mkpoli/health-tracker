@@ -237,7 +237,7 @@ export const actions: Actions = {
     const existingExtraData = parseJsonLike(current.extraData);
 
     await db.update(report).set({
-      testDate,
+      testDate: normalizeReportDate(testDate),
       extraData: JSON.stringify({
         ...existingExtraData,
         title: title || null,

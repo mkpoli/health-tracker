@@ -3340,7 +3340,7 @@
                                   <input
                                     type="datetime-local"
                                     name="testDate"
-                                    value={group.report.testDate ? group.report.testDate.slice(0, 16) : ''}
+                                    value={normalizeDateTimeLocal(group.report.testDate)}
                                     class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                                   />
                                   <input
