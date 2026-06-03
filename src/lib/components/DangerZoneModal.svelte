@@ -1,13 +1,16 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
+  import { downloadPatientExport } from '$lib/export';
 
   let {
     patient,
+    reports = [],
     records,
     onClose,
   }: {
     patient: any;
+    reports?: any[];
     records: any[];
     onClose: () => void;
   } = $props();
@@ -16,19 +19,7 @@
   let confirmName = $state('');
 
   function exportPatientData() {
-    const dataToExport = {
-      patient,
-      records,
-    };
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${patient?.name?.replace(/\s+/g, '_') || 'patient'}_health_data.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadPatientExport({ patient, reports, records }, patient?.name);
     hasExported = true;
   }
 </script>

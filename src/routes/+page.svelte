@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
+  import { downloadPatientExport } from '$lib/export';
   import { tick } from 'svelte';
   import {
     normalizeComparableMeasurement,
@@ -751,6 +752,17 @@
 
     const facility = getReportFacility(report) || m.report_fallback();
     return `${facility} ${formatDate(report.testDate, { dateStyle: 'medium' })}`;
+  }
+
+  // Download the full dataset for the current patient (profile + every report +
+  // every record, with all columns intact) as a single re-importable JSON file.
+  function exportPatientData() {
+    if (!data.currentPatient) return;
+
+    downloadPatientExport(
+      { patient: data.currentPatient, reports: data.reports, records: data.records },
+      data.currentPatient.name,
+    );
   }
 
   function getRecordMetadata(record: (typeof data.records)[number]) {
@@ -1978,7 +1990,7 @@
     {/if}
 
     {#if showDeleteModal && data.currentPatient}
-      <DangerZoneModal patient={data.currentPatient} records={data.records} onClose={() => (showDeleteModal = false)} />
+      <DangerZoneModal patient={data.currentPatient} reports={data.reports} records={data.records} onClose={() => (showDeleteModal = false)} />
     {/if}
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -2472,6 +2484,8 @@
               {m.delete_profile()}
             </button>
             <button
+              type="button"
+              onclick={exportPatientData}
               class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
             >
               <svg
@@ -2487,7 +2501,7 @@
                   d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
                 /></svg
               >
-              {m.export_report()}
+              {m.export_json_data()}
             </button>
           </div>
         </div>
