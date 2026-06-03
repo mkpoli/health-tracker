@@ -1,5 +1,5 @@
 import { sequence } from '@sveltejs/kit/hooks';
-import type { Handle } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getSession } from '$lib/server/auth0';
@@ -36,3 +36,25 @@ const handleParaglide: Handle = ({ event, resolve }) => paraglideMiddleware(even
 });
 
 export const handle: Handle = sequence(handleAuth, handleParaglide);
+
+// Drizzle rethrows driver failures as an opaque "Failed query: …" and stashes
+// the real reason (e.g. "FOREIGN KEY constraint failed") on error.cause, which
+// SvelteKit's default logger never prints. Walk the cause chain so the actual
+// SQLite/libsql error reaches the logs.
+export const handleError: HandleServerError = ({ error, event, status, message }) => {
+  const causes: string[] = [];
+  let current: unknown = error instanceof Error ? error.cause : undefined;
+  while (current && causes.length < 8) {
+    causes.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+
+  console.error('[handleError]', event.request.method, event.url.pathname, {
+    status,
+    message: error instanceof Error ? error.message : String(error),
+    causes,
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+
+  return { message };
+};

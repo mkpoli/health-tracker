@@ -63,168 +63,177 @@ export async function saveReviewedReport(input: {
   const deletedRecordIds = input.deletedRecordIdsStr ? JSON.parse(input.deletedRecordIdsStr) : [];
 
   const metrics = JSON.parse(input.metricsStr);
-  const patientRecords = await db.select().from(record).where(eq(record.patientId, patientId));
-  const patientRecordMap = new Map(patientRecords.map((item) => [item.id, item]));
-  const patientReports = await db.select().from(report).where(eq(report.patientId, patientId));
-  const patientReportMap = new Map(patientReports.map((item) => [item.id, item]));
 
-  if (Array.isArray(deletedRecordIds) && deletedRecordIds.length > 0) {
-    for (const recordId of deletedRecordIds) {
-      const existingRecord = patientRecordMap.get(String(recordId));
-      if (!existingRecord) continue;
-      await db.delete(record).where(eq(record.id, existingRecord.id));
-      patientRecordMap.delete(existingRecord.id);
-    }
-  }
+  // Run the entire save in a single transaction so a freshly-created report and
+  // its records commit atomically. They used to be separate auto-committed
+  // statements, which let a record insert reference a parent report that was
+  // not durably present yet on remote (Turso) — tripping the report_id FOREIGN
+  // KEY constraint and 500-ing the save. A transaction also prevents partial
+  // writes (e.g. an orphaned report with no records) when a later step fails.
+  return db.transaction(async (tx) => {
+    const patientRecords = await tx.select().from(record).where(eq(record.patientId, patientId));
+    const patientRecordMap = new Map(patientRecords.map((item) => [item.id, item]));
+    const patientReports = await tx.select().from(report).where(eq(report.patientId, patientId));
+    const patientReportMap = new Map(patientReports.map((item) => [item.id, item]));
 
-  const metricsToCreate: any[] = [];
-  const metricsToUpdate: Array<{ metric: any; targetRecordId: string }> = [];
-
-  for (const metric of metrics) {
-    const requestedTargetId = metric.matchedRecordId?.toString();
-    const requestedMode = metric.saveMode === 'update' ? 'update' : 'create';
-
-    if (requestedMode !== 'update') {
-      metricsToCreate.push(metric);
-      continue;
+    if (Array.isArray(deletedRecordIds) && deletedRecordIds.length > 0) {
+      for (const recordId of deletedRecordIds) {
+        const existingRecord = patientRecordMap.get(String(recordId));
+        if (!existingRecord) continue;
+        await tx.delete(record).where(eq(record.id, existingRecord.id));
+        patientRecordMap.delete(existingRecord.id);
+      }
     }
 
-    const requestedTarget = requestedTargetId ? patientRecordMap.get(requestedTargetId) : null;
-    if (requestedTarget) {
-      metricsToUpdate.push({ metric, targetRecordId: requestedTarget.id });
-      continue;
-    }
+    const metricsToCreate: any[] = [];
+    const metricsToUpdate: Array<{ metric: any; targetRecordId: string }> = [];
 
-    const metricKeys = [metric.parsedLabel, metric.originalLabel, metric.label, metric.type]
-      .map(normalizeMetricMatchKey)
-      .filter(Boolean);
+    for (const metric of metrics) {
+      const requestedTargetId = metric.matchedRecordId?.toString();
+      const requestedMode = metric.saveMode === 'update' ? 'update' : 'create';
 
-    const fallbackTarget = patientRecords.find((item) => {
-      const metadata = parseJsonLike(item.extraData);
-      const candidateKeys = [item.metricName, metadata.parsedLabel, metadata.originalLabel]
+      if (requestedMode !== 'update') {
+        metricsToCreate.push(metric);
+        continue;
+      }
+
+      const requestedTarget = requestedTargetId ? patientRecordMap.get(requestedTargetId) : null;
+      if (requestedTarget) {
+        metricsToUpdate.push({ metric, targetRecordId: requestedTarget.id });
+        continue;
+      }
+
+      const metricKeys = [metric.parsedLabel, metric.originalLabel, metric.label, metric.type]
         .map(normalizeMetricMatchKey)
         .filter(Boolean);
 
-      return metricKeys.some((key) => candidateKeys.includes(key));
-    });
+      const fallbackTarget = patientRecords.find((item) => {
+        const metadata = parseJsonLike(item.extraData);
+        const candidateKeys = [item.metricName, metadata.parsedLabel, metadata.originalLabel]
+          .map(normalizeMetricMatchKey)
+          .filter(Boolean);
 
-    if (fallbackTarget) {
-      metricsToUpdate.push({ metric, targetRecordId: fallbackTarget.id });
-    } else {
-      metricsToCreate.push(metric);
+        return metricKeys.some((key) => candidateKeys.includes(key));
+      });
+
+      if (fallbackTarget) {
+        metricsToUpdate.push({ metric, targetRecordId: fallbackTarget.id });
+      } else {
+        metricsToCreate.push(metric);
+      }
     }
-  }
 
-  const targetExistingReport = targetReportId ? patientReportMap.get(targetReportId) || null : null;
-  let createdReport: typeof report.$inferSelect | null = null;
+    const targetExistingReport = targetReportId ? patientReportMap.get(targetReportId) || null : null;
+    let createdReport: typeof report.$inferSelect | null = null;
 
-  if (metricsToCreate.length > 0 && !targetExistingReport) {
-    const insertedReports = await db.insert(report).values({
-      patientId,
-      testDate: requestedReportDate,
-      rawData: reportRawSource || null,
-      parsedJsonData: JSON.stringify(metricsToCreate),
-      extraData: JSON.stringify({ facilityName: reportFacility || null }),
-    }).returning();
+    if (metricsToCreate.length > 0 && !targetExistingReport) {
+      const insertedReports = await tx.insert(report).values({
+        patientId,
+        testDate: requestedReportDate,
+        rawData: reportRawSource || null,
+        parsedJsonData: JSON.stringify(metricsToCreate),
+        extraData: JSON.stringify({ facilityName: reportFacility || null }),
+      }).returning();
 
-    createdReport = insertedReports[0] || null;
-  }
+      createdReport = insertedReports[0] || null;
+    }
 
-  for (const m of metricsToCreate) {
-    const originalLabel = m.originalLabel || m.label || null;
-    const parsedLabel = m.parsedLabel || m.label || m.type || 'Other';
-    const derivedCategory = getDerivedCategory(parsedLabel);
-    const fallbackComparable = normalizeComparableMeasurement(m.value, m.unit, m.referenceRange);
-    const explicitComparableValue =
-      m.comparableValue === '' || m.comparableValue === null || m.comparableValue === undefined
-        ? null
-        : Number(m.comparableValue);
-    const comparableValue = Number.isFinite(explicitComparableValue)
-      ? explicitComparableValue
-      : fallbackComparable.comparableValue;
-    const comparableUnit = m.comparableUnit || fallbackComparable.comparableUnit || null;
-    const comparableReferenceRange =
-      m.comparableReferenceRange || fallbackComparable.comparableReferenceRange || null;
+    for (const m of metricsToCreate) {
+      const originalLabel = m.originalLabel || m.label || null;
+      const parsedLabel = m.parsedLabel || m.label || m.type || 'Other';
+      const derivedCategory = getDerivedCategory(parsedLabel);
+      const fallbackComparable = normalizeComparableMeasurement(m.value, m.unit, m.referenceRange);
+      const explicitComparableValue =
+        m.comparableValue === '' || m.comparableValue === null || m.comparableValue === undefined
+          ? null
+          : Number(m.comparableValue);
+      const comparableValue = Number.isFinite(explicitComparableValue)
+        ? explicitComparableValue
+        : fallbackComparable.comparableValue;
+      const comparableUnit = m.comparableUnit || fallbackComparable.comparableUnit || null;
+      const comparableReferenceRange =
+        m.comparableReferenceRange || fallbackComparable.comparableReferenceRange || null;
 
-    await db.insert(record).values({
-      patientId,
-      reportId: targetExistingReport?.id || createdReport!.id,
-      metricName: parsedLabel,
-      value: String(m.value) || 'N/A',
-      unit: m.unit || null,
-      refRange: m.referenceRange || null,
-      status: m.status || 'Review Required',
-      extraData: JSON.stringify({
-        notes: m.notes,
-        derivedCategory,
-        originalLabel,
-        parsedLabel,
-        comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
-        comparableUnit,
-        comparableReferenceRange,
-      }),
-    });
-  }
+      await tx.insert(record).values({
+        patientId,
+        reportId: targetExistingReport?.id || createdReport!.id,
+        metricName: parsedLabel,
+        value: String(m.value) || 'N/A',
+        unit: m.unit || null,
+        refRange: m.referenceRange || null,
+        status: m.status || 'Review Required',
+        extraData: JSON.stringify({
+          notes: m.notes,
+          derivedCategory,
+          originalLabel,
+          parsedLabel,
+          comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
+          comparableUnit,
+          comparableReferenceRange,
+        }),
+      });
+    }
 
-  for (const { metric: m, targetRecordId } of metricsToUpdate) {
-    const existingRecord = patientRecordMap.get(targetRecordId);
-    if (!existingRecord) continue;
+    for (const { metric: m, targetRecordId } of metricsToUpdate) {
+      const existingRecord = patientRecordMap.get(targetRecordId);
+      if (!existingRecord) continue;
 
-    const originalLabel = m.originalLabel || m.label || null;
-    const parsedLabel = m.parsedLabel || m.label || m.type || existingRecord.metricName;
-    const fallbackComparable = normalizeComparableMeasurement(m.value, m.unit, m.referenceRange);
-    const explicitComparableValue =
-      m.comparableValue === '' || m.comparableValue === null || m.comparableValue === undefined
-        ? null
-        : Number(m.comparableValue);
-    const comparableValue = Number.isFinite(explicitComparableValue)
-      ? explicitComparableValue
-      : fallbackComparable.comparableValue;
-    const comparableUnit = m.comparableUnit || fallbackComparable.comparableUnit || null;
-    const comparableReferenceRange =
-      m.comparableReferenceRange || fallbackComparable.comparableReferenceRange || null;
-    const existingExtraData = parseJsonLike(existingRecord.extraData);
-    const { category: _legacyCategory, ...extraDataWithoutLegacyCategory } = existingExtraData;
-    const derivedCategory = getDerivedCategory(parsedLabel);
+      const originalLabel = m.originalLabel || m.label || null;
+      const parsedLabel = m.parsedLabel || m.label || m.type || existingRecord.metricName;
+      const fallbackComparable = normalizeComparableMeasurement(m.value, m.unit, m.referenceRange);
+      const explicitComparableValue =
+        m.comparableValue === '' || m.comparableValue === null || m.comparableValue === undefined
+          ? null
+          : Number(m.comparableValue);
+      const comparableValue = Number.isFinite(explicitComparableValue)
+        ? explicitComparableValue
+        : fallbackComparable.comparableValue;
+      const comparableUnit = m.comparableUnit || fallbackComparable.comparableUnit || null;
+      const comparableReferenceRange =
+        m.comparableReferenceRange || fallbackComparable.comparableReferenceRange || null;
+      const existingExtraData = parseJsonLike(existingRecord.extraData);
+      const { category: _legacyCategory, ...extraDataWithoutLegacyCategory } = existingExtraData;
+      const derivedCategory = getDerivedCategory(parsedLabel);
 
-    await db.update(record).set({
-      metricName: parsedLabel,
-      value: String(m.value) || 'N/A',
-      unit: m.unit || null,
-      refRange: m.referenceRange || null,
-      status: m.status || 'Review Required',
-      extraData: JSON.stringify({
-        ...extraDataWithoutLegacyCategory,
-        notes: m.notes,
-        derivedCategory,
-        originalLabel,
-        parsedLabel,
-        comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
-        comparableUnit,
-        comparableReferenceRange,
-        lastReviewedSourceDate: requestedReportDate,
-        lastReviewedSourceFacility: reportFacility || null,
-      }),
-    }).where(eq(record.id, targetRecordId));
-  }
+      await tx.update(record).set({
+        metricName: parsedLabel,
+        value: String(m.value) || 'N/A',
+        unit: m.unit || null,
+        refRange: m.referenceRange || null,
+        status: m.status || 'Review Required',
+        extraData: JSON.stringify({
+          ...extraDataWithoutLegacyCategory,
+          notes: m.notes,
+          derivedCategory,
+          originalLabel,
+          parsedLabel,
+          comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
+          comparableUnit,
+          comparableReferenceRange,
+          lastReviewedSourceDate: requestedReportDate,
+          lastReviewedSourceFacility: reportFacility || null,
+        }),
+      }).where(eq(record.id, targetRecordId));
+    }
 
-  if (targetExistingReport) {
-    const existingExtraData = parseJsonLike(targetExistingReport.extraData);
+    if (targetExistingReport) {
+      const existingExtraData = parseJsonLike(targetExistingReport.extraData);
 
-    await db.update(report).set({
-      testDate: requestedReportDate,
-      rawData: reportRawSource || targetExistingReport.rawData || null,
-      parsedJsonData: JSON.stringify(metrics),
-      extraData: JSON.stringify({
-        ...existingExtraData,
-        facilityName: reportFacility || existingExtraData.facilityName || null,
-      }),
-    }).where(eq(report.id, targetExistingReport.id));
-  }
+      await tx.update(report).set({
+        testDate: requestedReportDate,
+        rawData: reportRawSource || targetExistingReport.rawData || null,
+        parsedJsonData: JSON.stringify(metrics),
+        extraData: JSON.stringify({
+          ...existingExtraData,
+          facilityName: reportFacility || existingExtraData.facilityName || null,
+        }),
+      }).where(eq(report.id, targetExistingReport.id));
+    }
 
-  return {
-    createdCount: metricsToCreate.length,
-    updatedCount: metricsToUpdate.length,
-    targetReportId: targetExistingReport?.id || createdReport?.id || null,
-  };
+    return {
+      createdCount: metricsToCreate.length,
+      updatedCount: metricsToUpdate.length,
+      targetReportId: targetExistingReport?.id || createdReport?.id || null,
+    };
+  });
 }
