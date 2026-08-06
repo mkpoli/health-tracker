@@ -1,2 +1,91 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
+
+/* Phone behaviour the utility classes cannot express. */
+
+:root {
+  /* Notch and home-indicator insets, 0 everywhere else. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  /* Height of the bottom navigation, so scroll containers can clear it. */
+  --mobile-nav-height: 4.25rem;
+}
+
+html {
+  /* Keep iOS from resizing type when the phone is turned sideways. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* Stop the whole page rubber-banding behind fixed chrome. */
+  overscroll-behavior-y: none;
+}
+
+/* iOS zooms the viewport when a focused field is under 16px, which leaves the
+   page scaled up and half off-screen. Only the small breakpoints need it —
+   the visual size is restored by the utility classes above that width. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Touch targets: a 2 mm tap target is a native-app tell in the wrong
+   direction. Applies only where a pointer is coarse. */
+@media (pointer: coarse) {
+  button,
+  [role='button'],
+  a.tap-target {
+    min-height: 44px;
+  }
+
+  button.tap-compact {
+    min-height: 0;
+  }
+}
+
+/* Scrollable regions inside the app shell get momentum and keep their
+   overscroll to themselves. */
+.app-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Horizontal strips (tab bars, chip rows) scroll without a visible bar. */
+.scroll-x-clean {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scroll-x-clean::-webkit-scrollbar {
+  display: none;
+}
+
+/* Sheets rise from the bottom edge on a phone the way a native modal does. */
+@media (max-width: 639px) {
+  .sheet-enter {
+    animation: sheet-rise 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(6%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-enter {
+    animation: none;
+  }
+}

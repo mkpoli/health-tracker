@@ -646,5 +646,10 @@
   "guide_mistakes": "常见错误",
   "guide_rotate_hint": "拖动可旋转",
   "guide_source": "测量标准：{source}",
-  "guide_open": "该项目的测量方法"
+  "guide_open": "该项目的测量方法",
+  "more_options": "更多",
+  "tab_lab_results_short": "化验",
+  "tab_body_measurements_short": "身体",
+  "tab_vitals_short": "体征",
+  "show_more_sessions": "再显示{count}条"
 }

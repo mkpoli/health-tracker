@@ -77,11 +77,28 @@
 
   let activeTab = $state<DashboardTab>('lab');
 
-  const dashboardTabs: Array<{ id: DashboardTab; label: () => string; hint: () => string; domain?: MeasurementDomain }> = [
-    { id: 'lab', label: () => m.tab_lab_results(), hint: () => m.tab_lab_results_hint() },
-    { id: 'body', label: () => m.tab_body_measurements(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
-    { id: 'vitals', label: () => m.tab_vitals(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
+  const dashboardTabs: Array<{
+    id: DashboardTab;
+    label: () => string;
+    short: () => string;
+    hint: () => string;
+    domain?: MeasurementDomain;
+  }> = [
+    { id: 'lab', label: () => m.tab_lab_results(), short: () => m.tab_lab_results_short(), hint: () => m.tab_lab_results_hint() },
+    { id: 'body', label: () => m.tab_body_measurements(), short: () => m.tab_body_measurements_short(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
+    { id: 'vitals', label: () => m.tab_vitals(), short: () => m.tab_vitals_short(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
   ];
+
+  // Spelled out rather than composed, so Tailwind keeps the class names.
+  const tabAccent: Record<DashboardTab, { bar: string; active: string }> = {
+    lab: { bar: 'bg-teal-500', active: 'text-teal-700' },
+    body: { bar: 'bg-violet-500', active: 'text-violet-700' },
+    vitals: { bar: 'bg-rose-500', active: 'text-rose-700' },
+  };
+
+  const activeTabMeta = $derived(dashboardTabs.find((tab) => tab.id === activeTab) ?? dashboardTabs[0]);
+
+  let mobileMenuOpen = $state(false);
   let trendRefRangeOverride = $state<Record<string, string>>({});
 
   const currentLocale = $derived(getLocale());
@@ -1922,14 +1939,17 @@
     </div>
   </div>
 {:else}
-  <div class="min-h-screen bg-slate-50 font-sans text-slate-800 pb-10">
+  <div class="min-h-screen bg-slate-50 font-sans text-slate-800 pb-10 sm:pb-10" style="padding-bottom: calc(var(--mobile-nav-height) + var(--safe-bottom))">
     <!-- Top Navigation -->
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+    <header
+      class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm"
+      style="padding-top: var(--safe-top)"
+    >
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between items-center h-16">
-          <div class="flex items-center gap-3">
+        <div class="flex justify-between items-center gap-2 h-14 sm:h-16">
+          <div class="flex min-w-0 items-center gap-2 sm:gap-3">
             <div
-              class="w-9 h-9 bg-teal-600 rounded-lg flex items-center justify-center text-white shadow-sm ring-1 ring-teal-700/50"
+              class="w-9 h-9 shrink-0 bg-teal-600 rounded-lg flex items-center justify-center text-white shadow-sm ring-1 ring-teal-700/50"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1940,12 +1960,12 @@
                 class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
               >
             </div>
-            <h1 class="text-xl font-semibold tracking-tight text-slate-900">
-              {m.app_title()} <span class="text-teal-600 font-bold">{m.app_pro()}</span>
+            <h1 class="truncate text-lg sm:text-xl font-semibold tracking-tight text-slate-900">
+              {m.app_title()} <span class="hidden text-teal-600 font-bold sm:inline">{m.app_pro()}</span>
             </h1>
           </div>
 
-          <div class="flex items-center gap-3 sm:gap-4 lg:gap-6">
+          <div class="flex shrink-0 items-center gap-2 sm:gap-4 lg:gap-6">
             <a
               href="/admin"
               class="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900 sm:inline-flex"
@@ -1953,12 +1973,13 @@
               {m.admin()}
             </a>
             <!-- Patient Selector -->
-            <div class="flex items-center space-x-3">
+            <div class="flex items-center gap-2">
               <form method="GET" action="/" class="flex flex-row items-center gap-2">
                 <select
                   name="patientId"
+                  aria-label={m.patient_dashboard()}
                   onchange={(e) => e.currentTarget.form?.submit()}
-                  class="block w-full pl-3 pr-8 py-1.5 text-sm border-slate-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md bg-slate-50 font-medium"
+                  class="block w-full max-w-[9rem] sm:max-w-none truncate pl-3 pr-8 py-1.5 text-sm border-slate-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md bg-slate-50 font-medium"
                 >
                   {#if data.patients.length === 0}
                     <option disabled>{m.no_patients()}</option>
@@ -1970,7 +1991,7 @@
               </form>
               <button
                 onclick={() => (showPatientModal = true)}
-                class="flex items-center justify-center w-7 h-7 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-teal-700 border border-slate-200 transition-colors"
+                class="flex items-center justify-center w-9 h-9 shrink-0 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-teal-700 border border-slate-200 transition-colors"
                 aria-label={m.nav_add_patient()}
                 title={m.nav_add_patient()}
               >
@@ -1997,25 +2018,15 @@
             <div class="w-px h-6 bg-slate-200 hidden sm:block"></div>
 
             <button
-              class="text-slate-400 hover:text-teal-600 transition-colors pointer relative"
-              aria-label={m.notifications()}
+              type="button"
+              onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
+              aria-expanded={mobileMenuOpen}
+              aria-label={m.more_options()}
+              class="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 md:hidden"
             >
-              <span
-                class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white translate-x-1/2 -translate-y-1/2"
-              ></span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-                /></svg
-              >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
             </button>
 
             {#if data.currentPatient}
@@ -2028,12 +2039,20 @@
           </div>
         </div>
 
-        <div class="border-t border-slate-100 px-4 py-3 md:hidden sm:px-6 lg:px-8">
-          <div class="flex flex-col gap-3">
-            <LanguageSwitcher />
-            <AuthStatus user={data.session?.user} compact={true} />
+        {#if mobileMenuOpen}
+          <div class="border-t border-slate-100 py-3 md:hidden">
+            <div class="flex flex-col gap-3">
+              <LanguageSwitcher />
+              <AuthStatus user={data.session?.user} compact={true} />
+              <a
+                href="/admin"
+                class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center text-sm font-medium text-slate-600"
+              >
+                {m.admin()}
+              </a>
+            </div>
           </div>
-        </div>
+        {/if}
       </div>
     </header>
 
@@ -2049,7 +2068,7 @@
       <DangerZoneModal patient={data.currentPatient} reports={data.reports} records={data.records} onClose={() => (showDeleteModal = false)} />
     {/if}
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
       <form
         id="edit-form"
         method="POST"
@@ -2511,7 +2530,7 @@
           </div>
         </div>
       {:else}
-        <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div class="mb-6 sm:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h2 class="text-2xl font-bold text-slate-900 tracking-tight">
               {m.patient_dashboard()} <span class="text-slate-400 font-light mx-2">|</span>
@@ -2519,10 +2538,10 @@
             </h2>
             <p class="text-slate-500 mt-1">{m.dashboard_subtitle()}</p>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onclick={() => (showDeleteModal = true)}
-              class="flex items-center gap-2 bg-white border border-rose-200 text-rose-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
+              class="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap bg-white border border-rose-200 text-rose-600 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -2542,7 +2561,7 @@
             <button
               type="button"
               onclick={exportPatientData}
-              class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+              class="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap bg-white border border-slate-300 text-slate-700 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -2562,7 +2581,7 @@
             <button
               type="button"
               onclick={() => (showImportModal = true)}
-              class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+              class="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap bg-white border border-slate-300 text-slate-700 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -2582,7 +2601,7 @@
           </div>
         </div>
 
-        <nav aria-label={m.dashboard_sections()} class="mt-6 border-b border-slate-200">
+        <nav aria-label={m.dashboard_sections()} class="mt-6 hidden border-b border-slate-200 sm:block">
           <div class="flex flex-wrap gap-1">
             {#each dashboardTabs as tab (tab.id)}
               <button
@@ -2601,17 +2620,20 @@
                 <span class="mt-0.5 block text-xs text-slate-400">{tab.hint()}</span>
                 <span
                   class="absolute inset-x-0 -bottom-px h-0.5 rounded-full {activeTab === tab.id
-                    ? tab.id === 'lab'
-                      ? 'bg-teal-500'
-                      : tab.id === 'body'
-                        ? 'bg-violet-500'
-                        : 'bg-rose-500'
+                    ? tabAccent[tab.id].bar
                     : 'bg-transparent'}"
                 ></span>
               </button>
             {/each}
           </div>
         </nav>
+
+        <!-- On a phone the section title is enough; switching happens in the
+             bottom bar, where a thumb already is. -->
+        <div class="mt-4 flex items-baseline gap-2 sm:hidden">
+          <h3 class="text-lg font-semibold tracking-tight text-slate-900">{activeTabMeta.label()}</h3>
+          <p class="truncate text-xs text-slate-400">{activeTabMeta.hint()}</p>
+        </div>
 
         <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6" hidden={activeTab !== 'lab'}>
           <div class="xl:col-span-1 border-slate-200">
@@ -3772,5 +3794,45 @@
         {/each}
       {/if}
     </main>
+
+    {#if data.currentPatient}
+      <!-- Section switching lives within thumb reach on a phone. -->
+      <nav
+        aria-label={m.dashboard_sections()}
+        class="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur sm:hidden"
+        style="padding-bottom: var(--safe-bottom)"
+      >
+        <div class="mx-auto flex max-w-lg">
+          {#each dashboardTabs as tab (tab.id)}
+            <button
+              type="button"
+              onclick={() => (activeTab = tab.id)}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              class="flex flex-1 flex-col items-center gap-1 px-1 py-2.5 text-[11px] font-medium transition-colors {activeTab ===
+              tab.id
+                ? tabAccent[tab.id].active
+                : 'text-slate-400'}"
+            >
+              <span class="flex h-6 w-6 items-center justify-center">
+                {#if tab.id === 'lab'}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 3.75v6.31a3 3 0 01-.44 1.56l-4.06 6.6A2.25 2.25 0 006.42 21.6h11.16a2.25 2.25 0 001.92-3.38l-4.06-6.6a3 3 0 01-.44-1.56V3.75M8.25 3.75h7.5" />
+                  </svg>
+                {:else if tab.id === 'body'}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6a2.25 2.25 0 100-4.5A2.25 2.25 0 0012 6zM8.25 9h7.5M9 9v4.5L7.5 22.5M15 9v4.5l1.5 9M9 13.5h6" />
+                  </svg>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h3l2.25-6 3.75 12 2.25-6h5.25" />
+                  </svg>
+                {/if}
+              </span>
+              {tab.short()}
+            </button>
+          {/each}
+        </div>
+      </nav>
+    {/if}
   </div>
 {/if}

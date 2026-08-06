@@ -194,10 +194,14 @@
 
   function positionBand(current: string) {
     if (!band || !ruler) return;
+
+    // 'none' is for measurements taken off a device rather than at a place on
+    // the body — weight has neither a tape position nor a height to mark.
     const showRuler = current === 'height';
+    const showBand = current !== 'height' && current !== 'none';
     ruler.visible = showRuler;
-    band.visible = !showRuler;
-    if (showRuler) return;
+    band.visible = showBand;
+    if (!showBand) return;
 
     const y = SITE_Y[current] ?? SITE_Y.waist;
     let x = 0;

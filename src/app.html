@@ -4,10 +4,18 @@
 	<head>
 		<meta charset="utf-8" />
 
+		<!-- viewport-fit=cover lets the layout reach under the notch and home
+		     indicator, which the safe-area padding in layout.css then respects. -->
 		<meta
 			name="viewport"
-			content="width=device-width, initial-scale=1"
+			content="width=device-width, initial-scale=1, viewport-fit=cover"
 		/>
+
+		<meta name="theme-color" content="#0f766e" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<link rel="manifest" href="/manifest.webmanifest" />
 
 		%sveltekit.head%
 	</head>

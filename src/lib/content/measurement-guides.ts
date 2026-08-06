@@ -87,7 +87,7 @@ export const MEASUREMENT_GUIDES: Record<string, GuideByLocale> = {
     },
   }),
 
-  'body-weight': guide('height', 'NHANES Anthropometry Procedures Manual', {
+  'body-weight': guide('none', 'NHANES Anthropometry Procedures Manual', {
     en: {
       steps: [
         'Put the scale on a hard, level floor — not carpet.',
@@ -407,7 +407,7 @@ export const MEASUREMENT_GUIDES: Record<string, GuideByLocale> = {
     },
   }),
 
-  'systolic-blood-pressure': guide('height', 'AHA Recommendations for Blood Pressure Measurement (Hypertension 2005)', {
+  'systolic-blood-pressure': guide('upper-arm', 'AHA Recommendations for Blood Pressure Measurement (Hypertension 2005)', {
     en: {
       steps: [
         'Sit quietly for five minutes first, back supported, legs uncrossed, feet flat on the floor.',

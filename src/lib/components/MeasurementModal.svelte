@@ -353,14 +353,14 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div
-  class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm sm:p-8"
+  class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm sm:items-start sm:p-8"
   role="presentation"
   onclick={(event) => {
     if (event.target === event.currentTarget) requestClose();
   }}
 >
   <div
-    class="my-auto w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10"
+    class="sheet-enter app-scroll flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:my-auto sm:max-h-none sm:rounded-2xl"
     role="dialog"
     aria-modal="true"
     aria-label={sessionId ? m.edit_measurement_session() : m.new_measurement_session()}
@@ -399,7 +399,7 @@
       <input type="hidden" name="measuredAt" value={measuredAtInstant} />
       <input type="hidden" name="entries" value={JSON.stringify(payload)} />
 
-      <header class="border-b border-slate-100 bg-slate-50/70 px-6 py-5">
+      <header class="shrink-0 border-b border-slate-100 bg-slate-50/70 px-4 py-4 sm:px-6 sm:py-5">
         <div class="flex items-start justify-between gap-4">
           <div>
             <h2 class="text-xl font-semibold tracking-tight text-slate-900">
@@ -444,7 +444,7 @@
         </div>
       </header>
 
-      <div class="flex flex-wrap items-center gap-3 border-b border-slate-100 px-6 py-3">
+      <div class="shrink-0 flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3 sm:gap-3 sm:px-6">
         <div class="relative min-w-56 flex-1">
           <input
             type="search"
@@ -490,11 +490,11 @@
         </span>
       </div>
 
-      <div class="max-h-[52vh] overflow-y-auto px-6 py-5">
+      <div class="app-scroll flex-1 overflow-y-auto px-4 py-5 sm:max-h-[52vh] sm:px-6">
         {#each groupedFields as group (group.key)}
           <section class="mb-7 last:mb-0">
             <h3 class="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{group.label}</h3>
-            <div class="grid gap-3 md:grid-cols-2">
+            <div class="grid gap-3 sm:grid-cols-2">
               {#each group.fields as field (field.key)}
                 <div class="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300">
                   <div class="flex items-start justify-between gap-2">
@@ -669,7 +669,7 @@
         </div>
       {/if}
 
-      <footer class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+      <footer class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-6 sm:py-4" style="padding-bottom: calc(0.75rem + var(--safe-bottom))">
         {#if saveError}
           <p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700" role="alert">
             {saveError}

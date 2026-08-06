@@ -138,19 +138,19 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div
-  class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm sm:p-8"
+  class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm sm:items-start sm:p-8"
   role="presentation"
   onclick={(event) => {
     if (event.target === event.currentTarget && stage !== 'importing') onClose();
   }}
 >
   <div
-    class="my-auto w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10"
+    class="sheet-enter app-scroll flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:my-auto sm:max-h-none sm:rounded-2xl"
     role="dialog"
     aria-modal="true"
     aria-label={m.import_data()}
   >
-    <header class="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-6 py-5">
+    <header class="shrink-0 flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-4 py-4 sm:px-6 sm:py-5">
       <div>
         <h2 class="text-xl font-semibold tracking-tight text-slate-900">{m.import_data()}</h2>
         <p class="mt-1 text-sm text-slate-500">{m.import_subtitle()}</p>
@@ -169,7 +169,7 @@
       {/if}
     </header>
 
-    <div class="px-6 py-5">
+    <div class="app-scroll flex-1 overflow-y-auto px-4 py-5 sm:px-6">
       {#if stage === 'choose'}
         <ol class="mb-5 space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
           <li>1. {m.import_apple_step_1()}</li>
@@ -291,7 +291,7 @@
       {/if}
     </div>
 
-    <footer class="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+    <footer class="shrink-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-6 sm:py-4" style="padding-bottom: calc(0.75rem + var(--safe-bottom))">
       {#if stage === 'review'}
         <button
           type="button"

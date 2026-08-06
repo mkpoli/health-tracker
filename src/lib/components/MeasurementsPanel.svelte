@@ -44,6 +44,10 @@
   } = $props();
 
   let modalOpen = $state(false);
+  // Years of imported history would otherwise render as one endless page,
+  // which on a phone is thousands of pixels of scrolling to reach anything.
+  const HISTORY_PAGE = 10;
+  let historyShown = $state(HISTORY_PAGE);
   let editingSessionId = $state<string | null>(null);
   let expandedSessionIds = $state<string[]>([]);
 
@@ -123,6 +127,9 @@
 
     return items.sort((a, b) => a.groupRank - b.groupRank || a.label.localeCompare(b.label));
   });
+
+  const visibleSessions = $derived(orderedSessions.slice(0, historyShown));
+  const remainingSessions = $derived(Math.max(orderedSessions.length - visibleSessions.length, 0));
 
   const editingSession = $derived(orderedSessions.find((session) => session.id === editingSessionId) || null);
 
@@ -271,7 +278,7 @@
 </script>
 
 <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-  <div class="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/50 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+  <div class="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
     <div class="flex items-center">
       <div class="mr-3 h-6 w-1.5 rounded-full {accentBar}"></div>
       <div>
@@ -311,7 +318,7 @@
       <p class="mt-1 text-xs">{domain.emptyHint()}</p>
     </div>
   {:else}
-    <div class="border-b border-slate-100 px-6 py-5 {accentWash}">
+    <div class="border-b border-slate-100 px-4 py-5 sm:px-6 {accentWash}">
       <p class="text-xs font-semibold uppercase tracking-[0.22em] {accentLabel}">{m.latest_measurements()}</p>
 
       <div class="mt-3 flex flex-col gap-5 xl:flex-row xl:items-start">
@@ -361,11 +368,11 @@
     </div>
 
     <div>
-      <p class="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">{m.measurement_history()}</p>
-      {#each orderedSessions as session (session.id)}
+      <p class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 sm:px-6">{m.measurement_history()}</p>
+      {#each visibleSessions as session (session.id)}
         {@const sessionDerived = derivedBySession.get(session.id) || []}
         <section id={`measurement-session-${session.id}`} class="border-t border-slate-100">
-          <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
             <button
               type="button"
               onclick={() => toggleSession(session.id)}
@@ -427,7 +434,7 @@
           </div>
 
           {#if isExpanded(session.id)}
-            <div class="px-6 pb-5">
+            <div class="px-4 pb-5 sm:px-6">
               <div class="overflow-hidden rounded-xl border border-slate-200">
                 <table class="min-w-full divide-y divide-slate-200">
                   <thead class="bg-slate-50/70">
@@ -472,6 +479,18 @@
           {/if}
         </section>
       {/each}
+
+      {#if remainingSessions > 0}
+        <div class="border-t border-slate-100 px-4 py-4 sm:px-6">
+          <button
+            type="button"
+            onclick={() => (historyShown += 25)}
+            class="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+          >
+            {m.show_more_sessions({ count: remainingSessions })}
+          </button>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

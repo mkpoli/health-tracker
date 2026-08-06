@@ -646,5 +646,10 @@
   "guide_mistakes": "よくある誤り",
   "guide_rotate_hint": "ドラッグで回転",
   "guide_source": "測定基準: {source}",
-  "guide_open": "この項目の測り方"
+  "guide_open": "この項目の測り方",
+  "more_options": "メニュー",
+  "tab_lab_results_short": "検査",
+  "tab_body_measurements_short": "身体",
+  "tab_vitals_short": "バイタル",
+  "show_more_sessions": "さらに{count}件を表示"
 }

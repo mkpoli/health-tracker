@@ -646,5 +646,10 @@
   "guide_mistakes": "Common mistakes",
   "guide_rotate_hint": "Drag to rotate",
   "guide_source": "Protocol: {source}",
-  "guide_open": "How to measure this"
+  "guide_open": "How to measure this",
+  "more_options": "More",
+  "tab_lab_results_short": "Lab",
+  "tab_body_measurements_short": "Body",
+  "tab_vitals_short": "Vitals",
+  "show_more_sessions": "Show {count} more"
 }
