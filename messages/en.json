@@ -651,5 +651,7 @@
   "tab_lab_results_short": "Lab",
   "tab_body_measurements_short": "Body",
   "tab_vitals_short": "Vitals",
-  "show_more_sessions": "Show {count} more"
+  "show_more_sessions": "Show {count} more",
+  "or_drop_file_here": "or drop the file here",
+  "file_type_not_accepted": "That file type is not accepted here. Expecting {types}."
 }

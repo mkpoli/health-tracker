@@ -33,6 +33,7 @@
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
   import MeasurementsPanel from '$lib/components/MeasurementsPanel.svelte';
   import ImportModal from '$lib/components/ImportModal.svelte';
+  import FileDropZone from '$lib/components/FileDropZone.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
@@ -51,7 +52,7 @@
   let extractFile: File | null = $state(null);
   let homepageExtractFile: File | null = $state(null);
   let homepageExtractSubmitting = $state(false);
-  let homepageExtractInput: HTMLInputElement = $state() as HTMLInputElement;
+  let homepageExtractInput = $state<HTMLInputElement | null>(null);
   let smartUploadActive = $state(true);
 
   let showPatientModal = $state(false);
@@ -1453,7 +1454,20 @@
   let isDragging = $state(false);
   let dragCounter = $state(0);
 
+  // A drop belongs to whichever uploader it landed on. The page only catches
+  // files dropped on open space, and only when no dialog is up — otherwise an
+  // Apple Health export dropped on the import sheet ended up in the lab
+  // report uploader behind it.
+  function dropBelongsElsewhere(e: DragEvent) {
+    if (typeof document !== 'undefined' && document.querySelector('[role="dialog"]')) return true;
+
+    const target = e.target as Element | null;
+    return Boolean(target?.closest?.('[data-dropzone]'));
+  }
+
   function handleGlobalDragEnter(e: DragEvent) {
+    if (dropBelongsElsewhere(e)) return;
+
     if (e.dataTransfer?.types.includes('Files')) {
       e.preventDefault();
       dragCounter++;
@@ -1474,15 +1488,26 @@
   }
 
   function handleGlobalDrop(e: DragEvent) {
+    if (dropBelongsElsewhere(e)) return;
+
     e.preventDefault();
     dragCounter = 0;
     isDragging = false;
 
     if (e.dataTransfer?.files?.length && data.currentPatient) {
       const file = e.dataTransfer.files[0];
+
+      // Only a report belongs in the extractor. An Apple Health export dropped
+      // on the page opens the importer instead of being read as a document.
+      if (/\.(zip|xml)$/i.test(file.name)) {
+        showImportModal = true;
+        return;
+      }
+
       extractFile = file;
       setHomepageExtractFile(file, e.dataTransfer.files);
       smartUploadActive = true;
+      activeTab = 'lab';
     }
   }
 </script>
@@ -2768,40 +2793,16 @@
                   >
                     <div>
                       <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
-                      <label
-                        class="mt-1 flex cursor-pointer justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 pb-6 pt-5 transition-colors hover:border-teal-500"
-                      >
-                        <div class="space-y-1 text-center">
-                          <svg
-                            class="mx-auto h-12 w-12 text-slate-400"
-                            stroke="currentColor"
-                            fill="none"
-                            viewBox="0 0 48 48"
-                            aria-hidden="true"
-                            ><path
-                              d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            ></path></svg
-                          >
-                          <div class="text-sm font-medium text-teal-600">{m.upload_file()}</div>
-                          <p class="text-xs text-slate-500">{m.file_size_hint()}</p>
-                        </div>
-                        <input
-                          bind:this={homepageExtractInput}
-                          name="file"
-                          type="file"
-                          accept="image/*,application/pdf"
-                          class="sr-only"
-                          onchange={handleHomepageExtractFileChange}
-                        />
-                      </label>
-                      {#if homepageExtractFile}
-                        <p class="mt-2 text-sm font-medium text-teal-600">
-                          {m.selected_file({ name: homepageExtractFile.name })}
-                        </p>
-                      {/if}
+                      <FileDropZone
+                        name="file"
+                        accept="image/*,application/pdf"
+                        extensions={['.png', '.jpg', '.jpeg', '.webp', '.heic', '.gif', '.pdf']}
+                        bind:inputRef={homepageExtractInput}
+                        selectedFile={homepageExtractFile}
+                        title={m.upload_file()}
+                        hint={m.file_size_hint()}
+                        onSelect={(file, list) => setHomepageExtractFile(file, list)}
+                      />
                     </div>
                     <div>
                       <label for="homepage-extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5"

@@ -4,6 +4,7 @@
   import { readAppleHealthFile, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
   import { getMetricDefinitionByKey } from '$lib/metrics/catalog';
   import { getDefinitionLabel } from '$lib/metrics/labels';
+  import FileDropZone from './FileDropZone.svelte';
 
   let { patientId, onClose }: { patientId: string; onClose: () => void } = $props();
 
@@ -55,11 +56,7 @@
     return new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
   }
 
-  async function handleFile(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
+  async function readFile(file: File) {
     fileName = file.name;
     errorMessage = '';
     progress = 0;
@@ -177,27 +174,13 @@
           <li>3. {m.import_apple_step_3()}</li>
         </ol>
 
-        <label
-          class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-6 py-10 text-center transition-colors hover:border-teal-500"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-            class="mb-2 h-10 w-10 text-slate-400"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M12 16.5V9.75m0 0l-3 3m3-3l3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
-            />
-          </svg>
-          <span class="text-sm font-semibold text-teal-700">{m.import_choose_file()}</span>
-          <span class="mt-1 text-xs text-slate-500">{m.import_file_hint()}</span>
-          <input type="file" accept=".zip,.xml" class="sr-only" onchange={handleFile} />
-        </label>
+        <FileDropZone
+          accept=".zip,.xml"
+          extensions={['.zip', '.xml']}
+          title={m.import_choose_file()}
+          hint={m.import_file_hint()}
+          onSelect={(file) => readFile(file)}
+        />
 
         {#if errorMessage}
           <p class="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">

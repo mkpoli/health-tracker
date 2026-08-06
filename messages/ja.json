@@ -651,5 +651,7 @@
   "tab_lab_results_short": "検査",
   "tab_body_measurements_short": "身体",
   "tab_vitals_short": "バイタル",
-  "show_more_sessions": "さらに{count}件を表示"
+  "show_more_sessions": "さらに{count}件を表示",
+  "or_drop_file_here": "またはここにファイルをドロップ",
+  "file_type_not_accepted": "この場所では扱えない形式です。{types}を選んでください。"
 }

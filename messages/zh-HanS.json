@@ -651,5 +651,7 @@
   "tab_lab_results_short": "化验",
   "tab_body_measurements_short": "身体",
   "tab_vitals_short": "体征",
-  "show_more_sessions": "再显示{count}条"
+  "show_more_sessions": "再显示{count}条",
+  "or_drop_file_here": "或将文件拖放到此处",
+  "file_type_not_accepted": "此处不支持该文件类型，请选择{types}。"
 }
