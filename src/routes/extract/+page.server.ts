@@ -1,11 +1,12 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq, desc, ne } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { patient, report, record } from '$lib/server/db/schema';
+import { patient, report } from '$lib/server/db/schema';
 import { buildRawReportSource, extractMedicalData } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
-import { getOwnedPatient, getOwnedReport, requireUserId } from '$lib/server/ownership';
+import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
+import { BODY_REPORT_KIND } from '$lib/report-kind';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
   const userId = requireUserId(locals);
@@ -21,13 +22,14 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     throw redirect(303, '/');
   }
 
-  const reports = await db.select().from(report).where(eq(report.patientId, selectedPatient.id)).orderBy(desc(report.testDate));
-  const records = await db.select().from(record).where(eq(record.patientId, selectedPatient.id)).orderBy(desc(record.id));
-
+  const reports = await db
+    .select()
+    .from(report)
+    .where(and(eq(report.patientId, selectedPatient.id), ne(report.kind, BODY_REPORT_KIND)))
+    .orderBy(desc(report.testDate));
   return {
     currentPatient: selectedPatient,
     reports,
-    records,
   };
 };
 
@@ -82,7 +84,7 @@ export const actions: Actions = {
     const targetReportId = data.get('targetReportId')?.toString();
 
     if (targetReportId) {
-      const ownedReport = await getOwnedReport(userId, targetReportId);
+      const ownedReport = await getOwnedLabReport(userId, targetReportId);
       if (!ownedReport || ownedReport.patientId !== ownedPatient.id) {
         return fail(404, { error: 'Report not found' });
       }

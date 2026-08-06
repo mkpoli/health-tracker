@@ -22,6 +22,8 @@ export const report = sqliteTable('report', {
 	patientId: text('patient_id')
 		.notNull()
 		.references(() => patient.id, { onDelete: 'cascade' }),
+	// 'lab' for a clinical report, 'body' for a hand-logged body measurement session
+	kind: text('kind').notNull().default('lab'),
 	testDate: text('test_date').notNull(),
 	reportTime: text('report_time'),
 	rawData: text('raw_data'), // base64, URL, or raw text

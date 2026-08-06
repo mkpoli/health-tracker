@@ -1,8 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { record, report } from '$lib/server/db/schema';
 import { getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
+import { BODY_REPORT_KIND } from '$lib/report-kind';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -71,10 +72,17 @@ export async function saveReviewedReport(input: {
   // KEY constraint and 500-ing the save. A transaction also prevents partial
   // writes (e.g. an orphaned report with no records) when a later step fails.
   return db.transaction(async (tx) => {
-    const patientRecords = await tx.select().from(record).where(eq(record.patientId, patientId));
-    const patientRecordMap = new Map(patientRecords.map((item) => [item.id, item]));
-    const patientReports = await tx.select().from(report).where(eq(report.patientId, patientId));
+    // Clinical reports only, so neither the fallback record matching below nor
+    // the target lookup can reach a body measurement session.
+    const patientReports = await tx
+      .select()
+      .from(report)
+      .where(and(eq(report.patientId, patientId), ne(report.kind, BODY_REPORT_KIND)));
     const patientReportMap = new Map(patientReports.map((item) => [item.id, item]));
+
+    const allRecords = await tx.select().from(record).where(eq(record.patientId, patientId));
+    const patientRecords = allRecords.filter((item) => patientReportMap.has(item.reportId));
+    const patientRecordMap = new Map(patientRecords.map((item) => [item.id, item]));
 
     if (Array.isArray(deletedRecordIds) && deletedRecordIds.length > 0) {
       for (const recordId of deletedRecordIds) {

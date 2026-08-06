@@ -1,20 +1,36 @@
+import { bodyMetricDefinitions } from './body';
+
 export type MetricDefinition = {
   key: string;
   canonicalLabel: string;
-  testType?: 'blood' | 'urine' | 'other';
+  testType?: 'blood' | 'urine' | 'body' | 'other';
   categories?: string[];
   aliases?: string[];
   wikidataId?: string;
   custom?: boolean;
+  /** Default unit offered when the value is entered by hand. */
+  unit?: string | null;
+  /** Alternative units the same measurement is commonly reported in. */
+  unitOptions?: string[];
+  /** Numeric step for hand-entered values. */
+  step?: number;
+  /** Set on the left/right variant of a limb measurement. */
+  sideOf?: { baseKey: string; side: 'left' | 'right' };
   calculation?: {
     dependencies: string[];
+    /**
+     * Dependencies that may be taken from the most recent earlier entry when
+     * the current one does not repeat them — height, for instance, is measured
+     * once and stays valid for every later weigh-in.
+     */
+    carryForward?: string[];
     compute: (inputs: Record<string, number>) => number | null;
     unit?: string | null;
     precision?: number;
   };
 };
 
-const metricCatalog: MetricDefinition[] = [
+const labMetricCatalog: MetricDefinition[] = [
   { key: 'triglycerides', canonicalLabel: 'Triglycerides', testType: 'blood', categories: ['fat', 'metabolism'], aliases: ['triglyceride', 'tg', '中性脂肪', 'tg 中性脂肪'] },
   { key: 'acth', canonicalLabel: 'ACTH', testType: 'blood', categories: ['hormone', 'endocrine'], aliases: ['acth'] },
   { key: 'ckd-stage', canonicalLabel: 'CKD Stage', testType: 'other', categories: ['kidney', 'renal'], aliases: ['ckd stage', 'ckdステージ'] },
@@ -119,6 +135,8 @@ const metricCatalog: MetricDefinition[] = [
   },
 ];
 
+const metricCatalog: MetricDefinition[] = [...labMetricCatalog, ...bodyMetricDefinitions];
+
 function normalizeMetricKey(value: string) {
   return value
     .toLowerCase()
@@ -143,7 +161,15 @@ for (const definition of metricCatalog) {
   }
 }
 
-export const metricSuggestions = metricCatalog.map((definition) => definition.canonicalLabel);
+// Lab-side suggestion list: the body catalog has its own logging form, and its
+// ~75 labels would bury the lab metrics in this datalist.
+export const metricSuggestions = labMetricCatalog.map((definition) => definition.canonicalLabel);
+
+const definitionsByKey = new Map(metricCatalog.map((definition) => [definition.key, definition]));
+
+export function getMetricDefinitionByKey(key: string): MetricDefinition | null {
+  return definitionsByKey.get(key) || null;
+}
 
 export function getMetricDefinition(label?: string | null): MetricDefinition {
   const rawLabel = label?.trim();

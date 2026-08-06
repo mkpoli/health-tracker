@@ -5,7 +5,7 @@ export type ComparableMeasurement = {
   multiplier: number;
 };
 
-function parseNumber(value?: string | number | null) {
+export function parseNumber(value?: string | number | null) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : null;
   }
@@ -44,8 +44,14 @@ function getUnitScale(unit?: string | null) {
     return { multiplier: 1, comparableUnit: unit?.trim() || null };
   }
 
+  // Cross-family conversions, as opposed to the ×10ⁿ magnitude handling below.
+  // Body measurements are entered in whichever unit the scale or tape reports,
+  // so mass and length have to reach a single comparable unit before anything
+  // trends them or feeds them to BMI and the other derived indices.
   const directConversions: Array<{ pattern: RegExp; multiplier: number; comparableUnit: string }> = [
     { pattern: /^ng\/mL$/i, multiplier: 100, comparableUnit: 'ng/dL' },
+    { pattern: /^lbs?$/i, multiplier: 0.45359237, comparableUnit: 'kg' },
+    { pattern: /^(in|inch|inches)$/i, multiplier: 2.54, comparableUnit: 'cm' },
   ];
 
   for (const conversion of directConversions) {

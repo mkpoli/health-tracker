@@ -5,7 +5,14 @@ import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
 import { saveReviewedReport } from '$lib/server/report-review';
-import { getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
+import {
+  deleteBodyMeasurementSession,
+  InvalidMeasurementsError,
+  parseMeasuredAt,
+  saveBodyMeasurementSession,
+} from '$lib/server/body-measurements';
+import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -166,7 +173,7 @@ export const actions: Actions = {
     if (!ownedPatient) return fail(404, { error: 'Patient not found' });
 
     if (targetReportId) {
-      const ownedReport = await getOwnedReport(userId, targetReportId);
+      const ownedReport = await getOwnedLabReport(userId, targetReportId);
       if (!ownedReport || ownedReport.patientId !== ownedPatient.id) {
         return fail(404, { error: 'Report not found' });
       }
@@ -230,7 +237,7 @@ export const actions: Actions = {
 
     if (!id || !testDate) return fail(400, { error: 'Missing required fields' });
 
-    const current = await getOwnedReport(userId, id);
+    const current = await getOwnedLabReport(userId, id);
 
     if (!current) return fail(404, { error: 'Report not found' });
 
@@ -296,6 +303,89 @@ export const actions: Actions = {
     if (!current) return fail(404, { error: 'Record not found' });
 
     await db.delete(record).where(eq(record.id, id));
+
+    return { success: true };
+  },
+
+  saveBodyMeasurement: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const entriesStr = data.get('entries')?.toString();
+
+    if (!patientId || !entriesStr) return fail(400, { error: 'Missing required fields' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
+
+    let entries: unknown;
+
+    try {
+      entries = JSON.parse(entriesStr);
+    } catch {
+      return fail(400, { code: 'invalid_entries' });
+    }
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return fail(400, { code: 'invalid_entries' });
+    }
+
+    const measuredAt = parseMeasuredAt(data.get('measuredAt')?.toString());
+
+    if (!measuredAt) {
+      return fail(400, { code: 'invalid_date' });
+    }
+
+    const sessionId = data.get('sessionId')?.toString() || null;
+
+    if (sessionId) {
+      const ownedSession = await getOwnedReport(userId, sessionId);
+
+      // Without the kind check a lab report id passed here would have its date
+      // and notes rewritten and every record not named in this payload deleted.
+      if (
+        !ownedSession ||
+        ownedSession.patientId !== ownedPatient.id ||
+        ownedSession.kind !== BODY_REPORT_KIND
+      ) {
+        return fail(404, { error: 'Measurement session not found' });
+      }
+    }
+
+    try {
+      const result = await saveBodyMeasurementSession({
+        patientId: ownedPatient.id,
+        sessionId,
+        measuredAt,
+        notes: data.get('notes')?.toString(),
+        entries,
+      });
+
+      return { success: true, ...result };
+    } catch (error) {
+      if (error instanceof InvalidMeasurementsError) {
+        return fail(400, { code: 'invalid_entries' });
+      }
+
+      throw error;
+    }
+  },
+
+  deleteBodyMeasurement: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const sessionId = data.get('sessionId')?.toString();
+
+    if (!sessionId) return fail(400, { error: 'Missing ID' });
+
+    const ownedSession = await getOwnedReport(userId, sessionId);
+
+    if (!ownedSession) return fail(404, { error: 'Measurement session not found' });
+
+    const deleted = await deleteBodyMeasurementSession(ownedSession.patientId, ownedSession.id);
+
+    if (!deleted) return fail(404, { error: 'Measurement session not found' });
 
     return { success: true };
   },

@@ -13,17 +13,24 @@
   import WikipediaIcon from '~icons/simple-icons/wikipedia';
   import WikidataIcon from '~icons/simple-icons/wikidata';
   import {
-    getCalculatedMetricDefinitions,
     getMetricDefinition,
-    getMetricMessageKey,
     getMetricTags,
     getMetricWikipediaFallbackUrl,
     getMetricWikipediaUrl,
     getMetricWikidataUrl,
     metricSuggestions,
   } from '$lib/metrics/catalog';
+  import {
+    getCategoryLabel,
+    getMetricDescription,
+    getMetricLabel,
+    getTestTypeLabel,
+  } from '$lib/metrics/labels';
+  import { computeDerivedMetrics } from '$lib/metrics/derived';
+  import { isBodyReport } from '$lib/report-kind';
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
+  import BodyMeasurementsPanel from '$lib/components/BodyMeasurementsPanel.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
@@ -61,6 +68,7 @@
   let trendComboboxContainer = $state<HTMLDivElement | null>(null);
   let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
   let trendUnitDisplay = $state<Record<string, string>>({});
+  let focusedBodySessionId = $state<string | null>(null);
   let trendRefRangeOverride = $state<Record<string, string>>({});
 
   const currentLocale = $derived(getLocale());
@@ -139,10 +147,50 @@
 
   const recordLookup = $derived(Object.fromEntries(data.records.map((record) => [record.id, record])));
 
+  // Comparable value of every record, indexed by report and catalog key. Feeds
+  // both the trend series and the metrics that are calculated from others.
+  const reportMetricValues = $derived.by(() => {
+    const byReport = new Map<string, Map<string, number>>();
+
+    for (const item of data.records) {
+      const numericValue = getRecordComparableValue(item);
+      if (numericValue === null) continue;
+
+      const values = byReport.get(item.reportId) || new Map<string, number>();
+      values.set(getMetricDefinition(item.metricName).key, numericValue);
+      byReport.set(item.reportId, values);
+    }
+
+    return byReport;
+  });
+
+  const derivedMetrics = $derived(computeDerivedMetrics(data.reports, reportMetricValues));
+
+  // Clinical reports and body measurement sessions share the report table, so
+  // the dashboard lists split them apart. Trends deliberately keep both.
+  const labReports = $derived(data.reports.filter((report) => !isBodyReport(report)));
+
+  const bodyReports = $derived(data.reports.filter((report) => isBodyReport(report)));
+
+  const bodyReportIds = $derived(new Set(bodyReports.map((report) => report.id)));
+
+  const labRecords = $derived(data.records.filter((record) => !bodyReportIds.has(record.reportId)));
+
+  const bodySessions = $derived(
+    bodyReports.map((report) => ({
+      id: report.id,
+      measuredAt: report.testDate,
+      notes: getReportNotes(report),
+      records: data.records.filter((record) => record.reportId === report.id),
+    })),
+  );
+
+  const bodyDerivedMetrics = $derived(derivedMetrics.filter((point) => bodyReportIds.has(point.reportId)));
+
   const reportCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
 
-    for (const item of data.records) {
+    for (const item of labRecords) {
       counts[item.reportId] = (counts[item.reportId] || 0) + 1;
     }
 
@@ -170,18 +218,17 @@
   });
 
   const groupedReports = $derived.by(() =>
-    data.reports.map((report) => ({
+    labReports.map((report) => ({
       report,
       title: getReportTitle(report),
       facilityName: reportFacilities[report.id],
       notes: reportNotes[report.id],
-      records: data.records.filter((record) => record.reportId === report.id),
+      records: labRecords.filter((record) => record.reportId === report.id),
     })),
   );
 
   const trendMetrics = $derived.by(() => {
     const grouped = new Map<string, TrendPoint[]>();
-    const reportMetricValues = new Map<string, Map<string, { point: TrendPoint; value: number }>>();
 
     for (const item of data.records) {
       const numericValue = getRecordComparableValue(item);
@@ -191,7 +238,7 @@
       const report = reportLookup[item.reportId];
       const point: TrendPoint = {
         id: item.id,
-        metricName: item.metricName,
+        metricName: getMetricDefinition(item.metricName).canonicalLabel,
         value: numericValue,
         rawValue: item.value,
         unit: getRecordComparableUnit(item),
@@ -206,65 +253,36 @@
         calculated: false,
       };
 
-      const existing = grouped.get(item.metricName) || [];
+      // Keyed on the catalog label, so a value recorded as "Weight" by the lab
+      // extractor and one logged as "Body Weight" stay a single series.
+      const seriesName = getMetricDefinition(item.metricName).canonicalLabel;
+      const existing = grouped.get(seriesName) || [];
       existing.push(point);
-      grouped.set(item.metricName, existing);
-
-      const definition = getMetricDefinition(item.metricName);
-      const reportValues = reportMetricValues.get(item.reportId) || new Map();
-      reportValues.set(definition.key, { point, value: numericValue });
-      reportMetricValues.set(item.reportId, reportValues);
+      grouped.set(seriesName, existing);
     }
 
-    for (const calculatedDefinition of getCalculatedMetricDefinitions()) {
-      const calculation = calculatedDefinition.calculation;
-      if (!calculation) continue;
+    for (const point of derivedMetrics) {
+      const report = reportLookup[point.reportId];
+      const calculatedPoint: TrendPoint = {
+        id: `calculated:${point.reportId}:${point.definition.key}`,
+        metricName: point.definition.canonicalLabel,
+        value: point.value,
+        rawValue: point.value.toFixed(point.precision),
+        unit: point.unit,
+        rawUnit: point.unit,
+        status: null,
+        date: report?.testDate || null,
+        chartDate: formatDate(report?.testDate || null, { dateStyle: 'medium' }),
+        formattedDate: formatDate(report?.testDate || null),
+        refRange: null,
+        rawRefRange: null,
+        reportId: point.reportId,
+        calculated: true,
+      };
 
-      for (const report of data.reports) {
-        const reportValues = reportMetricValues.get(report.id);
-        if (!reportValues || reportValues.has(calculatedDefinition.key)) continue;
-
-        const dependencyInputs: Record<string, number> = {};
-        let missingDependency = false;
-
-        for (const dependency of calculation.dependencies) {
-          const dependencyValue = reportValues.get(dependency);
-          if (!dependencyValue) {
-            missingDependency = true;
-            break;
-          }
-
-          dependencyInputs[dependency] = dependencyValue.value;
-        }
-
-        if (missingDependency) continue;
-
-        const computedValue = calculation.compute(dependencyInputs);
-        if (computedValue === null || !Number.isFinite(computedValue)) continue;
-
-        const precision = calculation.precision ?? 2;
-        const roundedValue = Number(computedValue.toFixed(precision));
-        const calculatedPoint: TrendPoint = {
-          id: `calculated:${report.id}:${calculatedDefinition.key}`,
-          metricName: calculatedDefinition.canonicalLabel,
-          value: roundedValue,
-          rawValue: roundedValue.toFixed(precision),
-          unit: calculation.unit ?? null,
-          rawUnit: calculation.unit ?? null,
-          status: null,
-          date: report.testDate || null,
-          chartDate: formatDate(report.testDate || null, { dateStyle: 'medium' }),
-          formattedDate: formatDate(report.testDate || null),
-          refRange: null,
-          rawRefRange: null,
-          reportId: report.id,
-          calculated: true,
-        };
-
-        const existing = grouped.get(calculatedDefinition.canonicalLabel) || [];
-        existing.push(calculatedPoint);
-        grouped.set(calculatedDefinition.canonicalLabel, existing);
-      }
+      const existing = grouped.get(point.definition.canonicalLabel) || [];
+      existing.push(calculatedPoint);
+      grouped.set(point.definition.canonicalLabel, existing);
     }
 
     return Array.from(grouped.entries())
@@ -589,13 +607,13 @@
     });
   }
 
-  let allRecordsSelected = $derived(data.records.length > 0 && selectedRecordIds.length === data.records.length);
+  let allRecordsSelected = $derived(labRecords.length > 0 && selectedRecordIds.length === labRecords.length);
 
   function toggleSelectAll() {
     if (allRecordsSelected) {
       selectedRecordIds = [];
     } else {
-      selectedRecordIds = data.records.map((r) => r.id);
+      selectedRecordIds = labRecords.map((r) => r.id);
     }
   }
 
@@ -612,12 +630,12 @@
   }
 
   function allReportRecordsSelected(reportId: string) {
-    const reportRecords = data.records.filter((record) => record.reportId === reportId).map((record) => record.id);
+    const reportRecords = labRecords.filter((record) => record.reportId === reportId).map((record) => record.id);
     return reportRecords.length > 0 && reportRecords.every((id) => selectedRecordIds.includes(id));
   }
 
   function toggleSelectReport(reportId: string) {
-    const reportRecordIds = data.records.filter((record) => record.reportId === reportId).map((record) => record.id);
+    const reportRecordIds = labRecords.filter((record) => record.reportId === reportId).map((record) => record.id);
 
     if (!reportRecordIds.length) return;
 
@@ -838,7 +856,7 @@
     const extractedDateKey = getDateOnlyKey(extractedReportDate || metric.date);
 
     return (
-      data.records
+      labRecords
         .filter((record) => metricKeys.some((key) => getRecordMatchKeys(record).includes(key)))
         .sort((a, b) => {
           const aDateKey = getDateOnlyKey(reportLookup[a.reportId]?.testDate);
@@ -964,32 +982,6 @@
     applyReportSource(parseRawReportSource(group.report.rawData));
   }
 
-  function getMetricMessage(messageKey: string) {
-    const lookup = m as unknown as Record<string, (inputs?: Record<string, never>) => string>;
-    const message = lookup[messageKey];
-    return typeof message === 'function' ? message({}) : '';
-  }
-
-  function getCategoryLabel(category: string) {
-    return getMetricMessage(`metric_category_${category.replace(/-/g, '_')}`) || category;
-  }
-
-  function getTestTypeLabel(testType: string) {
-    return getMetricMessage(`metric_test_type_${testType.replace(/-/g, '_')}`) || testType;
-  }
-
-  function getMetricLabel(label?: string | null) {
-    const definition = getMetricDefinition(label);
-    const localized = getMetricMessage(getMetricMessageKey(definition, 'label'));
-    return localized || definition.canonicalLabel;
-  }
-
-  function getMetricDescription(label?: string | null) {
-    const definition = getMetricDefinition(label);
-    const localized = getMetricMessage(getMetricMessageKey(definition, 'description'));
-    return localized || m.custom_metric_description();
-  }
-
   function getStatusLabel(status?: string | null) {
     if (status === 'High') return m.status_high();
     if (status === 'Low') return m.status_low();
@@ -1108,7 +1100,7 @@
     selectedRecordIds = [];
     reportFacilityName = '';
     reportTestDate = '';
-    expandedReportIds = data.reports[0] ? [data.reports[0].id] : [];
+    expandedReportIds = labReports[0] ? [labReports[0].id] : [];
   });
 
   $effect(() => {
@@ -1148,12 +1140,12 @@
     } else if (recordType === 'Blood Glucose') {
       valuePlaceholder = '90';
       valueLabel = m.level_label();
-    } else if (recordType === 'Weight') {
-      valuePlaceholder = '75.5';
-      valueLabel = m.weight_label();
     } else if (recordType === 'Cholesterol') {
       valuePlaceholder = '180';
       valueLabel = m.total_label();
+    } else {
+      valuePlaceholder = '';
+      valueLabel = m.value();
     }
   }
 
@@ -1356,6 +1348,17 @@
   }
 
   async function jumpToTrendPoint(point: TrendPoint) {
+    // Body points live in the measurements panel, which has none of the
+    // report-* / record-* nodes the lab branch below scrolls to.
+    if (point.reportId && bodyReportIds.has(point.reportId)) {
+      focusedBodySessionId = point.reportId;
+      await tick();
+      document
+        .getElementById(`body-session-${point.reportId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     if (point.calculated && point.reportId) {
       if (!expandedReportIds.includes(point.reportId)) {
         expandedReportIds = [...expandedReportIds, point.reportId];
@@ -2562,7 +2565,6 @@
                         >
                           <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
                           <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
-                          <option value="Weight">{m.body_weight()}</option>
                           <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
                           <option value="Other">{m.other_lab_metric()}</option>
                         </select>
@@ -2797,7 +2799,7 @@
                     </form>
                   {/if}
                   <div class="text-sm font-medium text-slate-500">
-                    {getItemCountLabel(data.records.length)}
+                    {getItemCountLabel(labRecords.length)}
                   </div>
                 </div>
               </div>
@@ -3243,7 +3245,7 @@
               </div>
 
               <div class="flex-1 overflow-x-auto">
-                {#if data.records.length === 0}
+                {#if labRecords.length === 0}
                   <div class="flex flex-col items-center justify-center p-12 text-slate-400">
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -3656,6 +3658,14 @@
                 {/if}
               </div>
             </div>
+
+            <BodyMeasurementsPanel
+              patientId={data.currentPatient.id}
+              sessions={bodySessions}
+              derivedPoints={bodyDerivedMetrics}
+              focusSessionId={focusedBodySessionId}
+              {formatDate}
+            />
           </div>
         </div>
       {/if}

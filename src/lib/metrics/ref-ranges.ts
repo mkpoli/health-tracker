@@ -162,6 +162,108 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Adult male', sex: 'Male', ageMin: 18, range: '3.4-7.0', unit: 'mg/dL' },
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '2.4-6.0', unit: 'mg/dL' },
   ],
+  bmi: [
+    {
+      label: 'Healthy weight (WHO)',
+      range: '18.5-24.9',
+      unit: 'kg/m^2',
+      notes: 'Below 18.5 underweight, 25.0-29.9 overweight, 30.0 and above obese.',
+      source: 'WHO, Obesity: preventing and managing the global epidemic (Technical Report Series 894, 2000)',
+    },
+    {
+      label: 'Below the Asian action point (WHO)',
+      range: '<23',
+      unit: 'kg/m^2',
+      notes: 'The consultation kept the international classification and identified 23.0 and 27.5 as public-health action points for Asian populations, rather than redefining the healthy range.',
+      source: 'WHO Expert Consultation, Lancet 2004;363:157-163',
+    },
+  ],
+  'waist-circumference': [
+    {
+      label: 'Adult male, low risk (WHO)',
+      sex: 'Male',
+      ageMin: 18,
+      range: '<94',
+      unit: 'cm',
+      notes: '94 cm marks increased risk and 102 cm substantially increased risk of metabolic complications.',
+      source: 'WHO, Waist Circumference and Waist-Hip Ratio: Report of a WHO Expert Consultation (2008)',
+    },
+    {
+      label: 'Adult female, low risk (WHO)',
+      sex: 'Female',
+      ageMin: 18,
+      range: '<80',
+      unit: 'cm',
+      notes: '80 cm marks increased risk and 88 cm substantially increased risk of metabolic complications.',
+      source: 'WHO, Waist Circumference and Waist-Hip Ratio: Report of a WHO Expert Consultation (2008)',
+    },
+  ],
+  'abdominal-circumference': [
+    {
+      label: 'Male, Japanese criterion',
+      sex: 'Male',
+      ageMin: 18,
+      range: '<85',
+      unit: 'cm',
+      notes: 'Measured at the navel; 85 cm and above is the entry criterion for metabolic syndrome in Japan.',
+      source: 'Japan Society for the Study of Obesity, metabolic syndrome criteria (2005)',
+    },
+    {
+      label: 'Female, Japanese criterion',
+      sex: 'Female',
+      ageMin: 18,
+      range: '<90',
+      unit: 'cm',
+      notes: 'Measured at the navel; 90 cm and above is the entry criterion for metabolic syndrome in Japan.',
+      source: 'Japan Society for the Study of Obesity, metabolic syndrome criteria (2005)',
+    },
+  ],
+  'waist-to-hip-ratio': [
+    {
+      label: 'Adult male, low risk (WHO)',
+      sex: 'Male',
+      ageMin: 18,
+      range: '<0.90',
+      notes: '0.90 and above is the substantially-increased-risk threshold.',
+      source: 'WHO, Waist Circumference and Waist-Hip Ratio: Report of a WHO Expert Consultation (2008)',
+    },
+    {
+      label: 'Adult female, low risk (WHO)',
+      sex: 'Female',
+      ageMin: 18,
+      range: '<0.85',
+      notes: '0.85 and above is the substantially-increased-risk threshold.',
+      source: 'WHO, Waist Circumference and Waist-Hip Ratio: Report of a WHO Expert Consultation (2008)',
+    },
+  ],
+  'waist-to-height-ratio': [
+    {
+      label: 'Keep waist under half your height',
+      range: '<0.5',
+      notes: 'Single boundary value proposed for both sexes and all ages as a screening rule.',
+      source: 'Ashwell M, Gibson S. BMJ Open 2016;6:e010159',
+    },
+  ],
+  'body-fat-percentage': [
+    {
+      label: 'Adult male, acceptable range',
+      sex: 'Male',
+      ageMin: 18,
+      range: '18-24',
+      unit: '%',
+      notes: 'The source describes bands across the whole scale — 14-17% is labelled "fitness" and 6-13% "athlete", so a value under this range is not necessarily abnormal.',
+      source: 'American Council on Exercise body-fat categories',
+    },
+    {
+      label: 'Adult female, acceptable range',
+      sex: 'Female',
+      ageMin: 18,
+      range: '25-31',
+      unit: '%',
+      notes: 'The source describes bands across the whole scale — 21-24% is labelled "fitness" and 14-20% "athlete", so a value under this range is not necessarily abnormal.',
+      source: 'American Council on Exercise body-fat categories',
+    },
+  ],
 };
 
 function normalizeAgab(value?: string | null): RefRangeSex | null {

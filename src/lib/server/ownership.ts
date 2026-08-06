@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import { patient, record, report } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { BODY_REPORT_KIND } from '$lib/report-kind';
 
 export function requireUserId(locals: App.Locals) {
   const userId = locals.user?.sub;
@@ -29,6 +30,19 @@ export async function getOwnedReport(userId: string, reportId: string) {
 
   const ownedPatient = await getOwnedPatient(userId, currentReport.patientId);
   return ownedPatient ? currentReport : null;
+}
+
+/**
+ * Clinical reports only. The lab review flow rewrites a report's metadata and
+ * prunes its records, so a body measurement session must never be reachable
+ * through it — the same restriction the body save path applies in reverse.
+ */
+export async function getOwnedLabReport(userId: string, reportId: string) {
+  const currentReport = await getOwnedReport(userId, reportId);
+
+  if (!currentReport || currentReport.kind === BODY_REPORT_KIND) return null;
+
+  return currentReport;
 }
 
 export async function getOwnedRecord(userId: string, recordId: string) {

@@ -5,11 +5,11 @@ import { db } from '$lib/server/db';
 import { record } from '$lib/server/db/schema';
 import { resolveStoredReportSource } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
-import { getOwnedPatient, getOwnedReport, requireUserId } from '$lib/server/ownership';
+import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const userId = requireUserId(locals);
-  const currentReport = await getOwnedReport(userId, params.reportId);
+  const currentReport = await getOwnedLabReport(userId, params.reportId);
 
   if (!currentReport) throw redirect(303, '/');
 
@@ -37,7 +37,7 @@ export const actions: Actions = {
 
     if (!metricsStr) return fail(400, { error: 'Missing metrics' });
 
-    const currentReport = await getOwnedReport(userId, params.reportId);
+    const currentReport = await getOwnedLabReport(userId, params.reportId);
     if (!currentReport) return fail(404, { error: 'Report not found' });
 
     await saveReviewedReport({
