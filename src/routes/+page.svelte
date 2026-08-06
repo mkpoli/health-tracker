@@ -32,7 +32,7 @@
 
   let { data, form } = $props();
 
-  let recordType = $state('blood_pressure');
+  let recordType = $state('Blood Pressure');
   let valuePlaceholder = $state('120/80');
   let valueLabel = $state(m.reading_label());
 
@@ -1142,16 +1142,16 @@
   });
 
   function updateFormHints() {
-    if (recordType === 'blood_pressure') {
+    if (recordType === 'Blood Pressure') {
       valuePlaceholder = '120/80';
       valueLabel = m.reading_label();
-    } else if (recordType === 'blood_glucose') {
+    } else if (recordType === 'Blood Glucose') {
       valuePlaceholder = '90';
       valueLabel = m.level_label();
-    } else if (recordType === 'weight') {
+    } else if (recordType === 'Weight') {
       valuePlaceholder = '75.5';
       valueLabel = m.weight_label();
-    } else if (recordType === 'cholesterol') {
+    } else if (recordType === 'Cholesterol') {
       valuePlaceholder = '180';
       valueLabel = m.total_label();
     }
