@@ -1,281 +1,388 @@
 <script lang="ts">
   import * as THREE from 'three';
 
-  // A rotatable figure whose torso radius at each level follows the recorded
-  // circumference, with a highlighted band at the site being explained. Built
-  // from primitives — no external model to license, download or keep in sync.
+  interface Props {
+    site: string;
+    circumferences?: Record<string, number>;
+    height?: number;
+  }
 
-  let {
-    site,
-    circumferences = {},
-    height = 360,
-  }: { site: string; circumferences?: Record<string, number>; height?: number } = $props();
+  let { site, circumferences = {}, height = 380 }: Props = $props();
 
-  // Body-space heights, 0 at the feet and 1 at the crown.
-  const SITES: Record<string, { level: number; radiusKey?: string; kind: 'band' | 'full' }> = {
-    head: { level: 0.94, kind: 'band' },
-    neck: { level: 0.86, radiusKey: 'neck', kind: 'band' },
-    shoulder: { level: 0.8, radiusKey: 'shoulder', kind: 'band' },
-    bust: { level: 0.72, radiusKey: 'bust', kind: 'band' },
-    underbust: { level: 0.67, radiusKey: 'underbust', kind: 'band' },
-    waist: { level: 0.61, radiusKey: 'waist', kind: 'band' },
-    abdomen: { level: 0.57, radiusKey: 'abdomen', kind: 'band' },
-    hip: { level: 0.5, radiusKey: 'hip', kind: 'band' },
-    thigh: { level: 0.38, radiusKey: 'thigh', kind: 'band' },
-    calf: { level: 0.2, radiusKey: 'calf', kind: 'band' },
-    'upper-arm': { level: 0.68, kind: 'band' },
-    forearm: { level: 0.58, kind: 'band' },
-    wrist: { level: 0.5, kind: 'band' },
-    ankle: { level: 0.08, kind: 'band' },
-    height: { level: 0.5, kind: 'full' },
+  const ACCENT = 0x7c3aed;
+
+  const DEFAULT_CIRC: Record<string, number> = {
+    head: 56,
+    neck: 36,
+    shoulder: 108,
+    bust: 90,
+    underbust: 78,
+    waist: 75,
+    abdomen: 84,
+    hip: 95,
+    thigh: 54,
+    calf: 36,
+    ankle: 22,
+    'upper-arm': 28,
+    forearm: 25,
+    wrist: 16,
   };
 
-  // Torso profile: level, then the default radius as a share of body width.
-  const PROFILE: Array<{ level: number; key?: string; ratio: number }> = [
-    { level: 0.5, key: 'hip', ratio: 1.08 },
-    { level: 0.57, key: 'abdomen', ratio: 0.9 },
-    { level: 0.61, key: 'waist', ratio: 0.82 },
-    { level: 0.67, key: 'underbust', ratio: 0.88 },
-    { level: 0.72, key: 'bust', ratio: 1.0 },
-    { level: 0.8, key: 'shoulder', ratio: 1.15 },
-    { level: 0.85, key: 'neck', ratio: 0.42 },
-  ];
+  const SITE_Y: Record<string, number> = {
+    ankle: 0.16,
+    calf: 0.34,
+    thigh: 0.72,
+    hip: 0.9,
+    abdomen: 1.02,
+    waist: 1.1,
+    underbust: 1.22,
+    bust: 1.32,
+    shoulder: 1.44,
+    neck: 1.51,
+    head: 1.63,
+    wrist: 0.99,
+    forearm: 1.12,
+    'upper-arm': 1.36,
+  };
 
-  const BASE_RADIUS = 0.26;
-  const BODY_HEIGHT = 3.4;
-  /** Scene units per centimetre, taking the figure as roughly 170 cm tall. */
-  const UNITS_PER_CM = BODY_HEIGHT / 170;
+  const ARM_SITES = new Set(['upper-arm', 'forearm', 'wrist']);
+  const LEG_SITES = new Set(['thigh', 'calf', 'ankle']);
 
-  let container = $state<HTMLDivElement | null>(null);
-  let bandLevel = $state(SITES.waist.level);
+  type Profile = [number, number][];
 
-  function radiusFor(key: string | undefined, ratio: number) {
-    const measured = key ? circumferences[key] : undefined;
-    if (measured && measured > 0) {
-      return Math.min(Math.max((measured / (2 * Math.PI)) * UNITS_PER_CM, 0.09), 0.6);
-    }
-    return BASE_RADIUS * ratio;
-  }
+  const rad = (cm: number) => cm / 100 / (2 * Math.PI);
+  const circOf = (c: Record<string, number>, key: string) => c[key] ?? DEFAULT_CIRC[key];
 
-  function radiusAtLevel(level: number) {
-    const sorted = [...PROFILE].sort((a, b) => a.level - b.level);
-    const first = sorted[0];
-    const last = sorted[sorted.length - 1];
-
-    if (level <= first.level) return radiusFor(first.key, first.ratio);
-    if (level >= last.level) return radiusFor(last.key, last.ratio);
-
-    for (let index = 0; index < sorted.length - 1; index += 1) {
-      const lower = sorted[index];
-      const upper = sorted[index + 1];
-
-      if (level >= lower.level && level <= upper.level) {
-        const t = (level - lower.level) / (upper.level - lower.level);
-        return radiusFor(lower.key, lower.ratio) * (1 - t) + radiusFor(upper.key, upper.ratio) * t;
+  function interp(profile: Profile, y: number): number {
+    if (profile.length === 0) return 0.1;
+    if (y <= profile[0][0]) return Math.max(profile[0][1], 0.001);
+    for (let i = 1; i < profile.length; i++) {
+      if (y <= profile[i][0]) {
+        const [y0, r0] = profile[i - 1];
+        const [y1, r1] = profile[i];
+        return r0 + ((r1 - r0) * (y - y0)) / (y1 - y0);
       }
     }
-
-    return BASE_RADIUS;
+    return profile[profile.length - 1][1];
   }
 
-  function toSceneY(level: number) {
-    return (level - 0.5) * BODY_HEIGHT;
+  function torsoProfile(c: Record<string, number>): Profile {
+    const hip = rad(circOf(c, 'hip'));
+    const abdomen = rad(circOf(c, 'abdomen'));
+    const waist = rad(circOf(c, 'waist'));
+    const underbust = rad(circOf(c, 'underbust'));
+    const bust = rad(circOf(c, 'bust'));
+    const shoulder = rad(circOf(c, 'shoulder'));
+    const neck = rad(circOf(c, 'neck'));
+    return [
+      [0.79, 0.001],
+      [0.82, hip * 0.75],
+      [0.86, hip * 0.95],
+      [0.9, hip],
+      [0.96, (hip + abdomen) / 2],
+      [1.02, abdomen],
+      [1.1, waist],
+      [1.16, (waist + underbust) / 2],
+      [1.22, underbust],
+      [1.32, bust],
+      [1.39, bust * 0.94],
+      [1.45, shoulder * 0.88],
+      [1.5, neck * 1.25],
+      [1.54, neck],
+    ];
+  }
+
+  function legProfile(c: Record<string, number>): Profile {
+    const ankle = rad(circOf(c, 'ankle'));
+    const calf = rad(circOf(c, 'calf'));
+    const thigh = rad(circOf(c, 'thigh'));
+    return [
+      [0.012, 0.001],
+      [0.07, ankle * 0.95],
+      [0.16, ankle],
+      [0.34, calf],
+      [0.52, (calf + thigh) / 2],
+      [0.72, thigh],
+      [0.88, thigh * 1.04],
+    ];
+  }
+
+  function armProfile(c: Record<string, number>): Profile {
+    const upper = rad(circOf(c, 'upper-arm'));
+    const fore = rad(circOf(c, 'forearm'));
+    const wrist = rad(circOf(c, 'wrist'));
+    return [
+      [0.955, 0.001],
+      [0.97, wrist],
+      [1.0, wrist * 1.05],
+      [1.12, fore],
+      [1.3, upper * 0.96],
+      [1.44, upper],
+      [1.48, upper * 0.85],
+      [1.5, 0.001],
+    ];
+  }
+
+  let container: HTMLDivElement;
+  let canvas: HTMLCanvasElement;
+
+  let renderer: THREE.WebGLRenderer | undefined;
+  let camera: THREE.PerspectiveCamera | undefined;
+  let scene: THREE.Scene | undefined;
+  let bodyGroup: THREE.Group | undefined;
+  let band: THREE.Mesh | undefined;
+  let ruler: THREE.Group | undefined;
+  let torso: THREE.Mesh | undefined;
+  let legL: THREE.Mesh | undefined;
+  let legR: THREE.Mesh | undefined;
+  let armL: THREE.Mesh | undefined;
+  let armR: THREE.Mesh | undefined;
+  let head: THREE.Mesh | undefined;
+
+  let torsoProf: Profile = [];
+  let legProf: Profile = [];
+  let armProf: Profile = [];
+  let armX = 0.2;
+  let legX = 0.07;
+  let headR = 0.09;
+  let sceneReady = false;
+  let dragging = false;
+  let lastX = 0;
+  let raf = 0;
+
+  const lathe = (profile: Profile) =>
+    new THREE.LatheGeometry(
+      profile.map(([y, r]) => new THREE.Vector2(Math.max(r, 0.001), y)),
+      48,
+    );
+
+  function computeProfiles(c: Record<string, number>) {
+    torsoProf = torsoProfile(c);
+    legProf = legProfile(c);
+    armProf = armProfile(c);
+    headR = rad(circOf(c, 'head'));
+    legX = rad(circOf(c, 'thigh')) * 0.72;
+    armX = rad(circOf(c, 'shoulder')) * 0.88 + rad(circOf(c, 'upper-arm')) + 0.005;
+  }
+
+  function rebuildBody(c: Record<string, number>) {
+    computeProfiles(c);
+    if (!torso || !legL || !legR || !armL || !armR || !head) return;
+
+    torso.geometry.dispose();
+    torso.geometry = lathe(torsoProf);
+
+    for (const leg of [legL, legR]) {
+      leg.geometry.dispose();
+      leg.geometry = lathe(legProf);
+    }
+    legL.position.x = -legX;
+    legR.position.x = legX;
+
+    for (const arm of [armL, armR]) {
+      arm.geometry.dispose();
+      arm.geometry = lathe(armProf);
+    }
+    armL.position.x = -armX;
+    armR.position.x = armX;
+
+    head.geometry.dispose();
+    head.geometry = new THREE.SphereGeometry(headR, 32, 24);
+
+    if (ruler) ruler.position.x = -(armX + 0.14);
+  }
+
+  function positionBand(current: string) {
+    if (!band || !ruler) return;
+    const showRuler = current === 'height';
+    ruler.visible = showRuler;
+    band.visible = !showRuler;
+    if (showRuler) return;
+
+    const y = SITE_Y[current] ?? SITE_Y.waist;
+    let x = 0;
+    let r: number;
+    if (ARM_SITES.has(current)) {
+      x = armX;
+      r = interp(armProf, y);
+    } else if (LEG_SITES.has(current)) {
+      x = legX;
+      r = interp(legProf, y);
+    } else if (current === 'head') {
+      r = headR;
+    } else {
+      r = interp(torsoProf, y);
+    }
+    band.position.set(x, y, 0);
+    band.geometry.dispose();
+    band.geometry = new THREE.TorusGeometry(r + 0.008, 0.014, 20, 72);
+  }
+
+  function resize() {
+    if (!renderer || !camera || !container) return;
+    const w = container.clientWidth || 1;
+    renderer.setSize(w, height, false);
+    camera.aspect = w / height;
+    camera.updateProjectionMatrix();
   }
 
   $effect(() => {
-    const target = SITES[site] ?? SITES.waist;
-    bandLevel = target.level;
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(34, 1, 0.1, 20);
+    camera.position.set(0, 1.0, 3.1);
+    camera.lookAt(0, 0.88, 0);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+    sun.position.set(2.2, 3.2, 2.4);
+    scene.add(sun);
+
+    bodyGroup = new THREE.Group();
+    scene.add(bodyGroup);
+
+    computeProfiles(circumferences);
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xd8d3cc,
+      roughness: 0.85,
+      metalness: 0.02,
+    });
+
+    torso = new THREE.Mesh(lathe(torsoProf), bodyMat);
+    legL = new THREE.Mesh(lathe(legProf), bodyMat);
+    legR = new THREE.Mesh(lathe(legProf), bodyMat);
+    armL = new THREE.Mesh(lathe(armProf), bodyMat);
+    armR = new THREE.Mesh(lathe(armProf), bodyMat);
+    legL.position.x = -legX;
+    legR.position.x = legX;
+    armL.position.x = -armX;
+    armR.position.x = armX;
+
+    head = new THREE.Mesh(new THREE.SphereGeometry(headR, 32, 24), bodyMat);
+    head.position.y = SITE_Y.head;
+
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 0.42, 0.012, 48),
+      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 1 }),
+    );
+    disc.position.y = -0.006;
+
+    const bandMat = new THREE.MeshStandardMaterial({
+      color: ACCENT,
+      emissive: ACCENT,
+      emissiveIntensity: 0.45,
+      roughness: 0.4,
+    });
+    band = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.014, 20, 72), bandMat);
+    band.rotation.x = Math.PI / 2;
+
+    const rulerMat = new THREE.MeshStandardMaterial({
+      color: ACCENT,
+      emissive: ACCENT,
+      emissiveIntensity: 0.3,
+      roughness: 0.5,
+    });
+    const rulerTop = SITE_Y.head + headR;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.005, 0.005, rulerTop, 12),
+      rulerMat,
+    );
+    pole.position.y = rulerTop / 2;
+    const tickTop = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.01, 0.01), rulerMat);
+    tickTop.position.set(0.15, rulerTop, 0);
+    ruler = new THREE.Group();
+    ruler.add(pole, tickTop);
+    ruler.position.x = -(armX + 0.14);
+    ruler.visible = false;
+
+    bodyGroup.add(torso, legL, legR, armL, armR, head, disc, band, ruler);
+
+    const onDown = (e: PointerEvent) => {
+      dragging = true;
+      lastX = e.clientX;
+      canvas.setPointerCapture(e.pointerId);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!dragging || !bodyGroup) return;
+      bodyGroup.rotation.y += (e.clientX - lastX) * 0.009;
+      lastX = e.clientX;
+    };
+    const onUp = () => {
+      dragging = false;
+    };
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+    resize();
+
+    sceneReady = true;
+    positionBand(site);
+
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (bodyGroup && !dragging && !motionQuery.matches) {
+        bodyGroup.rotation.y += 0.0035;
+      }
+      if (renderer && scene && camera) renderer.render(scene, camera);
+    };
+    tick();
+
+    return () => {
+      sceneReady = false;
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
+      scene?.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          const m = obj.material as THREE.Material | THREE.Material[];
+          if (Array.isArray(m)) m.forEach((x) => x.dispose());
+          else m.dispose();
+        }
+      });
+      renderer?.dispose();
+    };
   });
 
   $effect(() => {
-    const host = container;
-    if (!host) return;
+    const c = circumferences;
+    if (!sceneReady) return;
+    rebuildBody(c);
+    positionBand(site);
+  });
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.set(0, 0.1, 6.4);
+  $effect(() => {
+    const s = site;
+    if (!sceneReady) return;
+    positionBand(s);
+  });
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(host.clientWidth || 320, height, false);
-    host.appendChild(renderer.domElement);
-    renderer.domElement.style.width = '100%';
-    renderer.domElement.style.height = `${height}px`;
-    renderer.domElement.style.cursor = 'grab';
-    renderer.domElement.style.touchAction = 'pan-y';
-
-    scene.add(new THREE.AmbientLight(0xffffff, 1.5));
-    const key = new THREE.DirectionalLight(0xffffff, 1.7);
-    key.position.set(3, 5, 4);
-    scene.add(key);
-    const rim = new THREE.DirectionalLight(0xc4b5fd, 0.8);
-    rim.position.set(-4, 1, -3);
-    scene.add(rim);
-
-    const figure = new THREE.Group();
-    scene.add(figure);
-
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0xe9e4ff,
-      roughness: 0.72,
-      metalness: 0.02,
-      transparent: true,
-      opacity: 0.96,
-    });
-
-    const disposables: Array<{ dispose: () => void }> = [skin];
-
-    // Torso as a lathe through the measured profile.
-    const profilePoints: THREE.Vector2[] = [];
-    for (let level = 0.48; level <= 0.87; level += 0.01) {
-      profilePoints.push(new THREE.Vector2(radiusAtLevel(level), toSceneY(level)));
-    }
-    const torsoGeometry = new THREE.LatheGeometry(profilePoints, 48);
-    disposables.push(torsoGeometry);
-    figure.add(new THREE.Mesh(torsoGeometry, skin));
-
-    // Head and neck.
-    const headGeometry = new THREE.SphereGeometry(0.26, 32, 24);
-    disposables.push(headGeometry);
-    const head = new THREE.Mesh(headGeometry, skin);
-    head.position.y = toSceneY(0.955);
-    head.scale.set(0.92, 1.12, 0.96);
-    figure.add(head);
-
-    const neckGeometry = new THREE.CylinderGeometry(0.1, 0.12, 0.22, 24);
-    disposables.push(neckGeometry);
-    const neck = new THREE.Mesh(neckGeometry, skin);
-    neck.position.y = toSceneY(0.885);
-    figure.add(neck);
-
-    // Limbs.
-    const armGeometry = new THREE.CapsuleGeometry(0.075, 1.05, 6, 16);
-    disposables.push(armGeometry);
-    const legGeometry = new THREE.CapsuleGeometry(0.115, 1.35, 6, 16);
-    disposables.push(legGeometry);
-
-    for (const direction of [-1, 1]) {
-      const arm = new THREE.Mesh(armGeometry, skin);
-      arm.position.set(direction * (radiusAtLevel(0.78) + 0.11), toSceneY(0.66), 0);
-      arm.rotation.z = direction * 0.06;
-      figure.add(arm);
-
-      const leg = new THREE.Mesh(legGeometry, skin);
-      leg.position.set(direction * 0.15, toSceneY(0.27), 0);
-      figure.add(leg);
-    }
-
-    // The measuring band.
-    const bandMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7c3aed,
-      roughness: 0.35,
-      emissive: 0x4c1d95,
-      emissiveIntensity: 0.25,
-    });
-    disposables.push(bandMaterial);
-
-    let bandMesh: THREE.Mesh | null = null;
-    let bandGeometry: THREE.TorusGeometry | null = null;
-
-    function placeBand(level: number) {
-      if (bandMesh) {
-        figure.remove(bandMesh);
-        bandGeometry?.dispose();
-      }
-
-      const radius = radiusAtLevel(level) + 0.035;
-      bandGeometry = new THREE.TorusGeometry(radius, 0.028, 12, 48);
-      bandMesh = new THREE.Mesh(bandGeometry, bandMaterial);
-      bandMesh.rotation.x = Math.PI / 2;
-      bandMesh.position.y = toSceneY(level);
-      bandMesh.scale.z = 1;
-      figure.add(bandMesh);
-    }
-
-    placeBand(bandLevel);
-
-    // Pointer drag, so the band can be inspected from behind.
-    let dragging = false;
-    let lastX = 0;
-    let velocity = 0;
-
-    const onPointerDown = (event: PointerEvent) => {
-      dragging = true;
-      lastX = event.clientX;
-      renderer.domElement.setPointerCapture(event.pointerId);
-      renderer.domElement.style.cursor = 'grabbing';
-    };
-
-    const onPointerMove = (event: PointerEvent) => {
-      if (!dragging) return;
-      const delta = (event.clientX - lastX) / 140;
-      figure.rotation.y += delta;
-      velocity = delta;
-      lastX = event.clientX;
-    };
-
-    const onPointerUp = (event: PointerEvent) => {
-      dragging = false;
-      renderer.domElement.releasePointerCapture?.(event.pointerId);
-      renderer.domElement.style.cursor = 'grab';
-    };
-
-    renderer.domElement.addEventListener('pointerdown', onPointerDown);
-    renderer.domElement.addEventListener('pointermove', onPointerMove);
-    renderer.domElement.addEventListener('pointerup', onPointerUp);
-    renderer.domElement.addEventListener('pointercancel', onPointerUp);
-
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let frame = 0;
-
-    const resize = () => {
-      const width = host.clientWidth || 320;
-      renderer.setSize(width, height, false);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-    };
-
+  $effect(() => {
     resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(host);
-
-    const render = () => {
-      if (!dragging) {
-        if (Math.abs(velocity) > 0.0005) {
-          figure.rotation.y += velocity;
-          velocity *= 0.94;
-        } else if (!reduceMotion) {
-          figure.rotation.y += 0.0032;
-        }
-      }
-
-      renderer.render(scene, camera);
-      frame = requestAnimationFrame(render);
-    };
-
-    render();
-
-    // Reposition the band when the site changes, without rebuilding the scene.
-    const stopBandWatch = $effect.root(() => {
-      $effect(() => {
-        placeBand(bandLevel);
-      });
-    });
-
-    return () => {
-      stopBandWatch();
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      renderer.domElement.removeEventListener('pointermove', onPointerMove);
-      renderer.domElement.removeEventListener('pointerup', onPointerUp);
-      renderer.domElement.removeEventListener('pointercancel', onPointerUp);
-      bandGeometry?.dispose();
-      for (const item of disposables) item.dispose();
-      renderer.dispose();
-      renderer.domElement.remove();
-    };
   });
 </script>
 
-<div bind:this={container} class="w-full overflow-hidden rounded-xl bg-gradient-to-b from-violet-50/70 to-white" style={`height: ${height}px`}></div>
+<div
+  bind:this={container}
+  class="relative w-full overflow-hidden"
+  style:height="{height}px"
+  aria-hidden="true"
+>
+  <canvas
+    bind:this={canvas}
+    class="block h-full w-full cursor-grab touch-none active:cursor-grabbing"
+  ></canvas>
+</div>
