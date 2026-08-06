@@ -12,6 +12,7 @@ import {
   saveMeasurementSession,
 } from '$lib/server/measurements';
 import { isMeasurementKind } from '$lib/report-kind';
+import { importMeasurementSessions } from '$lib/server/measurement-import';
 import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
 function parseJsonLike(value: unknown) {
@@ -369,6 +370,43 @@ export const actions: Actions = {
 
       throw error;
     }
+  },
+
+  importMeasurements: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const source = data.get('source')?.toString();
+    const sessionsStr = data.get('sessions')?.toString();
+
+    if (!patientId || !sessionsStr) return fail(400, { error: 'Missing required fields' });
+    if (source !== 'apple-health' && source !== 'health-tracker-export') {
+      return fail(400, { error: 'Unknown import source' });
+    }
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
+
+    let sessions: unknown;
+
+    try {
+      sessions = JSON.parse(sessionsStr);
+    } catch {
+      return fail(400, { error: 'Invalid import payload' });
+    }
+
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      return fail(400, { error: 'Nothing to import' });
+    }
+
+    const result = await importMeasurementSessions({
+      patientId: ownedPatient.id,
+      source,
+      sessions: sessions as never,
+    });
+
+    return { success: true, ...result };
   },
 
   deleteMeasurement: async ({ request, locals }) => {

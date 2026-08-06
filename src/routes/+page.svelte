@@ -32,6 +32,7 @@
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
   import MeasurementsPanel from '$lib/components/MeasurementsPanel.svelte';
+  import ImportModal from '$lib/components/ImportModal.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
@@ -55,6 +56,7 @@
 
   let showPatientModal = $state(false);
   let showDeleteModal = $state(false);
+  let showImportModal = $state(false);
 
   let selectedRecordIds = $state<string[]>([]);
   let selectedTrendMetric = $state('');
@@ -2020,6 +2022,10 @@
       <AddPatientModal onClose={() => (showPatientModal = false)} />
     {/if}
 
+    {#if showImportModal && data.currentPatient}
+      <ImportModal patientId={data.currentPatient.id} onClose={() => (showImportModal = false)} />
+    {/if}
+
     {#if showDeleteModal && data.currentPatient}
       <DangerZoneModal patient={data.currentPatient} reports={data.reports} records={data.records} onClose={() => (showDeleteModal = false)} />
     {/if}
@@ -2533,6 +2539,26 @@
                 /></svg
               >
               {m.export_json_data()}
+            </button>
+            <button
+              type="button"
+              onclick={() => (showImportModal = true)}
+              class="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="2"
+                stroke="currentColor"
+                class="w-4 h-4"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M7.5 9L12 4.5m0 0L16.5 9M12 4.5v12"
+                /></svg
+              >
+              {m.import_data()}
             </button>
           </div>
         </div>

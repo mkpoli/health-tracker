@@ -8,6 +8,9 @@
   import { normalizeComparableMeasurement, parseNumber } from '$lib/metrics/normalization';
   import { computeDerivedMetrics } from '$lib/metrics/derived';
   import { getJisBraSize } from '$lib/metrics/bra-size';
+  import { getLocale } from '$lib/paraglide/runtime';
+  import { getMeasurementGuide, hasMeasurementGuide } from '$lib/content/measurement-guides';
+  import MeasurementGuide from './MeasurementGuide.svelte';
 
   export type SessionEntry = {
     metricKey: string | null;
@@ -104,6 +107,32 @@
   // Fields the user opened in this session stay on screen even once emptied,
   // so clearing a value does not make the input disappear under the cursor.
   let revealedKeys = $state<string[]>([]);
+  let guideKey = $state<string | null>(null);
+
+  const openGuide = $derived(guideKey ? getMeasurementGuide(guideKey, getLocale()) : null);
+
+  // The model keys its profile by site rather than catalog key.
+  const diagramValues = $derived.by(() => {
+    const bySite: Record<string, number> = {};
+    const map: Record<string, string> = {
+      'neck-circumference': 'neck',
+      'shoulder-circumference': 'shoulder',
+      'bust-circumference': 'bust',
+      'underbust-circumference': 'underbust',
+      'waist-circumference': 'waist',
+      'abdominal-circumference': 'abdomen',
+      'hip-circumference': 'hip',
+      'thigh-circumference': 'thigh',
+      'calf-circumference': 'calf',
+    };
+
+    for (const [key, site] of Object.entries(map)) {
+      const value = previewValues.get(key) ?? carriedValues[key];
+      if (typeof value === 'number') bySite[site] = value;
+    }
+
+    return bySite;
+  });
   let expandedSides = $state<Record<string, boolean>>(
     Object.fromEntries(
       domain.fields
@@ -474,6 +503,18 @@
                         {fieldLabel(field.key)}
                       </label>
                       <p class="mt-0.5 line-clamp-2 text-xs text-slate-500">{fieldDescription(field.key)}</p>
+                      {#if hasMeasurementGuide(field.key)}
+                        <button
+                          type="button"
+                          onclick={() => (guideKey = field.key)}
+                          class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-violet-700 transition-colors hover:text-violet-900"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-3.5 w-3.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M12 17.25h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          {m.guide_open()}
+                        </button>
+                      {/if}
                     </div>
                     {#if field.sided}
                       <button
@@ -656,3 +697,12 @@
     </form>
   </div>
 </div>
+
+{#if guideKey && openGuide}
+  <MeasurementGuide
+    title={fieldLabel(guideKey)}
+    guide={openGuide}
+    circumferences={diagramValues}
+    onClose={() => (guideKey = null)}
+  />
+{/if}
