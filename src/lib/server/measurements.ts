@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import { record, report } from '$lib/server/db/schema';
 import { getMetricDefinitionByKey, getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
 import { normalizeComparableMeasurement, parseNumber } from '$lib/metrics/normalization';
-import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { isMeasurementKind, type ReportKind } from '$lib/report-kind';
 
 export type BodyMeasurementEntry = {
   /** Catalog key, when the measurement comes from the body-metric catalog. */
@@ -136,7 +136,8 @@ function buildRecordExtraData(entry: ResolvedEntry, previous?: Record<string, un
   });
 }
 
-export async function saveBodyMeasurementSession(input: {
+export async function saveMeasurementSession(input: {
+  kind: ReportKind;
   patientId: string;
   sessionId?: string | null;
   measuredAt: string;
@@ -164,7 +165,7 @@ export async function saveBodyMeasurementSession(input: {
           and(
             eq(report.id, sessionId),
             eq(report.patientId, input.patientId),
-            eq(report.kind, BODY_REPORT_KIND),
+            eq(report.kind, input.kind),
           ),
         );
       const current = existing[0];
@@ -187,7 +188,7 @@ export async function saveBodyMeasurementSession(input: {
         .insert(report)
         .values({
           patientId: input.patientId,
-          kind: BODY_REPORT_KIND,
+          kind: input.kind,
           testDate: measuredAt,
           extraData: JSON.stringify({ notes }),
         })
@@ -238,14 +239,16 @@ export async function saveBodyMeasurementSession(input: {
   });
 }
 
-export async function deleteBodyMeasurementSession(patientId: string, sessionId: string) {
+export async function deleteMeasurementSession(patientId: string, sessionId: string) {
   return db.transaction(async (tx) => {
     const rows = await tx
       .select()
       .from(report)
-      .where(and(eq(report.id, sessionId), eq(report.patientId, patientId), eq(report.kind, BODY_REPORT_KIND)));
+      .where(and(eq(report.id, sessionId), eq(report.patientId, patientId)));
 
-    if (!rows[0]) return false;
+    // Only hand-entered sessions; a clinical report is deleted through its own
+    // action so its stored source document is handled too.
+    if (!rows[0] || !isMeasurementKind(rows[0].kind)) return false;
 
     await tx.delete(record).where(eq(record.reportId, sessionId));
     await tx.delete(report).where(eq(report.id, sessionId));

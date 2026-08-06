@@ -1,4 +1,5 @@
 import type { MetricDefinition } from './catalog';
+import { toMeasurementField, type MeasurementField, type MeasurementFieldSource } from './measurement-fields';
 
 // Body measurements are entered by hand rather than parsed out of a lab report,
 // so each definition carries the input affordances the logging form needs: a
@@ -8,20 +9,7 @@ import type { MetricDefinition } from './catalog';
 
 export type BodyMetricGroupKey = 'basics' | 'composition' | 'circumference' | 'skinfold' | 'index';
 
-export type BodyMetricSource = {
-  key: string;
-  canonicalLabel: string;
-  group: BodyMetricGroupKey;
-  categories: string[];
-  unit?: string | null;
-  unitOptions?: string[];
-  step?: number;
-  aliases?: string[];
-  wikidataId?: string;
-  sided?: boolean;
-  common?: boolean;
-  calculation?: MetricDefinition['calculation'];
-};
+export type BodyMetricSource = MeasurementFieldSource & { group: BodyMetricGroupKey };
 
 const MASS_UNITS = ['kg', 'lb'];
 const LENGTH_UNITS = ['cm', 'in'];
@@ -313,7 +301,8 @@ const bodyMetricSources: BodyMetricSource[] = [
     unit: 'cm',
     unitOptions: LENGTH_UNITS,
     step: 0.1,
-    aliases: ['bust circumference', 'bust', 'トップバスト'],
+    common: true,
+    aliases: ['bust circumference', 'bust', 'upper bust', 'top bust', 'upper chest', 'トップバスト', '上胸围'],
   },
   {
     key: 'underbust-circumference',
@@ -323,7 +312,17 @@ const bodyMetricSources: BodyMetricSource[] = [
     unit: 'cm',
     unitOptions: LENGTH_UNITS,
     step: 0.1,
-    aliases: ['underbust circumference', 'underbust', 'アンダーバスト'],
+    common: true,
+    aliases: [
+      'underbust circumference',
+      'underbust',
+      'under bust',
+      'lower bust',
+      'lower chest',
+      'ribcage',
+      'アンダーバスト',
+      '下胸围',
+    ],
   },
   {
     key: 'waist-circumference',
@@ -637,6 +636,27 @@ const bodyIndexSources: BodyMetricSource[] = [
     },
   },
   {
+    key: 'bust-underbust-difference',
+    canonicalLabel: 'Bust−Underbust Difference',
+    group: 'index',
+    categories: ['body-index'],
+    unit: 'cm',
+    aliases: ['bust underbust difference', 'top under difference', 'トップアンダー差'],
+    calculation: {
+      // Both measured together: breast size changes, so carrying either value
+      // forward would report a difference that was never measured.
+      dependencies: ['bust-circumference', 'underbust-circumference'],
+      compute: (inputs) => {
+        const bust = inputs['bust-circumference'];
+        const underbust = inputs['underbust-circumference'];
+        if (!Number.isFinite(bust) || !Number.isFinite(underbust)) return null;
+        return bust - underbust;
+      },
+      unit: 'cm',
+      precision: 1,
+    },
+  },
+  {
     key: 'fat-free-mass-index',
     canonicalLabel: 'Fat-Free Mass Index',
     group: 'index',
@@ -723,35 +743,7 @@ export const bodyMetricGroupOrder: BodyMetricGroupKey[] = [
   'skinfold',
   'index',
 ];
-
-// What the logging form renders: one row per base metric, in group order, with
-// the sided pair reachable behind a per-row toggle.
-export type BodyMetricField = {
-  key: string;
-  canonicalLabel: string;
-  group: BodyMetricGroupKey;
-  unit: string | null;
-  unitOptions: string[];
-  step: number;
-  common: boolean;
-  sided: boolean;
-  leftKey: string | null;
-  rightKey: string | null;
-};
-
-export const bodyMetricFields: BodyMetricField[] = bodyMetricSources
-  .map((source) => ({
-    key: source.key,
-    canonicalLabel: source.canonicalLabel,
-    group: source.group,
-    unit: source.unit ?? null,
-    unitOptions: source.unitOptions ?? (source.unit ? [source.unit] : []),
-    step: source.step ?? 0.1,
-    common: Boolean(source.common),
-    sided: Boolean(source.sided),
-    leftKey: source.sided ? `${source.key}-left` : null,
-    rightKey: source.sided ? `${source.key}-right` : null,
-  }));
+export const bodyMetricFields: MeasurementField[] = bodyMetricSources.map(toMeasurementField);
 
 // Groups the logging form can actually render. Derived indices carry a
 // `calculation` and are therefore absent from `bodyMetricFields`, so their group

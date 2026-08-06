@@ -27,10 +27,11 @@
     getTestTypeLabel,
   } from '$lib/metrics/labels';
   import { computeDerivedMetrics } from '$lib/metrics/derived';
-  import { isBodyReport } from '$lib/report-kind';
+  import { isLabReport, isMeasurementKind } from '$lib/report-kind';
+  import { bodyDomain, vitalDomain, type MeasurementDomain } from '$lib/metrics/measurement-domains';
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
-  import BodyMeasurementsPanel from '$lib/components/BodyMeasurementsPanel.svelte';
+  import MeasurementsPanel from '$lib/components/MeasurementsPanel.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
@@ -69,6 +70,16 @@
   let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
   let trendUnitDisplay = $state<Record<string, string>>({});
   let focusedBodySessionId = $state<string | null>(null);
+
+  type DashboardTab = 'lab' | 'body' | 'vitals';
+
+  let activeTab = $state<DashboardTab>('lab');
+
+  const dashboardTabs: Array<{ id: DashboardTab; label: () => string; hint: () => string; domain?: MeasurementDomain }> = [
+    { id: 'lab', label: () => m.tab_lab_results(), hint: () => m.tab_lab_results_hint() },
+    { id: 'body', label: () => m.tab_body_measurements(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
+    { id: 'vitals', label: () => m.tab_vitals(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
+  ];
   let trendRefRangeOverride = $state<Record<string, string>>({});
 
   const currentLocale = $derived(getLocale());
@@ -168,24 +179,39 @@
 
   // Clinical reports and body measurement sessions share the report table, so
   // the dashboard lists split them apart. Trends deliberately keep both.
-  const labReports = $derived(data.reports.filter((report) => !isBodyReport(report)));
+  const labReports = $derived(data.reports.filter((report) => isLabReport(report)));
 
-  const bodyReports = $derived(data.reports.filter((report) => isBodyReport(report)));
-
-  const bodyReportIds = $derived(new Set(bodyReports.map((report) => report.id)));
-
-  const labRecords = $derived(data.records.filter((record) => !bodyReportIds.has(record.reportId)));
-
-  const bodySessions = $derived(
-    bodyReports.map((report) => ({
-      id: report.id,
-      measuredAt: report.testDate,
-      notes: getReportNotes(report),
-      records: data.records.filter((record) => record.reportId === report.id),
-    })),
+  const measurementReportIds = $derived(
+    new Set(data.reports.filter((report) => isMeasurementKind(report.kind)).map((report) => report.id)),
   );
 
-  const bodyDerivedMetrics = $derived(derivedMetrics.filter((point) => bodyReportIds.has(point.reportId)));
+  const labRecords = $derived(data.records.filter((record) => !measurementReportIds.has(record.reportId)));
+
+  function sessionsOfKind(kind: string) {
+    return data.reports
+      .filter((report) => report.kind === kind)
+      .map((report) => ({
+        id: report.id,
+        measuredAt: report.testDate,
+        notes: getReportNotes(report),
+        records: data.records.filter((record) => record.reportId === report.id),
+      }));
+  }
+
+  const measurementSessions = $derived({
+    [bodyDomain.kind]: sessionsOfKind(bodyDomain.kind),
+    [vitalDomain.kind]: sessionsOfKind(vitalDomain.kind),
+  });
+
+  function derivedOfKind(kind: string) {
+    const ids = new Set(data.reports.filter((report) => report.kind === kind).map((report) => report.id));
+    return derivedMetrics.filter((point) => ids.has(point.reportId));
+  }
+
+  const measurementDerived = $derived({
+    [bodyDomain.kind]: derivedOfKind(bodyDomain.kind),
+    [vitalDomain.kind]: derivedOfKind(vitalDomain.kind),
+  });
 
   const reportCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
@@ -1350,11 +1376,13 @@
   async function jumpToTrendPoint(point: TrendPoint) {
     // Body points live in the measurements panel, which has none of the
     // report-* / record-* nodes the lab branch below scrolls to.
-    if (point.reportId && bodyReportIds.has(point.reportId)) {
+    if (point.reportId && measurementReportIds.has(point.reportId)) {
+      const owningReport = reportLookup[point.reportId];
+      activeTab = owningReport?.kind === vitalDomain.kind ? 'vitals' : 'body';
       focusedBodySessionId = point.reportId;
       await tick();
       document
-        .getElementById(`body-session-${point.reportId}`)
+        .getElementById(`measurement-session-${point.reportId}`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -2509,7 +2537,38 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6">
+        <nav aria-label={m.dashboard_sections()} class="mt-6 border-b border-slate-200">
+          <div class="flex flex-wrap gap-1">
+            {#each dashboardTabs as tab (tab.id)}
+              <button
+                type="button"
+                onclick={() => (activeTab = tab.id)}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
+                class="group relative rounded-t-lg px-4 py-3 text-left transition-colors {activeTab === tab.id
+                  ? 'bg-white'
+                  : 'hover:bg-white/60'}"
+              >
+                <span
+                  class="block text-sm font-semibold {activeTab === tab.id ? 'text-slate-900' : 'text-slate-500 group-hover:text-slate-700'}"
+                >
+                  {tab.label()}
+                </span>
+                <span class="mt-0.5 block text-xs text-slate-400">{tab.hint()}</span>
+                <span
+                  class="absolute inset-x-0 -bottom-px h-0.5 rounded-full {activeTab === tab.id
+                    ? tab.id === 'lab'
+                      ? 'bg-teal-500'
+                      : tab.id === 'body'
+                        ? 'bg-violet-500'
+                        : 'bg-rose-500'
+                    : 'bg-transparent'}"
+                ></span>
+              </button>
+            {/each}
+          </div>
+        </nav>
+
+        <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6" hidden={activeTab !== 'lab'}>
           <div class="xl:col-span-1 border-slate-200">
             <div class="bg-white rounded-xl shadow-sm border border-slate-200 sticky top-24">
               <div class="px-6 py-4 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50 rounded-t-xl">
@@ -3659,15 +3718,23 @@
               </div>
             </div>
 
-            <BodyMeasurementsPanel
-              patientId={data.currentPatient.id}
-              sessions={bodySessions}
-              derivedPoints={bodyDerivedMetrics}
-              focusSessionId={focusedBodySessionId}
-              {formatDate}
-            />
           </div>
         </div>
+
+        {#each dashboardTabs as tab (tab.id)}
+          {#if tab.domain}
+            <div class="mt-6" hidden={activeTab !== tab.id}>
+              <MeasurementsPanel
+                domain={tab.domain}
+                patientId={data.currentPatient.id}
+                sessions={measurementSessions[tab.domain.kind]}
+                derivedPoints={measurementDerived[tab.domain.kind]}
+                focusSessionId={focusedBodySessionId}
+                {formatDate}
+              />
+            </div>
+          {/if}
+        {/each}
       {/if}
     </main>
   </div>

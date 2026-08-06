@@ -6,12 +6,12 @@ import { fail } from '@sveltejs/kit';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
 import { saveReviewedReport } from '$lib/server/report-review';
 import {
-  deleteBodyMeasurementSession,
+  deleteMeasurementSession,
   InvalidMeasurementsError,
   parseMeasuredAt,
-  saveBodyMeasurementSession,
-} from '$lib/server/body-measurements';
-import { BODY_REPORT_KIND } from '$lib/report-kind';
+  saveMeasurementSession,
+} from '$lib/server/measurements';
+import { isMeasurementKind } from '$lib/report-kind';
 import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
 function parseJsonLike(value: unknown) {
@@ -307,13 +307,15 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  saveBodyMeasurement: async ({ request, locals }) => {
+  saveMeasurement: async ({ request, locals }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const patientId = data.get('patientId')?.toString();
     const entriesStr = data.get('entries')?.toString();
+    const kind = data.get('kind')?.toString();
 
     if (!patientId || !entriesStr) return fail(400, { error: 'Missing required fields' });
+    if (!isMeasurementKind(kind)) return fail(400, { error: 'Unknown measurement kind' });
 
     const ownedPatient = await getOwnedPatient(userId, patientId);
 
@@ -344,17 +346,14 @@ export const actions: Actions = {
 
       // Without the kind check a lab report id passed here would have its date
       // and notes rewritten and every record not named in this payload deleted.
-      if (
-        !ownedSession ||
-        ownedSession.patientId !== ownedPatient.id ||
-        ownedSession.kind !== BODY_REPORT_KIND
-      ) {
+      if (!ownedSession || ownedSession.patientId !== ownedPatient.id || ownedSession.kind !== kind) {
         return fail(404, { error: 'Measurement session not found' });
       }
     }
 
     try {
-      const result = await saveBodyMeasurementSession({
+      const result = await saveMeasurementSession({
+        kind,
         patientId: ownedPatient.id,
         sessionId,
         measuredAt,
@@ -372,7 +371,7 @@ export const actions: Actions = {
     }
   },
 
-  deleteBodyMeasurement: async ({ request, locals }) => {
+  deleteMeasurement: async ({ request, locals }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const sessionId = data.get('sessionId')?.toString();
@@ -383,7 +382,7 @@ export const actions: Actions = {
 
     if (!ownedSession) return fail(404, { error: 'Measurement session not found' });
 
-    const deleted = await deleteBodyMeasurementSession(ownedSession.patientId, ownedSession.id);
+    const deleted = await deleteMeasurementSession(ownedSession.patientId, ownedSession.id);
 
     if (!deleted) return fail(404, { error: 'Measurement session not found' });
 

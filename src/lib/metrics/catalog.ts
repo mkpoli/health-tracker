@@ -1,9 +1,10 @@
 import { bodyMetricDefinitions } from './body';
+import { vitalMetricDefinitions } from './vitals';
 
 export type MetricDefinition = {
   key: string;
   canonicalLabel: string;
-  testType?: 'blood' | 'urine' | 'body' | 'other';
+  testType?: 'blood' | 'urine' | 'body' | 'vital' | 'other';
   categories?: string[];
   aliases?: string[];
   wikidataId?: string;
@@ -135,7 +136,7 @@ const labMetricCatalog: MetricDefinition[] = [
   },
 ];
 
-const metricCatalog: MetricDefinition[] = [...labMetricCatalog, ...bodyMetricDefinitions];
+const metricCatalog: MetricDefinition[] = [...labMetricCatalog, ...bodyMetricDefinitions, ...vitalMetricDefinitions];
 
 function normalizeMetricKey(value: string) {
   return value

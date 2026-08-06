@@ -1,7 +1,7 @@
 import { db } from '$lib/server/db';
 import { patient, record, report } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
-import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { isLabReport } from '$lib/report-kind';
 
 export function requireUserId(locals: App.Locals) {
   const userId = locals.user?.sub;
@@ -40,7 +40,7 @@ export async function getOwnedReport(userId: string, reportId: string) {
 export async function getOwnedLabReport(userId: string, reportId: string) {
   const currentReport = await getOwnedReport(userId, reportId);
 
-  if (!currentReport || currentReport.kind === BODY_REPORT_KIND) return null;
+  if (!currentReport || !isLabReport(currentReport)) return null;
 
   return currentReport;
 }

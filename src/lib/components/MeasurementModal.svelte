@@ -1,10 +1,13 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { untrack } from 'svelte';
   import * as m from '$lib/paraglide/messages.js';
-  import { bodyMetricFields, bodyMetricFormGroups, type BodyMetricGroupKey } from '$lib/metrics/body';
+  import type { MeasurementDomain } from '$lib/metrics/measurement-domains';
   import { getMetricDefinitionByKey } from '$lib/metrics/catalog';
   import { getDefinitionDescription, getDefinitionLabel } from '$lib/metrics/labels';
-  import { parseNumber } from '$lib/metrics/normalization';
+  import { normalizeComparableMeasurement, parseNumber } from '$lib/metrics/normalization';
+  import { computeDerivedMetrics } from '$lib/metrics/derived';
+  import { getJisBraSize } from '$lib/metrics/bra-size';
 
   export type SessionEntry = {
     metricKey: string | null;
@@ -21,29 +24,30 @@
   };
 
   let {
+    domain,
     patientId,
     sessionId = null,
     measuredAt = '',
     notes = '',
     entries = [],
+    carriedValues = {},
     onClose,
   }: {
+    domain: MeasurementDomain;
     patientId: string;
     sessionId?: string | null;
     measuredAt?: string;
     notes?: string;
     entries?: SessionEntry[];
+    /**
+     * Last known value per catalog key from earlier sessions, so the preview can
+     * show a BMI for a weigh-in whose height was recorded months ago.
+     */
+    carriedValues?: Record<string, number>;
     onClose: () => void;
   } = $props();
 
-  const groupLabels: Partial<Record<BodyMetricGroupKey, () => string>> = {
-    basics: m.measurement_group_basics,
-    composition: m.measurement_group_composition,
-    circumference: m.measurement_group_circumference,
-    skinfold: m.measurement_group_skinfold,
-  };
-
-  const catalogKeys = new Set(bodyMetricFields.flatMap((field) => [field.key, field.leftKey, field.rightKey].filter(Boolean) as string[]));
+  const catalogKeys = new Set(domain.fields.flatMap((field) => [field.key, field.leftKey, field.rightKey].filter(Boolean) as string[]));
 
   function initialValues() {
     const values: Record<string, string> = {};
@@ -58,7 +62,7 @@
   function initialUnits() {
     const units: Record<string, string> = {};
 
-    for (const field of bodyMetricFields) {
+    for (const field of domain.fields) {
       for (const key of [field.key, field.leftKey, field.rightKey].filter(Boolean) as string[]) {
         units[key] = field.unit || '';
       }
@@ -102,7 +106,7 @@
   let revealedKeys = $state<string[]>([]);
   let expandedSides = $state<Record<string, boolean>>(
     Object.fromEntries(
-      bodyMetricFields
+      domain.fields
         .filter((field) => field.sided)
         .map((field) => [
           field.key,
@@ -159,7 +163,7 @@
   const normalizedQuery = $derived(query.trim().toLowerCase());
 
   const visibleFields = $derived.by(() =>
-    bodyMetricFields.filter((field) => {
+    domain.fields.filter((field) => {
       const hasValue =
         readValue(field.key) !== '' ||
         (field.leftKey ? readValue(field.leftKey) !== '' : false) ||
@@ -175,7 +179,7 @@
   $effect(() => {
     if (!commonOnly || normalizedQuery) return;
 
-    for (const field of bodyMetricFields) {
+    for (const field of domain.fields) {
       if (field.common || revealedKeys.includes(field.key)) continue;
 
       const hasValue =
@@ -188,10 +192,10 @@
   });
 
   const groupedFields = $derived.by(() =>
-    bodyMetricFormGroups
+    domain.groups
       .map((group) => ({
         key: group,
-        label: groupLabels[group]?.() ?? group,
+        label: domain.groupLabel(group),
         fields: visibleFields.filter((field) => field.group === group),
       }))
       .filter((group) => group.fields.length > 0),
@@ -223,11 +227,47 @@
 
   const filledCount = $derived(payload.length);
 
+  // What the entered values already add up to, recomputed as they are typed.
+  // Values from earlier sessions stand in for the dependencies this session does
+  // not repeat, matching how the saved session will be read back.
+  const previewValues = $derived.by(() => {
+    const resolved = new Map<string, number>(Object.entries(carriedValues));
+
+    for (const entry of payload) {
+      if (!entry.key) continue;
+      const comparable = normalizeComparableMeasurement(entry.value, entry.unit, null).comparableValue;
+      if (comparable !== null) resolved.set(entry.key, comparable);
+    }
+
+    return resolved;
+  });
+
+  const previewItems = $derived.by(() => {
+    const points = computeDerivedMetrics([{ id: 'preview' }], new Map([['preview', previewValues]]));
+
+    const items = points.map((point) => ({
+      key: point.definition.key,
+      label: getDefinitionLabel(point.definition),
+      value: `${point.value.toFixed(point.precision)}${point.unit ? ` ${point.unit}` : ''}`,
+    }));
+
+    const bust = previewValues.get('bust-circumference');
+    const underbust = previewValues.get('underbust-circumference');
+    const braSize =
+      domain.bodyExtras && bust !== undefined && underbust !== undefined ? getJisBraSize(underbust, bust) : null;
+
+    if (braSize) {
+      items.push({ key: 'bra-size', label: m.bra_size_jis(), value: braSize });
+    }
+
+    return items;
+  });
+
   // Switching a limb between one value and two rewrites the form: the values
   // the other mode holds are cleared on screen, so nothing is pruned invisibly
   // at save time.
   function toggleSides(key: string) {
-    const field = bodyMetricFields.find((item) => item.key === key);
+    const field = domain.fields.find((item) => item.key === key);
     const opening = !expandedSides[key];
     expandedSides = { ...expandedSides, [key]: opening };
 
@@ -254,8 +294,24 @@
     customRows = customRows.filter((row) => row.id !== id);
   }
 
+  // A click on the backdrop, Escape, or Cancel must not throw away a form that
+  // may hold dozens of hand-measured values. Only an untouched dialog closes
+  // without asking.
+  const currentState = $derived(JSON.stringify({ payload, notes: sessionNotes, date: sessionDate }));
+  let baselineState = $state('');
+  const dirty = $derived(baselineState !== '' && currentState !== baselineState);
+
+  $effect(() => {
+    if (!baselineState) baselineState = untrack(() => currentState);
+  });
+
+  function requestClose() {
+    if (dirty && !confirm(m.discard_measurements_confirm())) return;
+    onClose();
+  }
+
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') onClose();
+    if (event.key === 'Escape') requestClose();
   }
 
   // Opening a 70-field dialog without moving focus leaves the keyboard behind
@@ -271,7 +327,7 @@
   class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm sm:p-8"
   role="presentation"
   onclick={(event) => {
-    if (event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) requestClose();
   }}
 >
   <div
@@ -283,7 +339,7 @@
   >
     <form
       method="POST"
-      action="?/saveBodyMeasurement"
+      action="?/saveMeasurement"
       use:enhance={() => {
         submitting = true;
         saveError = '';
@@ -309,6 +365,7 @@
       }}
     >
       <input type="hidden" name="patientId" value={patientId} />
+      <input type="hidden" name="kind" value={domain.kind} />
       <input type="hidden" name="sessionId" value={sessionId ?? ''} />
       <input type="hidden" name="measuredAt" value={measuredAtInstant} />
       <input type="hidden" name="entries" value={JSON.stringify(payload)} />
@@ -319,11 +376,11 @@
             <h2 class="text-xl font-semibold tracking-tight text-slate-900">
               {sessionId ? m.edit_measurement_session() : m.new_measurement_session()}
             </h2>
-            <p class="mt-1 text-sm text-slate-500">{m.body_measurements_subtitle()}</p>
+            <p class="mt-1 text-sm text-slate-500">{domain.subtitle()}</p>
           </div>
           <button
             type="button"
-            onclick={onClose}
+            onclick={requestClose}
             class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
             aria-label={m.close()}
           >
@@ -351,7 +408,7 @@
               type="text"
               name="notes"
               bind:value={sessionNotes}
-              placeholder={m.measurement_notes_placeholder()}
+              placeholder={domain.notesPlaceholder()}
               class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
             />
           </label>
@@ -559,6 +616,18 @@
         </section>
       </div>
 
+      {#if previewItems.length > 0}
+        <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-teal-50/40 px-6 py-3">
+          <span class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700/80">{m.computed_now()}</span>
+          {#each previewItems as item (item.key)}
+            <span class="rounded-full border border-teal-200 bg-white px-3 py-1 text-sm text-slate-700">
+              {item.label}
+              <span class="ml-1 font-semibold text-slate-900">{item.value}</span>
+            </span>
+          {/each}
+        </div>
+      {/if}
+
       <footer class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4">
         {#if saveError}
           <p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700" role="alert">
@@ -570,7 +639,7 @@
         <div class="flex items-center gap-3">
           <button
             type="button"
-            onclick={onClose}
+            onclick={requestClose}
             class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
           >
             {m.cancel()}
