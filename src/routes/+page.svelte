@@ -1161,6 +1161,25 @@
     });
   });
 
+  // Dismissal watches for a pointer landing outside the combobox rather than
+  // for the input losing focus. iOS does not focus a button when it is tapped,
+  // so a focusout-based close tore the option list down before the tap on it
+  // could register — the search looked broken on every phone.
+  $effect(() => {
+    if (!trendComboboxOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && trendComboboxContainer?.contains(target)) return;
+
+      trendComboboxOpen = false;
+      trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
+    };
+
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  });
+
   function updateFormHints() {
     if (recordType === 'Blood Pressure') {
       valuePlaceholder = '120/80';
@@ -2983,17 +3002,7 @@
                             </svg>
                           </button>
 
-                          <div
-                            bind:this={trendComboboxContainer}
-                            class="relative flex-1"
-                            onfocusout={(event) => {
-                              const nextTarget = event.relatedTarget as Node | null;
-                              if (!nextTarget || !trendComboboxContainer?.contains(nextTarget)) {
-                                trendComboboxOpen = false;
-                                trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
-                              }
-                            }}
-                          >
+                          <div bind:this={trendComboboxContainer} class="relative flex-1">
                             <input
                               type="text"
                               bind:value={trendSearchQuery}
