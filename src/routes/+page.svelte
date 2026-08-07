@@ -26,13 +26,16 @@
     getMetricLabel,
     getTestTypeLabel,
   } from '$lib/metrics/labels';
+  import { buildTrendMetrics, type TrendPoint } from '$lib/metrics/trends';
   import { computeDerivedMetrics } from '$lib/metrics/derived';
   import { isLabReport, isMeasurementKind } from '$lib/report-kind';
   import { bodyDomain, vitalDomain, type MeasurementDomain } from '$lib/metrics/measurement-domains';
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
   import MeasurementsPanel from '$lib/components/MeasurementsPanel.svelte';
+  import TrendSection from '$lib/components/TrendSection.svelte';
   import ImportModal from '$lib/components/ImportModal.svelte';
+  import AddRecordModal from '$lib/components/AddRecordModal.svelte';
   import FileDropZone from '$lib/components/FileDropZone.svelte';
   import AddPatientModal from '$lib/components/AddPatientModal.svelte';
   import AuthStatus from '$lib/components/AuthStatus.svelte';
@@ -58,21 +61,14 @@
   let showPatientModal = $state(false);
   let showDeleteModal = $state(false);
   let showImportModal = $state(false);
+  let showAddRecordModal = $state(false);
 
-  let selectedRecordIds = $state<string[]>([]);
-  let selectedTrendMetric = $state('');
-  let trendSearchQuery = $state('');
-  let trendComboboxOpen = $state(false);
-  let lastSyncedTrendMetric = $state('');
+  let selectedRecordIds = $state<string[]>([]);  let trendSearchQuery = $state('');  let lastSyncedTrendMetric = $state('');
   let reportFacilityName = $state('');
   let reportTestDate = $state('');
   let reportRawSource = $state('');
   let reviewTargetReportId = $state<ReportDestination>('new');
-  let expandedReportIds = $state<string[]>([]);
-  let trendComboboxContainer = $state<HTMLDivElement | null>(null);
-  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});
-  let trendUnitDisplay = $state<Record<string, string>>({});
-  let focusedBodySessionId = $state<string | null>(null);
+  let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
   type DashboardTab = 'lab' | 'body' | 'vitals';
 
@@ -99,9 +95,22 @@
 
   const activeTabMeta = $derived(dashboardTabs.find((tab) => tab.id === activeTab) ?? dashboardTabs[0]);
 
-  let mobileMenuOpen = $state(false);
-  let trendRefRangeOverride = $state<Record<string, string>>({});
+  let accountMenuOpen = $state(false);
 
+  // Same dismissal rule as the metric combobox: a pointer outside closes it,
+  // which a tap satisfies where a focus change does not.
+  $effect(() => {
+    if (!accountMenuOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.('[data-account-menu]')) return;
+      accountMenuOpen = false;
+    };
+
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  });
   const currentLocale = $derived(getLocale());
 
   type TrendPoint = {
@@ -157,21 +166,6 @@
   type TrendMetricGroup = {
     metricName: string;
     points: TrendPoint[];
-  };
-
-  type TrendMetricOption = {
-    metricName: string;
-    label: string;
-    testType: string;
-    testTypeLabel: string;
-    categoryKeys: string[];
-    categoryLabels: string[];
-    primaryGroupKey: string;
-    primaryGroupLabel: string;
-    secondaryGroupKey: string;
-    secondaryGroupLabel: string;
-    readingCount: number;
-    searchText: string;
   };
 
   const reportLookup = $derived(Object.fromEntries(data.reports.map((report) => [report.id, report])));
@@ -273,385 +267,35 @@
     })),
   );
 
-  const trendMetrics = $derived.by(() => {
-    const grouped = new Map<string, TrendPoint[]>();
-
-    for (const item of data.records) {
-      const numericValue = getRecordComparableValue(item);
-
-      if (numericValue === null) continue;
-
-      const report = reportLookup[item.reportId];
-      const point: TrendPoint = {
-        id: item.id,
-        metricName: getMetricDefinition(item.metricName).canonicalLabel,
-        value: numericValue,
-        rawValue: item.value,
-        unit: getRecordComparableUnit(item),
-        rawUnit: item.unit,
-        status: item.status,
-        date: report?.testDate || null,
-        chartDate: formatDate(report?.testDate || null, { dateStyle: 'medium' }),
-        formattedDate: formatDate(report?.testDate || null),
-        refRange: getRecordComparableRange(item),
-        rawRefRange: item.refRange,
-        reportId: item.reportId,
-        calculated: false,
-      };
-
-      // Keyed on the catalog label, so a value recorded as "Weight" by the lab
-      // extractor and one logged as "Body Weight" stay a single series.
-      const seriesName = getMetricDefinition(item.metricName).canonicalLabel;
-      const existing = grouped.get(seriesName) || [];
-      existing.push(point);
-      grouped.set(seriesName, existing);
-    }
-
-    for (const point of derivedMetrics) {
-      const report = reportLookup[point.reportId];
-      const calculatedPoint: TrendPoint = {
-        id: `calculated:${point.reportId}:${point.definition.key}`,
-        metricName: point.definition.canonicalLabel,
-        value: point.value,
-        rawValue: point.value.toFixed(point.precision),
-        unit: point.unit,
-        rawUnit: point.unit,
-        status: null,
-        date: report?.testDate || null,
-        chartDate: formatDate(report?.testDate || null, { dateStyle: 'medium' }),
-        formattedDate: formatDate(report?.testDate || null),
-        refRange: null,
-        rawRefRange: null,
-        reportId: point.reportId,
-        calculated: true,
-      };
-
-      const existing = grouped.get(point.definition.canonicalLabel) || [];
-      existing.push(calculatedPoint);
-      grouped.set(point.definition.canonicalLabel, existing);
-    }
-
-    return Array.from(grouped.entries())
-      .map(([metricName, points]) => ({
-        metricName,
-        points: points.sort((a, b) => {
-          const aTime = a.date ? new Date(a.date).getTime() : 0;
-          const bTime = b.date ? new Date(b.date).getTime() : 0;
-          return aTime - bTime;
-        }),
-      }))
-      .filter(({ points }) => points.length > 0)
-      .sort((a, b) => b.points.length - a.points.length || a.metricName.localeCompare(b.metricName));
-  });
-
-  const selectedTrend = $derived(
-    trendMetrics.find(({ metricName }) => metricName === selectedTrendMetric) || trendMetrics[0],
-  );
-
-  const selectedTrendDefinition = $derived(getMetricDefinition(selectedTrend?.metricName));
-  const selectedTrendLabel = $derived(getMetricLabel(selectedTrend?.metricName));
-  const selectedTrendTags = $derived(getMetricTags(selectedTrendDefinition));
-  const selectedTrendWikidataUrl = $derived(getMetricWikidataUrl(selectedTrendDefinition));
-  const selectedTrendWikipediaUrl = $derived(getMetricWikipediaUrl(selectedTrendDefinition, currentLocale));
-  const selectedTrendWikipediaFallbackUrl = $derived(getMetricWikipediaFallbackUrl(selectedTrendDefinition));
-
-  const groupedTrendMetrics = $derived.by(() => {
-    const groups = new Map<string, { key: string; label: string; metrics: TrendMetricGroup[] }>();
-
-    for (const metric of trendMetrics) {
-      const definition = getMetricDefinition(metric.metricName);
-      const tags = getMetricTags(definition);
-      const primaryCategory = tags.categories[0] || 'other';
-      const groupKey = primaryCategory;
-      const existing = groups.get(groupKey) || {
-        key: groupKey,
-        label: getCategoryLabel(groupKey),
-        metrics: [] as TrendMetricGroup[],
-      };
-
-      existing.metrics.push(metric);
-      groups.set(groupKey, existing);
-    }
-
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        metrics: group.metrics.sort((a, b) => getMetricLabel(a.metricName).localeCompare(getMetricLabel(b.metricName))),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  });
-
-  const trendMetricOptions = $derived.by(() =>
-    trendMetrics.map((metric) => {
-      const definition = getMetricDefinition(metric.metricName);
-      const tags = getMetricTags(definition);
-      const categoryKeys = tags.categories.length ? tags.categories : ['other'];
-      const categoryLabels = categoryKeys.map(getCategoryLabel);
-
-      return {
-        metricName: metric.metricName,
-        label: getMetricLabel(metric.metricName),
-        testType: tags.testType,
-        testTypeLabel: getTestTypeLabel(tags.testType),
-        categoryKeys,
-        categoryLabels,
-        primaryGroupKey: categoryKeys[0] || 'other',
-        primaryGroupLabel: categoryLabels[0] || getCategoryLabel('other'),
-        secondaryGroupKey: categoryKeys[1] || 'general',
-        secondaryGroupLabel: categoryLabels[1] || 'General',
-        readingCount: metric.points.length,
-        searchText: [
-          metric.metricName,
-          getMetricLabel(metric.metricName),
-          definition.canonicalLabel,
-          ...(definition.aliases || []),
-          tags.testType,
-          ...categoryKeys,
-          ...categoryLabels,
-        ]
-          .map((value) => normalizeMetricMatchKey(value))
-          .filter(Boolean)
-          .join(' '),
-      } satisfies TrendMetricOption;
-    }),
-  );
-
-  const filteredTrendMetricOptions = $derived.by(() => {
-    const query = normalizeMetricMatchKey(trendSearchQuery);
-    const selectedLabelQuery = normalizeMetricMatchKey(selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '');
-
-    if (!query || query === selectedLabelQuery) return trendMetricOptions;
-
-    return trendMetricOptions.filter((option) => option.searchText.includes(query));
-  });
-
-  const groupedTrendMetricOptions = $derived.by(() => {
-    const groups = new Map<
-      string,
-      {
-        key: string;
-        label: string;
-        sections: Map<string, { key: string; label: string; options: TrendMetricOption[] }>;
-      }
-    >();
-
-    for (const option of filteredTrendMetricOptions) {
-      const group = groups.get(option.primaryGroupKey) || {
-        key: option.primaryGroupKey,
-        label: option.primaryGroupLabel,
-        sections: new Map(),
-      };
-      const section = group.sections.get(option.secondaryGroupKey) || {
-        key: option.secondaryGroupKey,
-        label: option.secondaryGroupLabel,
-        options: [],
-      };
-
-      section.options.push(option);
-      group.sections.set(option.secondaryGroupKey, section);
-      groups.set(option.primaryGroupKey, group);
-    }
-
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        sections: Array.from(group.sections.values())
-          .map((section) => ({
-            ...section,
-            options: section.options.sort((a, b) => a.label.localeCompare(b.label)),
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label)),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  });
-
-  const trendChart = $derived.by(() => {
-    const series = selectedTrend?.points || [];
-
-    if (series.length === 0) {
-      return null;
-    }
-
-    const metricName = selectedTrend?.metricName ?? '';
-    const latest = series[series.length - 1];
-
-    // Y is always plotted in the canonical comparable-unit space (so points
-    // with different rawUnits land at heights you can actually compare). Labels
-    // are rendered separately, in whichever display unit the user picked.
-    const plotValues = series.map((p) => p.value);
-
-    const override = trendRefRangeOverride[metricName] ?? null;
-    const overrideRange = override ? parseReferenceRange(override) : null;
-    const parsedRanges = series.map((point) => parseReferenceRange(point.refRange)).filter(Boolean) as ParsedRefRange[];
-    const bounds: number[] = [...plotValues];
-
-    // The override range comes in as text typed against the picker's "current
-    // unit" (the latest record's comparable unit), so its numbers are already
-    // in the chart's comparable-unit space. Recorded ranges come from each
-    // point's raw refRange string and were normalized into comparable units in
-    // trendMetrics — same space.
-    const rangesForBounds = overrideRange ? [overrideRange] : parsedRanges;
-    for (const range of rangesForBounds) {
-      if (range.low !== null) bounds.push(range.low);
-      if (range.high !== null) bounds.push(range.high);
-    }
-
-    const rawMin = Math.min(...bounds);
-    const rawMax = Math.max(...bounds);
-    const spread = rawMax - rawMin || Math.max(Math.abs(rawMax) * 0.1, 1);
-    const min = rawMin - spread * 0.18;
-    const max = rawMax + spread * 0.18;
-    const width = 640;
-    const height = 220;
-    const left = 20;
-    const right = 20;
-    const top = 14;
-    const bottom = 36;
-    const chartWidth = width - left - right;
-    const chartHeight = height - top - bottom;
-    const xStep = series.length > 1 ? chartWidth / (series.length - 1) : 0;
-
-    const xForIndex = (index: number) => left + index * xStep;
-    const yForValue = (value: number) => top + ((max - value) / (max - min || 1)) * chartHeight;
-
-    const line = plotValues.map((v, index) => `${xForIndex(index)},${yForValue(v)}`).join(' ');
-    const area = `${line} ${xForIndex(series.length - 1)},${height - bottom} ${xForIndex(0)},${height - bottom}`;
-
-    const previous = series.length > 1 ? series[series.length - 2] : null;
-    const delta = previous ? latest.value - previous.value : null;
-    const activeRange =
-      overrideRange ||
-      parseReferenceRange(latest.refRange) ||
-      parsedRanges.find((range) => range.low !== null || range.high !== null) ||
-      null;
-    const latestDisplayStatus = getStatusFromRange(latest.value, activeRange, latest.status);
-
-    let refRangePath = '';
-    // 'solid' = both bounds; 'fadeDown' = only upper bound (<X), fade toward
-    // chart bottom; 'fadeUp' = only lower bound (>X), fade toward chart top.
-    let refRangeFill: 'solid' | 'fadeDown' | 'fadeUp' = 'solid';
-
-    if (activeRange) {
-      const hasLow = activeRange.low !== null;
-      const hasHigh = activeRange.high !== null;
-      const chartTopY = top;
-      const chartBottomY = height - bottom;
-
-      if (hasLow && hasHigh) {
-        const upper = `${left},${yForValue(activeRange.high!)} ${width - right},${yForValue(activeRange.high!)}`;
-        const lower = `${width - right},${yForValue(activeRange.low!)} ${left},${yForValue(activeRange.low!)}`;
-        refRangePath = `${upper} ${lower}`;
-      } else if (hasHigh) {
-        // <X — band from chart bottom up to high; fade toward bottom.
-        const highY = yForValue(activeRange.high!);
-        refRangePath = `${left},${highY} ${width - right},${highY} ${width - right},${chartBottomY} ${left},${chartBottomY}`;
-        refRangeFill = 'fadeDown';
-      } else if (hasLow) {
-        // >X — band from low up to chart top; fade toward top.
-        const lowY = yForValue(activeRange.low!);
-        refRangePath = `${left},${chartTopY} ${width - right},${chartTopY} ${width - right},${lowY} ${left},${lowY}`;
-        refRangeFill = 'fadeUp';
-      }
-    }
-
-    const rawUnits = new Set(series.map((point) => point.rawUnit || '').filter(Boolean));
-    const hasMixedUnits = rawUnits.size > 1;
-    const overrideActive = Boolean(overrideRange);
-
-    const unitCandidateSet = new Set<string>();
-    for (const point of series) {
-      const r = canonicalUnitForm(point.rawUnit);
-      if (r) unitCandidateSet.add(r);
-      const c = canonicalUnitForm(point.unit);
-      if (c) unitCandidateSet.add(c);
-    }
-    const unitOptions = Array.from(unitCandidateSet);
-
-    return {
-      width,
-      height,
-      line,
-      area,
-      points: series.map((point, index) => ({
-        ...point,
-        x: xForIndex(index),
-        y: yForValue(plotValues[index]),
-      })),
-      firstDate: series[0].formattedDate,
-      lastDate: latest.formattedDate,
-      latest,
-      latestDisplayStatus,
-      delta,
-      refRange: activeRange,
-      refRangePath,
-      refRangeFill,
-      hasMixedUnits,
-      overrideActive,
-      unitOptions,
-    };
-  });
-
-  const currentTrendUnitMode = $derived.by(() => {
-    if (!selectedTrend) return 'asRecorded';
-    return trendUnitDisplay[selectedTrend.metricName] || 'asRecorded';
-  });
-
-  const trendDisplay = $derived.by(() => {
-    if (!trendChart || !selectedTrend) return null;
-    const mode = currentTrendUnitMode;
-    const latestRendered = renderTrendPointLabel(trendChart.latest, mode);
-
-    const points = selectedTrend.points;
-    let delta: number | null = null;
-    if (points.length > 1) {
-      const previousRendered = renderTrendPointLabel(points[points.length - 2], mode);
-      const latestNum = Number(latestRendered.value);
-      const previousNum = Number(previousRendered.value);
-      if (Number.isFinite(latestNum) && Number.isFinite(previousNum)) {
-        delta = latestNum - previousNum;
-      }
-    }
-
-    const refSourceUnit = canonicalUnitForm(trendChart.latest.rawUnit);
-    const refRangeLabel = trendChart.refRange
-      ? convertRefRangeText(trendChart.refRange.label, refSourceUnit, latestRendered.unit) || trendChart.refRange.label
-      : null;
-
-    return {
-      latestValue: latestRendered.value,
-      latestUnit: latestRendered.unit,
-      delta,
-      refRangeLabel,
-    };
-  });
-
-  function renderTrendPointLabel(point: TrendPoint, mode: string): { value: string; unit: string | null } {
-    if (mode === 'asRecorded') {
-      return { value: point.rawValue, unit: canonicalUnitForm(point.rawUnit) };
-    }
-    const source = canonicalUnitForm(point.rawUnit);
-    const sourceValueRaw = Number(point.rawValue);
-    const sourceValue = Number.isFinite(sourceValueRaw) ? sourceValueRaw : point.value;
-    if (source === mode) {
-      return { value: formatConvertedValue(sourceValue), unit: mode };
-    }
-    const converted = convertValueBetweenUnits(sourceValue, source, mode);
-    if (converted === null) {
-      return { value: point.rawValue, unit: canonicalUnitForm(point.rawUnit) };
-    }
-    return { value: formatConvertedValue(converted), unit: mode };
+  // One series set per section, so each tab charts its own domain.
+  function trendsFor(records: typeof data.records, reports: typeof data.reports) {
+    return buildTrendMetrics({
+      records,
+      reports,
+      comparableValue: getRecordComparableValue,
+      comparableUnit: getRecordComparableUnit,
+      comparableRange: getRecordComparableRange,
+      formatDate,
+    }).metrics;
   }
 
-  function convertRefRangeText(refRange: string | null | undefined, fromUnit: string | null | undefined, toUnit: string | null | undefined): string | null {
-    if (!refRange) return null;
-    if (!toUnit || !fromUnit || canonicalUnitForm(fromUnit) === canonicalUnitForm(toUnit)) return refRange;
-    return refRange.replace(/(?<![\d.])[+-]?\d*\.?\d+/g, (match) => {
-      const parsed = Number(match);
-      if (!Number.isFinite(parsed)) return match;
-      const converted = convertValueBetweenUnits(parsed, fromUnit, toUnit);
-      return converted === null ? match : formatConvertedValue(converted);
-    });
+  const labTrendMetrics = $derived(trendsFor(labRecords, labReports));
+
+  const measurementTrends = $derived({
+    [bodyDomain.kind]: trendsFor(
+      data.records.filter((record) => kindOfReport(record.reportId) === bodyDomain.kind),
+      data.reports.filter((report) => report.kind === bodyDomain.kind),
+    ),
+    [vitalDomain.kind]: trendsFor(
+      data.records.filter((record) => kindOfReport(record.reportId) === vitalDomain.kind),
+      data.reports.filter((report) => report.kind === vitalDomain.kind),
+    ),
+  });
+
+  function kindOfReport(reportId: string) {
+    return reportLookup[reportId]?.kind ?? 'lab';
   }
+
 
   let allRecordsSelected = $derived(labRecords.length > 0 && selectedRecordIds.length === labRecords.length);
 
@@ -1069,35 +713,6 @@
     return fallbackStatus || null;
   }
 
-  function stepTrendMetric(direction: -1 | 1) {
-    if (trendMetrics.length === 0) return;
-
-    const currentIndex = trendMetrics.findIndex((metric) => metric.metricName === selectedTrendMetric);
-    const safeIndex = currentIndex === -1 ? 0 : currentIndex;
-    const nextIndex = (safeIndex + direction + trendMetrics.length) % trendMetrics.length;
-    selectedTrendMetric = trendMetrics[nextIndex].metricName;
-    trendSearchQuery = getMetricLabel(trendMetrics[nextIndex].metricName);
-  }
-
-  function selectTrendMetric(metricName: string) {
-    selectedTrendMetric = metricName;
-    trendSearchQuery = getMetricLabel(metricName);
-    trendComboboxOpen = false;
-  }
-
-  function handleTrendComboboxKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      trendComboboxOpen = false;
-      trendSearchQuery = getMetricLabel(selectedTrendMetric);
-      return;
-    }
-
-    if (event.key === 'Enter' && filteredTrendMetricOptions.length > 0) {
-      event.preventDefault();
-      selectTrendMetric(filteredTrendMetricOptions[0].metricName);
-    }
-  }
-
   function normalizeDateTimeLocal(value?: string | null) {
     if (!value) return '';
 
@@ -1132,14 +747,6 @@
     return '';
   }
 
-  function shouldShowTrendPointDate(index: number, total: number) {
-    if (total <= 6) return true;
-    if (index === 0 || index === total - 1) return true;
-
-    const interval = Math.max(2, Math.round(total / 5));
-    return index % interval !== interval - 1;
-  }
-
   $effect(() => {
     // Reset selection when patient changes
     data.currentPatient?.id;
@@ -1147,55 +754,6 @@
     reportFacilityName = '';
     reportTestDate = '';
     expandedReportIds = labReports[0] ? [labReports[0].id] : [];
-  });
-
-  $effect(() => {
-    trendMetrics;
-
-    if (!trendMetrics.length) {
-      selectedTrendMetric = '';
-      lastSyncedTrendMetric = '';
-      trendSearchQuery = '';
-      return;
-    }
-
-    if (!trendMetrics.some(({ metricName }) => metricName === selectedTrendMetric)) {
-      selectedTrendMetric = trendMetrics[0].metricName;
-    }
-
-    if (selectedTrendMetric !== lastSyncedTrendMetric) {
-      trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
-      lastSyncedTrendMetric = selectedTrendMetric;
-    }
-  });
-
-  $effect(() => {
-    if (!trendComboboxOpen) return;
-
-    const selectedMetric = selectedTrendMetric;
-
-    tick().then(() => {
-      trendOptionButtons[selectedMetric]?.scrollIntoView({ block: 'nearest' });
-    });
-  });
-
-  // Dismissal watches for a pointer landing outside the combobox rather than
-  // for the input losing focus. iOS does not focus a button when it is tapped,
-  // so a focusout-based close tore the option list down before the tap on it
-  // could register — the search looked broken on every phone.
-  $effect(() => {
-    if (!trendComboboxOpen) return;
-
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && trendComboboxContainer?.contains(target)) return;
-
-      trendComboboxOpen = false;
-      trendSearchQuery = selectedTrendMetric ? getMetricLabel(selectedTrendMetric) : '';
-    };
-
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
   });
 
   function updateFormHints() {
@@ -1967,122 +1525,122 @@
   <div class="min-h-screen bg-slate-50 font-sans text-slate-800 pb-10 sm:pb-10" style="padding-bottom: calc(var(--mobile-nav-height) + var(--safe-bottom))">
     <!-- Top Navigation -->
     <header
-      class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm"
+      class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur"
       style="padding-top: var(--safe-top)"
     >
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between items-center gap-2 h-14 sm:h-16">
-          <div class="flex min-w-0 items-center gap-2 sm:gap-3">
-            <div
-              class="w-9 h-9 shrink-0 bg-teal-600 rounded-lg flex items-center justify-center text-white shadow-sm ring-1 ring-teal-700/50"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="2.5"
-                stroke="currentColor"
-                class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
-              >
-            </div>
-            <h1 class="truncate text-lg sm:text-xl font-semibold tracking-tight text-slate-900">
-              {m.app_title()} <span class="hidden text-teal-600 font-bold sm:inline">{m.app_pro()}</span>
-            </h1>
+      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4 sm:h-16 sm:px-6 lg:px-8">
+        <div class="flex min-w-0 items-center gap-2 sm:gap-3">
+          <div
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm ring-1 ring-teal-700/50"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="h-5 w-5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
           </div>
+          <h1 class="truncate text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
+            {m.app_title()}
+          </h1>
+        </div>
 
-          <div class="flex shrink-0 items-center gap-2 sm:gap-4 lg:gap-6">
-            <a
-              href="/admin"
-              class="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900 sm:inline-flex"
+        <!-- Two controls only: the profile being viewed, and everything about
+             the account behind one avatar. -->
+        <div class="flex shrink-0 items-center gap-2">
+          <form method="GET" action="/" class="contents">
+            <select
+              name="patientId"
+              aria-label={m.patient_dashboard()}
+              onchange={(e) => e.currentTarget.form?.submit()}
+              class="max-w-[9rem] truncate rounded-lg border-slate-300 bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-medium text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 sm:max-w-none"
             >
-              {m.admin()}
-            </a>
-            <!-- Patient Selector -->
-            <div class="flex items-center gap-2">
-              <form method="GET" action="/" class="flex flex-row items-center gap-2">
-                <select
-                  name="patientId"
-                  aria-label={m.patient_dashboard()}
-                  onchange={(e) => e.currentTarget.form?.submit()}
-                  class="block w-full max-w-[9rem] sm:max-w-none truncate pl-3 pr-8 py-1.5 text-sm border-slate-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md bg-slate-50 font-medium"
-                >
-                  {#if data.patients.length === 0}
-                    <option disabled>{m.no_patients()}</option>
-                  {/if}
-                  {#each data.patients as p}
-                    <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
-                  {/each}
-                </select>
-              </form>
-              <button
-                onclick={() => (showPatientModal = true)}
-                class="flex items-center justify-center w-9 h-9 shrink-0 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-teal-700 border border-slate-200 transition-colors"
-                aria-label={m.nav_add_patient()}
-                title={m.nav_add_patient()}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke-width="2"
-                  stroke="currentColor"
-                  class="w-4 h-4"
-                  ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
-                >
-              </button>
-            </div>
+              {#if data.patients.length === 0}
+                <option disabled>{m.no_patients()}</option>
+              {/if}
+              {#each data.patients as p}
+                <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
+              {/each}
+            </select>
+          </form>
 
-            <div class="hidden md:block">
-              <LanguageSwitcher />
-            </div>
+          <button
+            type="button"
+            onclick={() => (showPatientModal = true)}
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 transition-colors hover:bg-white hover:text-teal-700"
+            aria-label={m.nav_add_patient()}
+            title={m.nav_add_patient()}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-4 w-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
 
-            <div class="hidden xl:block">
-              <AuthStatus user={data.session?.user} />
-            </div>
-
-            <div class="w-px h-6 bg-slate-200 hidden sm:block"></div>
-
+          <div class="relative" data-account-menu>
             <button
               type="button"
-              onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
-              aria-expanded={mobileMenuOpen}
-              aria-label={m.more_options()}
-              class="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 md:hidden"
+              onclick={() => (accountMenuOpen = !accountMenuOpen)}
+              aria-expanded={accountMenuOpen}
+              aria-label={m.account_menu()}
+              class="flex h-9 w-9 items-center justify-center rounded-full border border-teal-200 bg-teal-100 text-sm font-bold uppercase text-teal-700 transition-colors hover:bg-teal-200"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              </svg>
+              {(data.session?.user?.name || data.currentPatient?.name || '?').substring(0, 2)}
             </button>
 
-            {#if data.currentPatient}
+            {#if accountMenuOpen}
               <div
-                class="hidden sm:flex w-9 h-9 rounded-full bg-teal-100 border border-teal-200 shadow-sm overflow-hidden items-center justify-center text-teal-700 font-bold text-sm uppercase"
+                class="absolute right-0 z-40 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+                role="menu"
+                tabindex="-1"
               >
-                {data.currentPatient.name.substring(0, 2)}
+                {#if data.session?.user}
+                  <div class="border-b border-slate-100 px-4 py-3">
+                    <p class="truncate text-sm font-semibold text-slate-900">{data.session.user.name || m.account_menu()}</p>
+                    <p class="truncate text-xs text-slate-500">{data.session.user.email || ''}</p>
+                  </div>
+                {/if}
+
+                <div class="border-b border-slate-100 px-3 py-3">
+                  <LanguageSwitcher />
+                </div>
+
+                <div class="p-2">
+                  <a
+                    href="/admin"
+                    class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    {m.admin()}
+                  </a>
+                  <a
+                    href="/auth/logout"
+                    class="block rounded-lg px-3 py-2 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50"
+                  >
+                    {m.log_out()}
+                  </a>
+                </div>
               </div>
             {/if}
           </div>
         </div>
-
-        {#if mobileMenuOpen}
-          <div class="border-t border-slate-100 py-3 md:hidden">
-            <div class="flex flex-col gap-3">
-              <LanguageSwitcher />
-              <AuthStatus user={data.session?.user} compact={true} />
-              <a
-                href="/admin"
-                class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center text-sm font-medium text-slate-600"
-              >
-                {m.admin()}
-              </a>
-            </div>
-          </div>
-        {/if}
       </div>
     </header>
 
     {#if showPatientModal}
       <AddPatientModal onClose={() => (showPatientModal = false)} />
+    {/if}
+
+    {#if showAddRecordModal && data.currentPatient}
+      <AddRecordModal
+        patientId={data.currentPatient.id}
+        bind:smartUploadActive
+        bind:recordType
+        {valueLabel}
+        {valuePlaceholder}
+        {homepageExtractFile}
+        bind:homepageExtractInput
+        {homepageExtractSubmitting}
+        onExtractFileSelect={(file, list) => setHomepageExtractFile(file, list)}
+        onExtractPaste={handleHomepageExtractPaste}
+        onExtractSubmit={startHomepageExtractSubmit}
+        onClose={() => (showAddRecordModal = false)}
+      />
     {/if}
 
     {#if showImportModal && data.currentPatient}
@@ -2660,213 +2218,8 @@
           <p class="truncate text-xs text-slate-400">{activeTabMeta.hint()}</p>
         </div>
 
-        <div class="grid grid-cols-1 xl:grid-cols-4 gap-8 mt-6" hidden={activeTab !== 'lab'}>
-          <div class="xl:col-span-1 border-slate-200">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 sticky top-24">
-              <div class="px-6 py-4 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50 rounded-t-xl">
-                <div class="flex items-center">
-                  <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
-                  <h3 class="text-lg font-semibold text-slate-800">{m.add_clinical_record()}</h3>
-                </div>
-                <div class="flex bg-slate-200/50 p-1 rounded-lg">
-                  <button
-                    class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {!smartUploadActive
-                      ? 'bg-white text-slate-800 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'}"
-                    onclick={() => (smartUploadActive = false)}
-                  >
-                    {m.manual()}
-                  </button>
-                  <button
-                    class="flex-1 py-1.5 text-sm font-medium rounded-md transition-colors {smartUploadActive
-                      ? 'bg-white text-slate-800 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'}"
-                    onclick={() => (smartUploadActive = true)}
-                  >
-                    {m.test_result()}
-                  </button>
-                </div>
-              </div>
-              <div class="p-6">
-                {#if !smartUploadActive}
-                  <form method="POST" action="?/addManualRecord" use:enhance class="space-y-5">
-                    <input type="hidden" name="patientId" value={data.currentPatient.id} />
-                    <div>
-                      <label for="manual-facility" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{m.lab_or_hospital()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
-                      >
-                      <input
-                        type="text"
-                        name="facilityName"
-                        id="manual-facility"
-                        placeholder={m.facility_example()}
-                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label for="metric-type" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{m.metric_type()}</label
-                      >
-                      <div class="relative">
-                        <select
-                          id="metric-type"
-                          name="type"
-                          bind:value={recordType}
-                          class="appearance-none w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 pl-3 pr-10 border outline-none transition-colors"
-                        >
-                          <option value="Blood Pressure">{getMetricLabel('Blood Pressure')}</option>
-                          <option value="Blood Glucose">{getMetricLabel('Blood Glucose')}</option>
-                          <option value="Cholesterol">{getMetricLabel('Cholesterol')}</option>
-                          <option value="Other">{m.other_lab_metric()}</option>
-                        </select>
-                        <div
-                          class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500"
-                        >
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            ><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"
-                            ></path></svg
-                          >
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <label for="metric-value" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{valueLabel}</label
-                      >
-                      <input
-                        type="text"
-                        name="value"
-                        id="metric-value"
-                        placeholder={valuePlaceholder}
-                        required
-                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label for="date-time" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{m.date_time()}</label
-                      >
-                      <input
-                        type="datetime-local"
-                        name="date"
-                        id="date-time"
-                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label for="notes" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{m.clinical_notes()} <span class="text-slate-400 font-normal">({m.optional()})</span></label
-                      >
-                      <textarea
-                        name="notes"
-                        id="notes"
-                        rows="3"
-                        placeholder={m.condition_details()}
-                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
-                      ></textarea>
-                    </div>
-                    <div class="pt-2">
-                      <button
-                        type="submit"
-                        class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke-width="2.5"
-                          stroke="currentColor"
-                          class="w-4 h-4 mr-2"
-                          ><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg
-                        >
-                        {m.save_record()}
-                      </button>
-                    </div>
-                  </form>
-                {:else}
-                  <form
-                    method="POST"
-                    action={`/extract?/extract&patientId=${data.currentPatient.id}`}
-                    enctype="multipart/form-data"
-                    class="space-y-5"
-                    onsubmit={startHomepageExtractSubmit}
-                  >
-                    <div>
-                      <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
-                      <FileDropZone
-                        name="file"
-                        accept="image/*,application/pdf"
-                        extensions={['.png', '.jpg', '.jpeg', '.webp', '.heic', '.gif', '.pdf']}
-                        bind:inputRef={homepageExtractInput}
-                        selectedFile={homepageExtractFile}
-                        title={m.upload_file()}
-                        hint={m.file_size_hint()}
-                        onSelect={(file, list) => setHomepageExtractFile(file, list)}
-                      />
-                    </div>
-                    <div>
-                      <label for="homepage-extract-text" class="block text-sm font-semibold text-slate-700 mb-1.5"
-                        >{m.paste_raw_text()}</label
-                      >
-                      <textarea
-                        id="homepage-extract-text"
-                        name="text"
-                        rows="3"
-                        placeholder={m.paste_lab_results()}
-                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors resize-none placeholder-slate-400"
-                        onpaste={handleHomepageExtractPaste}
-                      ></textarea>
-                    </div>
-                    <div class="pt-2">
-                      <button
-                        type="submit"
-                        disabled={homepageExtractSubmitting}
-                        class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
-                      >
-                        {#if homepageExtractSubmitting}
-                          <svg
-                            class="-ml-1 mr-2 h-4 w-4 animate-spin text-white"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            ><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
-                            ></circle><path
-                              class="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            ></path></svg
-                          >
-                          Preparing review...
-                        {:else}
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke-width="2.5"
-                            stroke="currentColor"
-                            class="w-4 h-4 mr-2"
-                            ><path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"
-                            ></path></svg
-                          >
-                          {m.smart_extract()}
-                        {/if}
-                      </button>
-                    </div>
-                    {#if homepageExtractSubmitting}
-                      <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-                        Uploading the document and extracting metrics. This can take a little while for larger files.
-                      </div>
-                    {/if}
-                  </form>
-                {/if}
-              </div>
-            </div>
-          </div>
-
-          <div class="xl:col-span-3 space-y-6">
+        <div class="mt-6" hidden={activeTab !== 'lab'}>
+          <div class="space-y-6">
             <div
               class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col"
             >
@@ -2874,12 +2227,22 @@
                 class="px-6 py-5 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50 lg:flex-row lg:items-center lg:justify-between"
               >
                 <div class="flex items-center">
-                  <div class="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
+                  <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
                   <div>
                     <h3 class="text-lg font-semibold text-slate-800">{m.assessed_records()}</h3>
                     <p class="text-sm text-slate-500">{m.assessed_records_subtitle()}</p>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onclick={() => (showAddRecordModal = true)}
+                  class="inline-flex items-center gap-2 self-start rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1 lg:self-auto"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="h-4 w-4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  {m.add_clinical_record()}
+                </button>
                 <div class="flex items-center gap-4">
                   {#if selectedRecordIds.length > 0}
                     <form
@@ -2931,435 +2294,12 @@
                 </div>
               </div>
 
-              <div
-                class="border-b border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)] px-6 py-6"
-              >
-                {#if trendMetrics.length > 0 && trendChart}
-                  <div class="flex flex-col gap-6">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div class="max-w-2xl">
-                        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">
-                          {m.diachronic_view()}
-                        </p>
-                        <div class="mt-2 flex flex-wrap items-end gap-3">
-                          <h4 class="text-2xl font-semibold tracking-tight text-slate-900">{selectedTrendLabel}</h4>
-                          <span
-                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
-                          >
-                            {getReadingCountLabel(selectedTrend.points.length)}
-                          </span>
-                        </div>
-                        {#if selectedTrendLabel !== selectedTrend.metricName}
-                          <p class="mt-2 text-sm font-medium text-slate-500">
-                            {m.canonical()}: {selectedTrend.metricName}
-                          </p>
-                        {/if}
-                        <div class="mt-3 flex flex-wrap gap-2">
-                          <span
-                            class="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 shadow-sm backdrop-blur"
-                          >
-                            {getTestTypeLabel(selectedTrendTags.testType)}
-                          </span>
-                          {#each selectedTrendTags.categories as category}
-                            <span
-                              class="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur"
-                            >
-                              {getCategoryLabel(category)}
-                            </span>
-                          {/each}
-                        </div>
-                        <p class="mt-2 text-sm text-slate-600">
-                          {getMetricDescription(selectedTrend.metricName)}
-                        </p>
-                        <div class="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                          {#if selectedTrendWikipediaUrl}
-                            <a
-                              href={selectedTrendWikipediaUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 font-medium text-teal-700 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                            >
-                              <WikipediaIcon class="h-4 w-4" />
-                              {m.open_wikipedia()}
-                            </a>
-                          {/if}
-                          {#if selectedTrendWikipediaFallbackUrl && selectedTrendWikipediaFallbackUrl !== selectedTrendWikipediaUrl}
-                            <a
-                              href={selectedTrendWikipediaFallbackUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                            >
-                              <WikipediaIcon class="h-4 w-4" />
-                              {m.english_wikipedia()}
-                            </a>
-                          {/if}
-                          {#if selectedTrendWikidataUrl}
-                            <a
-                              href={selectedTrendWikidataUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
-                            >
-                              <WikidataIcon class="h-4 w-4" />
-                              {m.wikidata()}
-                            </a>
-                          {/if}
-                        </div>
-                      </div>
-
-                      <div class="min-w-[24rem] max-w-[36rem] xl:min-w-[30rem]">
-                        <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
-                          >{m.metric()}</span
-                        >
-                        <div class="flex items-start gap-2">
-                          <button
-                            type="button"
-                            onclick={() => stepTrendMetric(-1)}
-                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
-                            aria-label={m.previous_metric()}
-                          >
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"
-                              ></path>
-                            </svg>
-                          </button>
-
-                          <div bind:this={trendComboboxContainer} class="relative flex-1">
-                            <input
-                              type="text"
-                              bind:value={trendSearchQuery}
-                              placeholder={m.search_biomarker()}
-                              class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
-                              onclick={() => (trendComboboxOpen = true)}
-                              onfocus={() => (trendComboboxOpen = true)}
-                              oninput={() => (trendComboboxOpen = true)}
-                              onkeydown={handleTrendComboboxKeydown}
-                              role="combobox"
-                              aria-controls="trend-metric-listbox"
-                              aria-expanded={trendComboboxOpen}
-                              aria-label={m.search_biomarker()}
-                            />
-                            <div
-                              class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400"
-                            >
-                              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"
-                                ></path>
-                              </svg>
-                            </div>
-                            {#if trendComboboxOpen}
-                              <div
-                                id="trend-metric-listbox"
-                                class="absolute left-0 right-0 top-[calc(100%+0.65rem)] z-20 overflow-hidden rounded-[1.4rem] border border-white/80 bg-white/95 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.45)] backdrop-blur"
-                              >
-                                <div class="max-h-[26rem] overflow-y-auto px-2 py-2">
-                                  {#if groupedTrendMetricOptions.length === 0}
-                                    <div class="px-4 py-6 text-sm text-slate-500">{m.no_biomarker_found()}</div>
-                                  {:else}
-                                    {#each groupedTrendMetricOptions as group}
-                                      <div class="px-2 py-2">
-                                        <div
-                                          class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700/80"
-                                        >
-                                          {group.label}
-                                        </div>
-                                        {#each group.sections as section}
-                                          <div class="mb-2 rounded-2xl bg-slate-50/80 px-2 py-2">
-                                            <div
-                                              class="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500"
-                                            >
-                                              {section.label}
-                                            </div>
-                                            <div class="space-y-1">
-                                              {#each section.options as option}
-                                                <button
-                                                  type="button"
-                                                  bind:this={trendOptionButtons[option.metricName]}
-                                                  onclick={() => selectTrendMetric(option.metricName)}
-                                                  class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? 'bg-teal-50 text-teal-900 ring-1 ring-teal-200' : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
-                                                >
-                                                  <div class="min-w-0 flex-1">
-                                                    <div class="truncate text-sm font-semibold">{option.label}</div>
-                                                    <div class="mt-1 flex flex-wrap gap-1.5">
-                                                      <span
-                                                        class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
-                                                        >{option.testTypeLabel}</span
-                                                      >
-                                                      {#each option.categoryLabels as tag}
-                                                        <span
-                                                          class="inline-flex items-center rounded-full border border-teal-100 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700"
-                                                          >{tag}</span
-                                                        >
-                                                      {/each}
-                                                    </div>
-                                                  </div>
-                                                  <span
-                                                    class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500"
-                                                    >{option.readingCount}</span
-                                                  >
-                                                </button>
-                                              {/each}
-                                            </div>
-                                          </div>
-                                        {/each}
-                                      </div>
-                                    {/each}
-                                  {/if}
-                                </div>
-                              </div>
-                            {/if}
-                          </div>
-
-                          <button
-                            type="button"
-                            onclick={() => stepTrendMetric(1)}
-                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
-                            aria-label={m.next_metric()}
-                          >
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"
-                              ></path>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="grid gap-3 md:grid-cols-3">
-                      <div
-                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
-                      >
-                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.latest()}</p>
-                        <div class="mt-2 flex flex-wrap items-center gap-3">
-                          <p
-                            class={`text-3xl font-semibold tracking-tight ${
-                              trendChart.latestDisplayStatus === 'High'
-                                ? 'text-rose-700'
-                                : trendChart.latestDisplayStatus === 'Low'
-                                  ? 'text-orange-700'
-                                  : 'text-slate-900'
-                            }`}
-                          >
-                            {#if trendChart.latestDisplayStatus === 'High'}↑{/if}{#if trendChart.latestDisplayStatus === 'Low'}↓{/if}{trendDisplay?.latestValue ?? trendChart.latest.rawValue}
-                            {#if trendDisplay?.latestUnit}
-                              <span class="text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>
-                            {/if}
-                          </p>
-                          {#if trendChart.latestDisplayStatus}
-                            <span
-                              class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(trendChart.latestDisplayStatus)}`}
-                            >
-                              {getStatusLabel(trendChart.latestDisplayStatus)}
-                            </span>
-                          {/if}
-                        </div>
-                        {#if currentTrendUnitMode !== 'asRecorded' && trendChart.latest.rawUnit && canonicalUnitForm(trendChart.latest.rawUnit) !== trendDisplay?.latestUnit}
-                          <p class="mt-2 text-sm text-teal-700">
-                            {m.original_prefix({ value: `${trendChart.latest.rawValue}${trendChart.latest.rawUnit ? ` ${trendChart.latest.rawUnit}` : ''}` })}
-                          </p>
-                        {/if}
-                        <p class="mt-2 text-sm text-slate-500">{m.measured_on({ date: trendChart.lastDate })}</p>
-                      </div>
-
-                      <div
-                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
-                      >
-                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.change()}</p>
-                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                          {#if trendDisplay?.delta === null || trendDisplay?.delta === undefined}
-                            --
-                          {:else if trendDisplay.delta > 0}
-                            +{trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
-                          {:else}
-                            {trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
-                          {/if}
-                        </p>
-                        <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
-                      </div>
-
-                      <div
-                        class="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm"
-                      >
-                        <div class="flex items-start justify-between gap-2">
-                          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                            {m.reference_range()}
-                          </p>
-                          <RefRangePicker
-                            metricLabel={selectedTrend.metricName}
-                            patient={data.currentPatient}
-                            currentUnit={trendChart.latest.unit}
-                            currentValue={trendRefRangeOverride[selectedTrend.metricName] ?? trendChart.refRange?.label ?? null}
-                            onSelect={(rangeText) => {
-                              trendRefRangeOverride = { ...trendRefRangeOverride, [selectedTrend.metricName]: rangeText };
-                            }}
-                          />
-                        </div>
-                        <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                          {trendDisplay?.refRangeLabel || m.not_available()}
-                          {#if trendDisplay?.refRangeLabel && trendDisplay?.latestUnit}
-                            <span class="text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>
-                          {/if}
-                        </p>
-                        <div class="mt-2 flex items-center justify-between gap-2">
-                          <p class="text-sm text-slate-500">{m.reference_range_hint()}</p>
-                          {#if trendChart.overrideActive}
-                            <button
-                              type="button"
-                              class="text-xs font-semibold text-teal-700 hover:text-teal-900"
-                              onclick={() => {
-                                const next = { ...trendRefRangeOverride };
-                                delete next[selectedTrend.metricName];
-                                trendRefRangeOverride = next;
-                              }}
-                            >
-                              {m.reset_to_record_range()}
-                            </button>
-                          {/if}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <span class="font-semibold uppercase tracking-wide text-slate-500">{m.unit_display()}:</span>
-                      <div class="inline-flex flex-wrap gap-0.5 rounded-lg border border-slate-200 bg-white/70 p-0.5 shadow-sm">
-                        <button
-                          type="button"
-                          onclick={() => {
-                            trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: 'asRecorded' };
-                          }}
-                          class={`rounded-md px-3 py-1 font-medium transition-colors ${
-                            currentTrendUnitMode === 'asRecorded'
-                              ? 'bg-teal-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {m.unit_display_mixed()}
-                        </button>
-                        {#each trendChart.unitOptions as unit}
-                          <button
-                            type="button"
-                            onclick={() => {
-                              trendUnitDisplay = { ...trendUnitDisplay, [selectedTrend.metricName]: unit };
-                            }}
-                            class={`rounded-md px-3 py-1 font-medium transition-colors ${
-                              currentTrendUnitMode === unit
-                                ? 'bg-teal-600 text-white shadow-sm'
-                                : 'text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            {unit}
-                          </button>
-                        {/each}
-                      </div>
-                      {#if trendChart.hasMixedUnits}
-                        <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                          {m.mixed_units_detected()}
-                        </span>
-                      {/if}
-                    </div>
-
-                    <div
-                      class="overflow-hidden rounded-[28px] border border-white/80 bg-slate-950/[0.03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
-                    >
-                      <svg viewBox={`0 0 ${trendChart.width} ${trendChart.height}`} class="h-64 w-full">
-                        <defs>
-                          <linearGradient id="trend-line" x1="0%" x2="100%" y1="0%" y2="0%">
-                            <stop offset="0%" stop-color="#14b8a6"></stop>
-                            <stop offset="100%" stop-color="#2563eb"></stop>
-                          </linearGradient>
-                          <linearGradient id="trend-area" x1="0%" x2="0%" y1="0%" y2="100%">
-                            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
-                            <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
-                          </linearGradient>
-                          <linearGradient id="trend-ref-fade-down" x1="0%" x2="0%" y1="0%" y2="100%">
-                            <stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0.22"></stop>
-                            <stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>
-                          </linearGradient>
-                          <linearGradient id="trend-ref-fade-up" x1="0%" x2="0%" y1="0%" y2="100%">
-                            <stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>
-                            <stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0.22"></stop>
-                          </linearGradient>
-                        </defs>
-
-                        {#if trendChart.refRangePath}
-                          <polygon
-                            points={trendChart.refRangePath}
-                            fill={trendChart.refRangeFill === 'fadeDown'
-                              ? 'url(#trend-ref-fade-down)'
-                              : trendChart.refRangeFill === 'fadeUp'
-                                ? 'url(#trend-ref-fade-up)'
-                                : 'rgba(16,185,129,0.12)'}
-                          ></polygon>
-                        {/if}
-
-                        <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"
-                        ></line>
-                        <polygon points={trendChart.area} fill="url(#trend-area)"></polygon>
-                        <polyline
-                          points={trendChart.line}
-                          fill="none"
-                          stroke="url(#trend-line)"
-                          stroke-width="4"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        ></polyline>
-
-                        {#each trendChart.points as point, index}
-                          {@const rendered = renderTrendPointLabel(point, currentTrendUnitMode)}
-                          {@const pointLabel = `${rendered.value}${rendered.unit ? ` ${rendered.unit}` : ''}`}
-                          {@const tooltipLabel =
-                            `${point.rawValue}${point.rawUnit ? ` ${point.rawUnit}` : ''}` +
-                            (currentTrendUnitMode !== 'asRecorded' && rendered.unit !== point.rawUnit
-                              ? ` (= ${rendered.value}${rendered.unit ? ` ${rendered.unit}` : ''})`
-                              : '') +
-                            ` — ${point.chartDate}`}
-                          <g
-                            role="button"
-                            tabindex="0"
-                            class="cursor-pointer"
-                            aria-label={m.edit_trend_point({ metric: selectedTrendLabel, date: point.chartDate })}
-                            onclick={() => jumpToTrendPoint(point)}
-                            onkeydown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                jumpToTrendPoint(point);
-                              }
-                            }}
-                          >
-                            <title>{tooltipLabel}</title>
-                            <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
-                            <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
-                            <text
-                              x={point.x}
-                              y={Math.max(point.y - 14, 16)}
-                              text-anchor="middle"
-                              class="fill-slate-700 text-[11px] font-semibold">{pointLabel}</text
-                            >
-                            {#if shouldShowTrendPointDate(index, trendChart.points.length)}
-                              <text x={point.x} y="208" text-anchor="middle" class="fill-slate-500 text-[11px]"
-                                >{point.chartDate}</text
-                              >
-                            {/if}
-                          </g>
-                        {/each}
-                      </svg>
-                    </div>
-                  </div>
-                {:else}
-                  <div
-                    class="rounded-[28px] border border-dashed border-slate-300/90 bg-white/70 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-sm"
-                  >
-                    <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-                      {m.diachronic_view()}
-                    </p>
-                    <h4 class="mt-3 text-xl font-semibold text-slate-900">{m.no_plot_title()}</h4>
-                    <p class="mx-auto mt-2 max-w-xl text-sm text-slate-600">
-                      {m.no_plot_description()}
-                    </p>
-                  </div>
-                {/if}
-              </div>
+              <TrendSection
+                metrics={labTrendMetrics}
+                patient={data.currentPatient}
+                {formatDate}
+                onJumpToPoint={jumpToTrendPoint}
+              />
 
               <div class="flex-1 overflow-x-auto">
                 {#if labRecords.length === 0}
@@ -3787,6 +2727,7 @@
                 patientId={data.currentPatient.id}
                 sessions={measurementSessions[tab.domain.kind]}
                 derivedPoints={measurementDerived[tab.domain.kind]}
+                trendMetrics={measurementTrends[tab.domain.kind]}
                 focusSessionId={focusedBodySessionId}
                 {formatDate}
               />

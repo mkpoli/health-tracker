@@ -656,5 +656,7 @@
   "file_type_not_accepted": "此处不支持该文件类型，请选择{types}。",
   "import_undo": "撤销此次导入",
   "import_undo_hint": "仅删除从Apple健康导入的数据，手动录入的测量值不受影响。",
-  "import_undo_confirm": "要删除全部从Apple健康导入的数据吗？手动录入的测量值将保留。"
+  "import_undo_confirm": "要删除全部从Apple健康导入的数据吗？手动录入的测量值将保留。",
+  "account_menu": "账户",
+  "log_out": "退出登录"
 }

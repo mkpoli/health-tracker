@@ -656,5 +656,7 @@
   "file_type_not_accepted": "That file type is not accepted here. Expecting {types}.",
   "import_undo": "Undo this import",
   "import_undo_hint": "Removes everything imported from Apple Health. Measurements you entered by hand are untouched.",
-  "import_undo_confirm": "Remove everything imported from Apple Health? Measurements you entered by hand are kept."
+  "import_undo_confirm": "Remove everything imported from Apple Health? Measurements you entered by hand are kept.",
+  "account_menu": "Account",
+  "log_out": "Log out"
 }

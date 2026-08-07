@@ -7,6 +7,8 @@
   import { getDefinitionLabel } from '$lib/metrics/labels';
   import type { MeasurementDomain } from '$lib/metrics/measurement-domains';
   import type { DerivedPoint } from '$lib/metrics/derived';
+  import type { TrendMetricGroup } from '$lib/metrics/trends';
+  import TrendSection from './TrendSection.svelte';
   import MeasurementModal from './MeasurementModal.svelte';
   import BodyDiagram from './BodyDiagram.svelte';
 
@@ -31,6 +33,7 @@
     patientId,
     sessions = [],
     derivedPoints = [],
+    trendMetrics = [],
     focusSessionId = null,
     formatDate,
   }: {
@@ -38,6 +41,8 @@
     patientId: string;
     sessions?: Session[];
     derivedPoints?: DerivedPoint[];
+    /** Series for this section's diachronic view. */
+    trendMetrics?: TrendMetricGroup[];
     /** Session to open, set when a trend point in this panel is clicked. */
     focusSessionId?: string | null;
     formatDate: (value: string | null, options?: Intl.DateTimeFormatOptions) => string;
@@ -272,6 +277,19 @@
     }
   });
 
+  // A point on the chart opens the session it came from.
+  function focusSession(point: { reportId: string | null }) {
+    if (!point.reportId) return;
+
+    if (!expandedSessionIds.includes(point.reportId)) {
+      expandedSessionIds = [...expandedSessionIds, point.reportId];
+    }
+
+    document
+      .getElementById(`measurement-session-${point.reportId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   function formatDelta(delta: number) {
     return delta > 0 ? `+${delta}` : String(delta);
   }
@@ -318,6 +336,10 @@
       <p class="mt-1 text-xs">{domain.emptyHint()}</p>
     </div>
   {:else}
+    {#if trendMetrics.length > 0}
+      <TrendSection metrics={trendMetrics} patient={null} {formatDate} onJumpToPoint={focusSession} />
+    {/if}
+
     <div class="border-b border-slate-100 px-4 py-5 sm:px-6 {accentWash}">
       <p class="text-xs font-semibold uppercase tracking-[0.22em] {accentLabel}">{m.latest_measurements()}</p>
 
