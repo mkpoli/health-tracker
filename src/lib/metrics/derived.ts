@@ -6,10 +6,32 @@ export type DerivedPoint = {
   value: number;
   precision: number;
   unit: string | null;
+  /**
+   * Date of the oldest input the value was calculated from. A BMI is only as
+   * current as the height behind it, which may be several sessions back.
+   */
+  basisDate: string | null;
 };
 
 function reportTime(report: { testDate?: string | null }) {
   return report.testDate ? new Date(report.testDate).getTime() : 0;
+}
+
+function oldestDate(dates: Array<string | null>) {
+  let oldest: string | null = null;
+  let oldestTime = Infinity;
+
+  for (const date of dates) {
+    if (!date) continue;
+
+    const time = new Date(date).getTime();
+    if (Number.isNaN(time) || time >= oldestTime) continue;
+
+    oldest = date;
+    oldestTime = time;
+  }
+
+  return oldest;
 }
 
 /**
@@ -31,18 +53,23 @@ export function computeDerivedMetrics(
 
     const carryForward = new Set(calculation.carryForward || []);
     const lastKnown = new Map<string, number>();
+    const lastKnownDate = new Map<string, string | null>();
 
     for (const report of ordered) {
       const values = valuesByReport.get(report.id);
 
       if (values) {
-        for (const [key, value] of values) lastKnown.set(key, value);
+        for (const [key, value] of values) {
+          lastKnown.set(key, value);
+          lastKnownDate.set(key, report.testDate ?? null);
+        }
       }
 
       // A directly recorded value always wins over the calculated one.
       if (values?.has(definition.key)) continue;
 
       const inputs: Record<string, number> = {};
+      const inputDates: Array<string | null> = [];
       let missing = false;
 
       for (const dependency of calculation.dependencies) {
@@ -55,6 +82,7 @@ export function computeDerivedMetrics(
         }
 
         inputs[dependency] = value;
+        inputDates.push(direct !== undefined ? (report.testDate ?? null) : (lastKnownDate.get(dependency) ?? null));
       }
 
       if (missing) continue;
@@ -70,6 +98,7 @@ export function computeDerivedMetrics(
         value: Number(computed.toFixed(precision)),
         precision,
         unit: calculation.unit ?? null,
+        basisDate: oldestDate(inputDates),
       });
     }
   }

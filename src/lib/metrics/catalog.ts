@@ -17,6 +17,12 @@ export type MetricDefinition = {
   step?: number;
   /** Set on the left/right variant of a limb measurement. */
   sideOf?: { baseKey: string; side: 'left' | 'right' };
+  /**
+   * How long a reading of this kind still describes the body it was taken from.
+   * An adult's height holds for years; a body-fat percentage from five years ago
+   * says nothing about today.
+   */
+  freshnessDays?: number;
   calculation?: {
     dependencies: string[];
     /**

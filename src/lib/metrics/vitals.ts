@@ -202,5 +202,8 @@ export const vitalMetricDefinitions: MetricDefinition[] = [...vitalMetricSources
     unitOptions: source.unitOptions,
     step: source.step,
     calculation: source.calculation,
+    // A blood pressure or heart rate describes the moment it was taken; months
+    // later it is history rather than a current reading.
+    freshnessDays: source.freshnessDays ?? 90,
   }),
 );

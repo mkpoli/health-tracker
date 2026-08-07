@@ -542,6 +542,7 @@
   "delete_session_confirm_one": "この記録と{count}件の値を削除しますか？",
   "delete_session_confirm_other": "この記録と{count}件の値を削除しますか？",
   "derived_value": "導出値",
+  "derived_from_oldest_reading": "{date}の測定値を使用",
   "measurement_calculated_hint": "導出指標は入力した値から計算されます。",
   "edit_session": "編集",
   "save_measurements_failed": "計測を保存できませんでした。入力値を確認してもう一度お試しください。",

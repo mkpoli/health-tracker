@@ -14,12 +14,25 @@ export type BodyMetricSource = MeasurementFieldSource & { group: BodyMetricGroup
 const MASS_UNITS = ['kg', 'lb'];
 const LENGTH_UNITS = ['cm', 'in'];
 
+// How long a reading still describes the body. Skeletal dimensions hold for
+// years in an adult, composition and girth for months. Derived indices take
+// theirs from the oldest input they were calculated from.
+const GROUP_FRESHNESS_DAYS: Record<BodyMetricGroupKey, number> = {
+  basics: 1825,
+  composition: 90,
+  circumference: 180,
+  skinfold: 180,
+  index: 180,
+};
+
 const bodyMetricSources: BodyMetricSource[] = [
   // Basics
   {
     key: 'body-weight',
     canonicalLabel: 'Body Weight',
     group: 'basics',
+    // Filed with the skeletal dimensions, but it moves like a composition value.
+    freshnessDays: 90,
     categories: ['anthropometry'],
     unit: 'kg',
     unitOptions: MASS_UNITS,
@@ -711,6 +724,7 @@ function toMetricDefinition(source: BodyMetricSource, sideOf?: { baseKey: string
     unitOptions: source.unitOptions,
     step: source.step,
     calculation: source.calculation,
+    freshnessDays: source.freshnessDays ?? GROUP_FRESHNESS_DAYS[source.group],
     sideOf,
   };
 }

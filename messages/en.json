@@ -542,6 +542,7 @@
   "delete_session_confirm_one": "Delete this session and its {count} value?",
   "delete_session_confirm_other": "Delete this session and its {count} values?",
   "derived_value": "Derived",
+  "derived_from_oldest_reading": "Uses a reading from {date}",
   "measurement_calculated_hint": "Derived indices are computed from the values you enter.",
   "edit_session": "Edit",
   "save_measurements_failed": "Could not save these measurements. Check the values and try again.",

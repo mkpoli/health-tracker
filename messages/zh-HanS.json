@@ -542,6 +542,7 @@
   "delete_session_confirm_one": "删除该记录及其{count}项数值？",
   "delete_session_confirm_other": "删除该记录及其{count}项数值？",
   "derived_value": "衍生值",
+  "derived_from_oldest_reading": "使用{date}的测量值",
   "measurement_calculated_hint": "衍生指标由所填数值计算得出。",
   "edit_session": "编辑",
   "save_measurements_failed": "无法保存这些测量值。请检查后重试。",

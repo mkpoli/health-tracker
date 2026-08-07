@@ -4,6 +4,8 @@
   import { getMetricDefinition } from '$lib/metrics/catalog';
   import { convertValueBetweenUnits, normalizeComparableMeasurement } from '$lib/metrics/normalization';
   import { getJisBraSize } from '$lib/metrics/bra-size';
+  import { formatAge, freshnessHorizon, measureFreshness, type Freshness } from '$lib/metrics/freshness';
+  import { getLocale } from '$lib/paraglide/runtime';
   import { getDefinitionLabel } from '$lib/metrics/labels';
   import type { MeasurementDomain } from '$lib/metrics/measurement-domains';
   import type { DerivedPoint } from '$lib/metrics/derived';
@@ -48,6 +50,10 @@
     formatDate: (value: string | null, options?: Intl.DateTimeFormatOptions) => string;
   } = $props();
 
+  // Ages read in whole days, so one timestamp for the whole render is enough.
+  const now = Date.now();
+  const currentLocale = $derived(getLocale());
+
   let modalOpen = $state(false);
   // Years of imported history would otherwise render as one endless page,
   // which on a phone is thousands of pixels of scrolling to reach anything.
@@ -79,12 +85,24 @@
     value: string;
     unit: string | null;
     date: string | null;
+    /** For a derived value, the date of the oldest reading behind it. */
+    basisDate: string | null;
+    freshness: Freshness | null;
     delta: number | null;
     derived: boolean;
   };
 
+  type SnapshotSource = {
+    value: string;
+    numeric: number | null;
+    unit: string | null;
+    date: string | null;
+    basisDate: string | null;
+    derived: boolean;
+  };
+
   const snapshot = $derived.by(() => {
-    const byMetric = new Map<string, Array<{ value: string; numeric: number | null; unit: string | null; date: string | null; derived: boolean }>>();
+    const byMetric = new Map<string, SnapshotSource[]>();
 
     for (const session of orderedSessions) {
       for (const item of session.records) {
@@ -94,6 +112,7 @@
           numeric: toComparable(item.value, item.unit),
           unit: item.unit,
           date: session.measuredAt,
+          basisDate: session.measuredAt,
           derived: false,
         });
         byMetric.set(item.metricName, list);
@@ -106,6 +125,7 @@
           numeric: point.value,
           unit: point.unit,
           date: session.measuredAt,
+          basisDate: point.basisDate ?? session.measuredAt,
           derived: true,
         });
         byMetric.set(point.definition.canonicalLabel, list);
@@ -125,6 +145,10 @@
         value: latest.value,
         unit: latest.unit,
         date: latest.date,
+        basisDate: latest.basisDate,
+        // A calculated value ages with its oldest input, so a BMI resting on a
+        // three-year-old height is not presented as this morning's number.
+        freshness: measureFreshness(latest.basisDate, freshnessHorizon(metricName), now),
         delta: deltaInDisplayUnit(latest, previous),
         derived: latest.derived,
       });
@@ -364,7 +388,8 @@
           </div>
         {/if}
         {#each snapshot as item (item.metricName)}
-          <div class="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm backdrop-blur">
+          {@const stale = item.freshness?.stale ?? false}
+          <div class="rounded-xl border p-3 shadow-sm backdrop-blur {stale ? 'border-amber-200/80 bg-amber-50/60' : 'border-white/80 bg-white/80'}">
             <div class="flex items-start justify-between gap-2">
               <p class="text-xs font-medium text-slate-500">{item.label}</p>
               {#if item.derived}
@@ -374,15 +399,23 @@
               {/if}
             </div>
             <p class="mt-1 flex items-baseline gap-1">
-              <span class="text-2xl font-semibold tracking-tight text-slate-900">{item.value}</span>
+              <span class="text-2xl font-semibold tracking-tight {stale ? 'text-slate-400' : 'text-slate-900'}">{item.value}</span>
               {#if item.unit}<span class="text-sm text-slate-500">{item.unit}</span>{/if}
             </p>
             <p class="mt-1 text-xs text-slate-400">
               {#if item.delta !== null && item.delta !== 0}
                 <span class="font-semibold text-slate-600">{formatDelta(item.delta)}</span> ·
               {/if}
+              {#if item.freshness}
+                <span class={stale ? 'font-semibold text-amber-700' : ''}>{formatAge(item.freshness.ageDays, currentLocale)}</span> ·
+              {/if}
               {formatDate(item.date, { dateStyle: 'medium' })}
             </p>
+            {#if item.derived && item.basisDate !== item.date}
+              <p class="mt-1 text-[11px] {stale ? 'text-amber-700/80' : 'text-slate-400'}">
+                {m.derived_from_oldest_reading({ date: formatDate(item.basisDate, { dateStyle: 'medium' }) })}
+              </p>
+            {/if}
           </div>
         {/each}
         </div>

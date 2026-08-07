@@ -19,6 +19,8 @@ export type MeasurementFieldSource = {
   sided?: boolean;
   /** Shown before the form is switched to its full catalog. */
   common?: boolean;
+  /** Overrides the catalog's default freshness horizon for this reading. */
+  freshnessDays?: number;
   calculation?: MetricDefinition['calculation'];
 };
 
