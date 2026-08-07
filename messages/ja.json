@@ -653,5 +653,8 @@
   "tab_vitals_short": "バイタル",
   "show_more_sessions": "さらに{count}件を表示",
   "or_drop_file_here": "またはここにファイルをドロップ",
-  "file_type_not_accepted": "この場所では扱えない形式です。{types}を選んでください。"
+  "file_type_not_accepted": "この場所では扱えない形式です。{types}を選んでください。",
+  "import_undo": "この取り込みを取り消す",
+  "import_undo_hint": "Apple ヘルスケアから取り込んだデータのみを削除します。手入力した計測値はそのまま残ります。",
+  "import_undo_confirm": "Apple ヘルスケアから取り込んだデータをすべて削除しますか？手入力した計測値は残ります。"
 }

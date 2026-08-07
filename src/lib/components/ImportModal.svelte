@@ -127,6 +127,32 @@
     }
   }
 
+  let removing = $state(false);
+
+  // Everything this importer wrote is tagged with its source, so undoing it is
+  // a matter of deleting what carries that tag — hand-entered sessions do not.
+  async function removeImported() {
+    if (!confirm(m.import_undo_confirm())) return;
+
+    removing = true;
+
+    const body = new FormData();
+    body.set('patientId', patientId);
+    body.set('source', 'apple-health');
+
+    const response = await fetch('?/removeImportedMeasurements', { method: 'POST', body });
+    const payload = (await response.json()) as { type?: string };
+
+    removing = false;
+
+    if (payload.type === 'success') {
+      await invalidateAll();
+      onClose();
+    } else {
+      errorMessage = m.import_failed();
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && stage !== 'importing') onClose();
   }
@@ -270,6 +296,15 @@
           <p class="text-sm font-semibold text-slate-800">
             {m.import_done({ sessions: sessionsSent, values: importedCount })}
           </p>
+          <button
+            type="button"
+            onclick={removeImported}
+            disabled={removing}
+            class="mt-4 text-sm font-medium text-rose-600 underline underline-offset-2 transition-colors hover:text-rose-700 disabled:text-slate-400"
+          >
+            {removing ? m.saving() : m.import_undo()}
+          </button>
+          <p class="mt-1 text-xs text-slate-400">{m.import_undo_hint()}</p>
         </div>
       {/if}
     </div>

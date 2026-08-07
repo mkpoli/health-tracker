@@ -105,6 +105,28 @@ export async function importMeasurementSessions(input: {
     if (typeof extra.importSourceKey === 'string') bySourceKey.set(extra.importSourceKey, existing.id);
   }
 
+  // Everything is planned in memory first, then sent as a handful of batched
+  // statements. Writing a row at a time inside a transaction per session meant
+  // roughly a thousand network round trips to a remote database for one import,
+  // which took minutes rather than seconds.
+  type PlannedReport = { id: string; kind: ReportKind; testDate: string; sourceKey: string };
+  type PlannedRecord = {
+    id: string;
+    reportId: string;
+    metricName: string;
+    value: string;
+    unit: string | null;
+    extraData: string;
+  };
+
+  const reportsToInsert: PlannedReport[] = [];
+  const recordsToInsert: PlannedRecord[] = [];
+  const reportsToTouch: Array<{ id: string; testDate: string }> = [];
+  const recordsToUpdate: Array<{ id: string; value: string; unit: string | null; extraData: string }> = [];
+
+  const reusedReportIds: string[] = [];
+  const plannedBySession: Array<{ reportId: string; entries: ReturnType<typeof resolveEntries>; reused: boolean }> = [];
+
   for (const session of sessions) {
     if (!isMeasurementKind(session.kind)) {
       result.skippedSessions += 1;
@@ -126,59 +148,118 @@ export async function importMeasurementSessions(input: {
     const sourceKey = `${input.source}:${session.sourceKey}`;
     const existingId = bySourceKey.get(sourceKey);
 
-    await db.transaction(async (tx) => {
-      let reportId = existingId;
+    if (existingId) {
+      reportsToTouch.push({ id: existingId, testDate: measuredAt.toISOString() });
+      reusedReportIds.push(existingId);
+      plannedBySession.push({ reportId: existingId, entries, reused: true });
+      result.updatedSessions += 1;
+    } else {
+      const id = crypto.randomUUID();
+      reportsToInsert.push({
+        id,
+        kind: session.kind,
+        testDate: measuredAt.toISOString(),
+        sourceKey,
+      });
+      plannedBySession.push({ reportId: id, entries, reused: false });
+      result.createdSessions += 1;
+    }
+  }
 
-      if (reportId) {
-        await tx
-          .update(report)
-          .set({ testDate: measuredAt.toISOString() })
-          .where(eq(report.id, reportId));
-        result.updatedSessions += 1;
+  // Records of the sessions being re-imported, fetched in one query rather than
+  // one per session.
+  const existingRecordsByReport = new Map<string, Map<string, string>>();
+
+  if (reusedReportIds.length > 0) {
+    for (const chunk of chunked(reusedReportIds, 200)) {
+      const rows = await db.select().from(record).where(inArray(record.reportId, chunk));
+
+      for (const row of rows) {
+        const byName = existingRecordsByReport.get(row.reportId) ?? new Map<string, string>();
+        byName.set(row.metricName, row.id);
+        existingRecordsByReport.set(row.reportId, byName);
+      }
+    }
+  }
+
+  for (const planned of plannedBySession) {
+    const existingByName = planned.reused ? existingRecordsByReport.get(planned.reportId) : undefined;
+
+    for (const entry of planned.entries) {
+      const extraData = buildExtraData(entry, input.source);
+      const existingRecordId = existingByName?.get(entry.metricName);
+
+      if (existingRecordId) {
+        recordsToUpdate.push({ id: existingRecordId, value: entry.value, unit: entry.unit, extraData });
       } else {
-        const inserted = await tx
-          .insert(report)
-          .values({
-            patientId: input.patientId,
-            kind: session.kind,
-            testDate: measuredAt.toISOString(),
-            extraData: JSON.stringify({ importedFrom: input.source, importSourceKey: sourceKey }),
-          })
-          .returning();
-
-        reportId = inserted[0].id;
-        result.createdSessions += 1;
+        recordsToInsert.push({
+          id: crypto.randomUUID(),
+          reportId: planned.reportId,
+          metricName: entry.metricName,
+          value: entry.value,
+          unit: entry.unit,
+          extraData,
+        });
       }
 
-      const existingRecords = await tx.select().from(record).where(eq(record.reportId, reportId));
-      const byName = new Map(existingRecords.map((item) => [item.metricName, item]));
+      result.writtenValues += 1;
+    }
+  }
 
-      for (const entry of entries) {
-        const current = byName.get(entry.metricName);
+  // Reports before their records, so the foreign key holds within the batch.
+  for (const chunk of chunked(reportsToInsert, 100)) {
+    await db.insert(report).values(
+      chunk.map((item) => ({
+        id: item.id,
+        patientId: input.patientId,
+        kind: item.kind,
+        testDate: item.testDate,
+        extraData: JSON.stringify({ importedFrom: input.source, importSourceKey: item.sourceKey }),
+      })),
+    );
+  }
 
-        if (current) {
-          await tx
-            .update(record)
-            .set({ value: entry.value, unit: entry.unit, extraData: buildExtraData(entry, input.source) })
-            .where(eq(record.id, current.id));
-        } else {
-          await tx.insert(record).values({
-            patientId: input.patientId,
-            reportId,
-            metricName: entry.metricName,
-            value: entry.value,
-            unit: entry.unit,
-            status: null,
-            extraData: buildExtraData(entry, input.source),
-          });
-        }
+  for (const chunk of chunked(recordsToInsert, 100)) {
+    await db.insert(record).values(
+      chunk.map((item) => ({
+        id: item.id,
+        patientId: input.patientId,
+        reportId: item.reportId,
+        metricName: item.metricName,
+        value: item.value,
+        unit: item.unit,
+        status: null,
+        extraData: item.extraData,
+      })),
+    );
+  }
 
-        result.writtenValues += 1;
-      }
-    });
+  for (const chunk of chunked(reportsToTouch, 50)) {
+    await db.batch(
+      chunk.map((item) => db.update(report).set({ testDate: item.testDate }).where(eq(report.id, item.id))) as never,
+    );
+  }
+
+  for (const chunk of chunked(recordsToUpdate, 50)) {
+    await db.batch(
+      chunk.map((item) =>
+        db
+          .update(record)
+          .set({ value: item.value, unit: item.unit, extraData: item.extraData })
+          .where(eq(record.id, item.id)),
+      ) as never,
+    );
   }
 
   return result;
+}
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 /** Sessions already imported from this source, so the UI can offer to replace them. */

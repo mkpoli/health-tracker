@@ -12,7 +12,7 @@ import {
   saveMeasurementSession,
 } from '$lib/server/measurements';
 import { isMeasurementKind } from '$lib/report-kind';
-import { importMeasurementSessions } from '$lib/server/measurement-import';
+import { deleteImportedSessions, importMeasurementSessions } from '$lib/server/measurement-import';
 import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
 
 function parseJsonLike(value: unknown) {
@@ -407,6 +407,23 @@ export const actions: Actions = {
     });
 
     return { success: true, ...result };
+  },
+
+  removeImportedMeasurements: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const source = data.get('source')?.toString();
+
+    if (!patientId || source !== 'apple-health') return fail(400, { error: 'Missing required fields' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+
+    if (!ownedPatient) return fail(404, { error: 'Patient not found' });
+
+    const removed = await deleteImportedSessions(ownedPatient.id, source);
+
+    return { success: true, removed };
   },
 
   deleteMeasurement: async ({ request, locals }) => {

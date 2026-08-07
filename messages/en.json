@@ -653,5 +653,8 @@
   "tab_vitals_short": "Vitals",
   "show_more_sessions": "Show {count} more",
   "or_drop_file_here": "or drop the file here",
-  "file_type_not_accepted": "That file type is not accepted here. Expecting {types}."
+  "file_type_not_accepted": "That file type is not accepted here. Expecting {types}.",
+  "import_undo": "Undo this import",
+  "import_undo_hint": "Removes everything imported from Apple Health. Measurements you entered by hand are untouched.",
+  "import_undo_confirm": "Remove everything imported from Apple Health? Measurements you entered by hand are kept."
 }
