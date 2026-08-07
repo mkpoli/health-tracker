@@ -13,6 +13,15 @@ function getOpenAI(): OpenAI {
 }
 const metricCatalogPrompt = metricSuggestions.map((label) => `- ${label}`).join('\n');
 
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** Scans are single-shot and the user waits on them, so an unreadable setting falls back rather than failing the request. */
+function getReasoningEffort(): ReasoningEffort {
+  const configured = env.OPENAI_API_REASONING_EFFORT;
+  return REASONING_EFFORTS.find((effort) => effort === configured) ?? 'medium';
+}
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -98,9 +107,9 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
   messages.push({ role: 'user', content });
 
   const response = await getOpenAI().chat.completions.create({
-    model: env.OPENAI_API_MODEL || 'gpt-5.4',
+    model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
     messages,
-    temperature: 0,
+    reasoning_effort: getReasoningEffort(),
   });
 
   const outputRaw = response.choices[0]?.message?.content || '{}';
