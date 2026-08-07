@@ -34,9 +34,12 @@
     metrics = [],
     patient,
     formatDate,
+    accent = 'teal',
     onJumpToPoint,
   }: {
     metrics?: TrendMetricGroup[];
+    /** Matches the section this view sits in. */
+    accent?: 'teal' | 'violet' | 'rose';
     patient: { agab?: string | null; birthday?: string | null } | null;
     formatDate: (value: string | null, options?: Intl.DateTimeFormatOptions) => string;
     onJumpToPoint?: (point: TrendPoint) => void;
@@ -53,6 +56,57 @@
 
   const currentLocale = $derived(getLocale());
   const trendMetrics = $derived(metrics);
+
+  // Spelled out per accent, since Tailwind needs the class names whole and the
+  // SVG gradients need literal colours.
+  const ACCENTS = {
+    teal: {
+      wash: 'bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)]',
+      eyebrow: 'text-teal-700/80',
+      link: 'text-teal-700',
+      linkHover: 'hover:text-teal-900',
+      focus: 'focus:border-teal-300 focus:ring-teal-200',
+      optionActive: 'bg-teal-50 text-teal-900 ring-1 ring-teal-200',
+      chip: 'border-teal-100 bg-teal-50 text-teal-700',
+      toggleActive: 'bg-teal-600 text-white shadow-sm',
+      lineFrom: '#14b8a6',
+      lineTo: '#2563eb',
+      area: '#2563eb',
+      dot: '#0f766e',
+    },
+    violet: {
+      wash: 'bg-[radial-gradient(circle_at_top_left,_rgba(167,139,250,0.18),_transparent_38%),linear-gradient(135deg,_#fbfaff_0%,_#f5f3ff_50%,_#fdf4ff_100%)]',
+      eyebrow: 'text-violet-700/80',
+      link: 'text-violet-700',
+      linkHover: 'hover:text-violet-900',
+      focus: 'focus:border-violet-300 focus:ring-violet-200',
+      optionActive: 'bg-violet-50 text-violet-900 ring-1 ring-violet-200',
+      chip: 'border-violet-100 bg-violet-50 text-violet-700',
+      toggleActive: 'bg-violet-600 text-white shadow-sm',
+      lineFrom: '#a78bfa',
+      lineTo: '#7c3aed',
+      area: '#7c3aed',
+      dot: '#6d28d9',
+    },
+    rose: {
+      wash: 'bg-[radial-gradient(circle_at_top_left,_rgba(251,113,133,0.16),_transparent_38%),linear-gradient(135deg,_#fffafb_0%,_#fff1f2_50%,_#fff7ed_100%)]',
+      eyebrow: 'text-rose-700/80',
+      link: 'text-rose-700',
+      linkHover: 'hover:text-rose-900',
+      focus: 'focus:border-rose-300 focus:ring-rose-200',
+      optionActive: 'bg-rose-50 text-rose-900 ring-1 ring-rose-200',
+      chip: 'border-rose-100 bg-rose-50 text-rose-700',
+      toggleActive: 'bg-rose-600 text-white shadow-sm',
+      lineFrom: '#fb7185',
+      lineTo: '#e11d48',
+      area: '#e11d48',
+      dot: '#be123c',
+    },
+  } as const;
+
+  const tone = $derived(ACCENTS[accent]);
+  // Gradient ids must be unique per instance or all three sections share one.
+  const gradientId = $derived(`trend-${accent}`);
 
   type TrendMetricOption = {
     metricName: string;
@@ -538,13 +592,13 @@
 </script>
 
               <div
-                class="border-b border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_38%),linear-gradient(135deg,_#f8fffd_0%,_#eff6ff_50%,_#fff7ed_100%)] px-6 py-6"
+                class="border-b border-slate-100 px-4 py-6 sm:px-6 {tone.wash}"
               >
                 {#if trendMetrics.length > 0 && trendChart}
                   <div class="flex flex-col gap-6">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div class="max-w-2xl">
-                        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700/80">
+                        <p class="text-xs font-semibold uppercase tracking-[0.22em] {tone.eyebrow}">
                           {m.diachronic_view()}
                         </p>
                         <div class="mt-2 flex flex-wrap items-end gap-3">
@@ -583,7 +637,7 @@
                               href={selectedTrendWikipediaUrl}
                               target="_blank"
                               rel="noreferrer"
-                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 font-medium text-teal-700 shadow-sm backdrop-blur transition-colors hover:bg-white"
+                              class="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 font-medium {tone.link} shadow-sm backdrop-blur transition-colors hover:bg-white"
                             >
                               <WikipediaIcon class="h-4 w-4" />
                               {m.open_wikipedia()}
@@ -622,7 +676,7 @@
                           <button
                             type="button"
                             onclick={() => stepTrendMetric(-1)}
-                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:outline-none focus:ring-2 {tone.focus}"
                             aria-label={m.previous_metric()}
                           >
                             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -636,7 +690,7 @@
                               type="text"
                               bind:value={trendSearchQuery}
                               placeholder={m.search_biomarker()}
-                              class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-200"
+                              class="w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] outline-none transition placeholder:text-slate-400 focus:ring-2 {tone.focus}"
                               onclick={() => (trendComboboxOpen = true)}
                               onfocus={() => (trendComboboxOpen = true)}
                               oninput={() => (trendComboboxOpen = true)}
@@ -666,7 +720,7 @@
                                     {#each groupedTrendMetricOptions as group}
                                       <div class="px-2 py-2">
                                         <div
-                                          class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700/80"
+                                          class="px-2 pb-2 pt-1 text-[11px] font-bold uppercase tracking-[0.24em] {tone.eyebrow}"
                                         >
                                           {group.label}
                                         </div>
@@ -683,7 +737,7 @@
                                                   type="button"
                                                   bind:this={trendOptionButtons[option.metricName]}
                                                   onclick={() => selectTrendMetric(option.metricName)}
-                                                  class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? 'bg-teal-50 text-teal-900 ring-1 ring-teal-200' : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
+                                                  class={`flex w-full items-start justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${selectedTrendMetric === option.metricName ? tone.optionActive : 'bg-white text-slate-700 hover:bg-slate-100/80'}`}
                                                 >
                                                   <div class="min-w-0 flex-1">
                                                     <div class="truncate text-sm font-semibold">{option.label}</div>
@@ -694,7 +748,7 @@
                                                       >
                                                       {#each option.categoryLabels as tag}
                                                         <span
-                                                          class="inline-flex items-center rounded-full border border-teal-100 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700"
+                                                          class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium {tone.chip}"
                                                           >{tag}</span
                                                         >
                                                       {/each}
@@ -720,7 +774,7 @@
                           <button
                             type="button"
                             onclick={() => stepTrendMetric(1)}
-                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-200"
+                            class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-slate-500 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.6)] transition hover:text-slate-800 focus:outline-none focus:ring-2 {tone.focus}"
                             aria-label={m.next_metric()}
                           >
                             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -761,7 +815,7 @@
                           {/if}
                         </div>
                         {#if currentTrendUnitMode !== 'asRecorded' && trendChart.latest.rawUnit && canonicalUnitForm(trendChart.latest.rawUnit) !== trendDisplay?.latestUnit}
-                          <p class="mt-2 text-sm text-teal-700">
+                          <p class="mt-2 text-sm {tone.link}">
                             {m.original_prefix({ value: `${trendChart.latest.rawValue}${trendChart.latest.rawUnit ? ` ${trendChart.latest.rawUnit}` : ''}` })}
                           </p>
                         {/if}
@@ -812,7 +866,7 @@
                           {#if trendChart.overrideActive}
                             <button
                               type="button"
-                              class="text-xs font-semibold text-teal-700 hover:text-teal-900"
+                              class="text-xs font-semibold {tone.link} {tone.linkHover}"
                               onclick={() => {
                                 const next = { ...trendRefRangeOverride };
                                 delete next[selectedTrend.metricName];
@@ -836,7 +890,7 @@
                           }}
                           class={`rounded-md px-3 py-1 font-medium transition-colors ${
                             currentTrendUnitMode === 'asRecorded'
-                              ? 'bg-teal-600 text-white shadow-sm'
+                              ? tone.toggleActive
                               : 'text-slate-600 hover:bg-slate-100'
                           }`}
                         >
@@ -850,7 +904,7 @@
                             }}
                             class={`rounded-md px-3 py-1 font-medium transition-colors ${
                               currentTrendUnitMode === unit
-                                ? 'bg-teal-600 text-white shadow-sm'
+                                ? tone.toggleActive
                                 : 'text-slate-600 hover:bg-slate-100'
                             }`}
                           >
@@ -870,13 +924,13 @@
                     >
                       <svg viewBox={`0 0 ${trendChart.width} ${trendChart.height}`} class="h-64 w-full">
                         <defs>
-                          <linearGradient id="trend-line" x1="0%" x2="100%" y1="0%" y2="0%">
-                            <stop offset="0%" stop-color="#14b8a6"></stop>
-                            <stop offset="100%" stop-color="#2563eb"></stop>
+                          <linearGradient id={`${gradientId}-line`} x1="0%" x2="100%" y1="0%" y2="0%">
+                            <stop offset="0%" stop-color={tone.lineFrom}></stop>
+                            <stop offset="100%" stop-color={tone.lineTo}></stop>
                           </linearGradient>
-                          <linearGradient id="trend-area" x1="0%" x2="0%" y1="0%" y2="100%">
-                            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.28"></stop>
-                            <stop offset="100%" stop-color="#2563eb" stop-opacity="0.02"></stop>
+                          <linearGradient id={`${gradientId}-area`} x1="0%" x2="0%" y1="0%" y2="100%">
+                            <stop offset="0%" stop-color={tone.area} stop-opacity="0.28"></stop>
+                            <stop offset="100%" stop-color={tone.area} stop-opacity="0.02"></stop>
                           </linearGradient>
                           <linearGradient id="trend-ref-fade-down" x1="0%" x2="0%" y1="0%" y2="100%">
                             <stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0.22"></stop>
@@ -901,11 +955,11 @@
 
                         <line x1="20" y1="184" x2="620" y2="184" stroke="rgba(148,163,184,0.35)" stroke-width="1"
                         ></line>
-                        <polygon points={trendChart.area} fill="url(#trend-area)"></polygon>
+                        <polygon points={trendChart.area} fill={`url(#${gradientId}-area)`}></polygon>
                         <polyline
                           points={trendChart.line}
                           fill="none"
-                          stroke="url(#trend-line)"
+                          stroke={`url(#${gradientId}-line)`}
                           stroke-width="4"
                           stroke-linecap="round"
                           stroke-linejoin="round"
@@ -937,9 +991,9 @@
                             <title>{tooltipLabel}</title>
                             {#if chartDensity.fullMarkers || emphasisIndices.has(index)}
                               <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
-                              <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
+                              <circle cx={point.x} cy={point.y} r="4.5" fill={tone.dot}></circle>
                             {:else}
-                              <circle cx={point.x} cy={point.y} r="2.4" fill="#0f766e" fill-opacity="0.55"></circle>
+                              <circle cx={point.x} cy={point.y} r="2.4" fill={tone.dot} fill-opacity="0.55"></circle>
                             {/if}
                             {#if chartDensity.labelEveryPoint || emphasisIndices.has(index)}
                               <text

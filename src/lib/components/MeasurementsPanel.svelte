@@ -337,7 +337,7 @@
     </div>
   {:else}
     {#if trendMetrics.length > 0}
-      <TrendSection metrics={trendMetrics} patient={null} {formatDate} onJumpToPoint={focusSession} />
+      <TrendSection metrics={trendMetrics} patient={null} accent={domain.accent} {formatDate} onJumpToPoint={focusSession} />
     {/if}
 
     <div class="border-b border-slate-100 px-4 py-5 sm:px-6 {accentWash}">

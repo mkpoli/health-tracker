@@ -2297,6 +2297,7 @@
               <TrendSection
                 metrics={labTrendMetrics}
                 patient={data.currentPatient}
+                accent="teal"
                 {formatDate}
                 onJumpToPoint={jumpToTrendPoint}
               />
