@@ -422,13 +422,65 @@
     }
   }
 
-  function shouldShowTrendPointDate(index: number, total: number) {
-    if (total <= 6) return true;
-    if (index === 0 || index === total - 1) return true;
+  // A year of daily readings is hundreds of points. Drawing a marker, a value
+  // and a date for each one buries the line under its own annotation, so what
+  // gets drawn depends on how many points there are.
+  const CHART_MAX_MARKERS = 160;
 
-    const interval = Math.max(2, Math.round(total / 5));
-    return index % interval !== interval - 1;
-  }
+  const chartDensity = $derived.by(() => {
+    const count = trendChart?.points.length ?? 0;
+
+    return {
+      count,
+      fullMarkers: count <= 40,
+      smallMarkers: count > 40,
+      labelEveryPoint: count <= 10,
+    };
+  });
+
+  /** First, last, lowest and highest — the points worth naming on any series. */
+  const emphasisIndices = $derived.by(() => {
+    const points = trendChart?.points ?? [];
+    if (points.length === 0) return new Set<number>();
+
+    let lowest = 0;
+    let highest = 0;
+
+    points.forEach((point, index) => {
+      if (point.value < points[lowest].value) lowest = index;
+      if (point.value > points[highest].value) highest = index;
+    });
+
+    return new Set([0, points.length - 1, lowest, highest]);
+  });
+
+  /** At most five evenly spaced dates along the axis. */
+  const dateTickIndices = $derived.by(() => {
+    const count = trendChart?.points.length ?? 0;
+    if (count === 0) return new Set<number>();
+    if (count <= 6) return new Set(Array.from({ length: count }, (_, index) => index));
+
+    const ticks = new Set<number>();
+    const steps = 4;
+    for (let step = 0; step <= steps; step += 1) {
+      ticks.add(Math.round((step * (count - 1)) / steps));
+    }
+    return ticks;
+  });
+
+  /** Keeps the node count bounded on a long series. */
+  const renderedIndices = $derived.by(() => {
+    const count = trendChart?.points.length ?? 0;
+    if (count === 0) return new Set<number>();
+    if (count <= CHART_MAX_MARKERS) return new Set(Array.from({ length: count }, (_, index) => index));
+
+    const stride = Math.ceil(count / CHART_MAX_MARKERS);
+    const kept = new Set<number>();
+    for (let index = 0; index < count; index += stride) kept.add(index);
+    for (const index of emphasisIndices) kept.add(index);
+    for (const index of dateTickIndices) kept.add(index);
+    return kept;
+  });
 
 
   $effect(() => {
@@ -860,6 +912,7 @@
                         ></polyline>
 
                         {#each trendChart.points as point, index}
+                          {#if renderedIndices.has(index)}
                           {@const rendered = renderTrendPointLabel(point, currentTrendUnitMode)}
                           {@const pointLabel = `${rendered.value}${rendered.unit ? ` ${rendered.unit}` : ''}`}
                           {@const tooltipLabel =
@@ -882,20 +935,27 @@
                             }}
                           >
                             <title>{tooltipLabel}</title>
-                            <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
-                            <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
-                            <text
-                              x={point.x}
-                              y={Math.max(point.y - 14, 16)}
-                              text-anchor="middle"
-                              class="fill-slate-700 text-[11px] font-semibold">{pointLabel}</text
-                            >
-                            {#if shouldShowTrendPointDate(index, trendChart.points.length)}
+                            {#if chartDensity.fullMarkers || emphasisIndices.has(index)}
+                              <circle cx={point.x} cy={point.y} r="7" fill="white" fill-opacity="0.95"></circle>
+                              <circle cx={point.x} cy={point.y} r="4.5" fill="#0f766e"></circle>
+                            {:else}
+                              <circle cx={point.x} cy={point.y} r="2.4" fill="#0f766e" fill-opacity="0.55"></circle>
+                            {/if}
+                            {#if chartDensity.labelEveryPoint || emphasisIndices.has(index)}
+                              <text
+                                x={point.x}
+                                y={Math.max(point.y - 14, 16)}
+                                text-anchor="middle"
+                                class="fill-slate-700 text-[11px] font-semibold">{pointLabel}</text
+                              >
+                            {/if}
+                            {#if dateTickIndices.has(index)}
                               <text x={point.x} y="208" text-anchor="middle" class="fill-slate-500 text-[11px]"
                                 >{point.chartDate}</text
                               >
                             {/if}
                           </g>
+                          {/if}
                         {/each}
                       </svg>
                     </div>
