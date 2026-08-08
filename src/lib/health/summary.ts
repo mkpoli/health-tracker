@@ -556,3 +556,81 @@ export function describeTrend(points: SeriesPoint[]) {
     direction: change > 0 ? 'rising' : change < 0 ? 'falling' : 'flat',
   };
 }
+
+// Whether a series can carry an answer yet.
+//
+// A chart drawn through five points spread over nine years looks like a trend
+// and is not one. Saying so — with what would change it — is a more useful
+// answer than a slope, and it is the honest one while the record is thin.
+
+/** Product rules, stated rather than hidden, so a reader can disagree with them. */
+export const DIRECTION_MIN_POINTS = 6;
+// Six weekly readings span five weeks, so this is the floor that makes "measure
+// it once a week for six weeks" exactly sufficient. Its job is to reject six
+// readings taken over three days, where a slope is noise.
+export const DIRECTION_MIN_SPAN_DAYS = 35;
+
+export type EvidenceAssessment = {
+  metricKey: string;
+  readingCount: number;
+  spanDays: number | null;
+  medianGapDays: number | null;
+  firstDate: string | null;
+  lastDate: string | null;
+  /** Whether the series is dense enough over long enough to state a direction. */
+  sufficient: boolean;
+  /** What is missing, in the reader's terms. Null when nothing is. */
+  shortfall: string | null;
+  rule: string;
+};
+
+export function assessEvidence(metricKey: string, points: SeriesPoint[], now: number): EvidenceAssessment {
+  const dated = points.filter((point) => point.date).sort((a, b) => pointTime(a.date) - pointTime(b.date));
+  const first = dated[0]?.date ?? null;
+  const last = dated[dated.length - 1]?.date ?? null;
+  const spanDays =
+    dated.length > 1 ? Math.round((pointTime(last) - pointTime(first)) / 86_400_000) : dated.length ? 0 : null;
+
+  const gaps: number[] = [];
+  for (let i = 1; i < dated.length; i++) {
+    gaps.push(Math.round((pointTime(dated[i].date) - pointTime(dated[i - 1].date)) / 86_400_000));
+  }
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const medianGapDays = sortedGaps.length ? sortedGaps[Math.floor(sortedGaps.length / 2)] : null;
+
+  const enoughPoints = dated.length >= DIRECTION_MIN_POINTS;
+  const enoughSpan = (spanDays ?? 0) >= DIRECTION_MIN_SPAN_DAYS;
+
+  const rule = `A direction is stated once there are ${DIRECTION_MIN_POINTS} readings spanning ${DIRECTION_MIN_SPAN_DAYS} days or more.`;
+
+  if (enoughPoints && enoughSpan) {
+    return {
+      metricKey,
+      readingCount: dated.length,
+      spanDays,
+      medianGapDays,
+      firstDate: first,
+      lastDate: last,
+      sufficient: true,
+      shortfall: null,
+      rule,
+    };
+  }
+
+  const missingPoints = Math.max(0, DIRECTION_MIN_POINTS - dated.length);
+  const shortfall = !enoughPoints
+    ? `${dated.length} reading${dated.length === 1 ? '' : 's'} recorded; ${missingPoints} more would reach the threshold.`
+    : `Readings span ${spanDays} days; ${DIRECTION_MIN_SPAN_DAYS} days or more is needed before a direction means anything.`;
+
+  return {
+    metricKey,
+    readingCount: dated.length,
+    spanDays,
+    medianGapDays,
+    firstDate: first,
+    lastDate: last,
+    sufficient: false,
+    shortfall,
+    rule,
+  };
+}

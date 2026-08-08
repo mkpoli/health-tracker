@@ -7,6 +7,7 @@ import {
   buildSummary,
   describeTrend,
   downsample,
+  assessEvidence,
   drawsAreComparable,
   statusForPoint,
   type SummarySource,
@@ -282,7 +283,7 @@ const getMetricHistory: ToolDefinition = {
   name: 'get_metric_history',
   title: 'Metric history',
   description:
-    'Time series for named metrics. Accepts catalog keys or ordinary names in English, 日本語 or 中文. Points come newest first as [date, value, status, collected]. `collected` says whether the draw was fasting, post-meal or random; where it varies within a series, mixed_collection_contexts is set and the points are not one comparable line.',
+    'Time series for named metrics, each with an `evidence` block saying whether the series is dense enough over long enough to carry a direction. When enough_to_state_a_direction is false there is no trend and you must say the record cannot answer it yet, quoting the shortfall, rather than reading a slope off the points. Accepts catalog keys or ordinary names in English, 日本語 or 中文. Points come newest first as [date, value, status, collected]. `collected` says whether the draw was fasting, post-meal or random; where it varies within a series, mixed_collection_contexts is set and the points are not one comparable line.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -324,11 +325,22 @@ const getMetricHistory: ToolDefinition = {
       // A trend across a fasting and a post-meal draw measures the meals.
       const comparable = drawsAreComparable(key, windowed);
 
+      // What the series can carry, before anything is read into it.
+      const evidence = assessEvidence(key, windowed, ctx.now);
+
       return {
         metric: key,
         label,
         unit: group.unit,
-        trend: comparable ? describeTrend(windowed) : null,
+        evidence: {
+          reading_count: evidence.readingCount,
+          span_days: evidence.spanDays,
+          median_gap_days: evidence.medianGapDays,
+          enough_to_state_a_direction: evidence.sufficient,
+          ...(evidence.shortfall ? { shortfall: evidence.shortfall } : {}),
+          rule: evidence.rule,
+        },
+        trend: comparable && evidence.sufficient ? describeTrend(windowed) : null,
         points: points.map((point) => [
           point.date,
           Math.round(point.value * 1000) / 1000,
@@ -707,6 +719,7 @@ export const serverInstructions = [
   'Call list_patients, then get_health_summary, and only then get_metric_history for the metrics in question.',
   'Values arrive unit-normalized. A metric marked stale has outlived the period a reading of its kind describes; do not present it as current.',
   'A null status means no interval applied — the report carried none, no published range fits what is known about this person, or the draw conditions do not match the interval. Report the number without calling it normal or abnormal; range_notes says which.',
+  'A series with too few readings, or spread over too short a window, cannot show a direction. get_metric_history says so in its evidence block; when it does, report what the record cannot yet answer and what would settle it, and do not describe the points as rising or falling.',
   'Glucose and triglycerides mean different things fasting and after a meal. Where a reading says collected: post-meal, the fasting interval beside it does not apply, and such a reading must not be compared with a fasting one.',
   'Reference intervals differ between laboratories and assays, and the range on the report itself wins over any published one.',
   'A range whose context is on-therapy describes where a clinician aims during hormone therapy. A value inside or outside one says nothing about disease.',
