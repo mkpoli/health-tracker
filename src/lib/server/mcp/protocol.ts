@@ -7,8 +7,30 @@ import { touchGrant } from './oauth';
 // does needs to speak first, so there is nothing for a long-lived session to
 // carry.
 
-const PROTOCOL_VERSION = '2025-06-18';
-const SUPPORTED_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const PROTOCOL_VERSION = '2025-11-25';
+const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+
+/**
+ * What a client shows next to the connection. `serverInfo` gained `icons`,
+ * `title` and `websiteUrl` in 2025-11-25; a client reading an older revision
+ * ignores the extra fields. PNG rather than the app's SVG because PNG is the
+ * format clients are required to render — SVG support is only recommended.
+ */
+function serverIdentity(origin: string) {
+  return {
+    name: 'health-tracker',
+    title: 'Health Tracker',
+    version: '1.0.0',
+    description: "Lab results and body measurements from this account holder's own records.",
+    websiteUrl: origin,
+    icons: [
+      { src: `${origin}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },
+      { src: `${origin}/icon-96.png`, mimeType: 'image/png', sizes: ['96x96'] },
+      { src: `${origin}/icon-192.png`, mimeType: 'image/png', sizes: ['192x192'] },
+      { src: `${origin}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  };
+}
 
 export type JsonRpcRequest = {
   jsonrpc?: string;
@@ -72,7 +94,7 @@ export async function dispatch(message: JsonRpcRequest, ctx: McpContext): Promis
       return ok(id, {
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'health-tracker', version: '1.0.0' },
+        serverInfo: serverIdentity(ctx.origin),
         instructions: serverInstructions,
       });
     }

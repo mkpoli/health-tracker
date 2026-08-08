@@ -10,6 +10,8 @@ export type McpContext = {
   clientId: string;
   patientIds: string[];
   shareDemographics: boolean;
+  /** Where this server is reachable, for the absolute URLs it hands back. */
+  origin: string;
   now: number;
 };
 
@@ -38,6 +40,7 @@ export async function resolveContext(request: Request, origin: string): Promise<
     clientId: grant.clientId,
     patientIds: grantPatientIds(grant),
     shareDemographics: grant.shareDemographics === 1,
+    origin,
     now: Date.now(),
   };
 }

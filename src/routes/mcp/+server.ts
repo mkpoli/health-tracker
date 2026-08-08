@@ -27,6 +27,16 @@ export const POST: RequestHandler = async ({ request, url }) => {
     return new Response(JSON.stringify({ error: 'server_not_configured' }), { status: 503, headers: JSON_HEADERS });
   }
 
+  // Required of a Streamable HTTP server: an Origin that is not this server's
+  // is refused, which is what stops a page in a browser from driving the
+  // endpoint through a rebound DNS name. Agents send no Origin at all, so an
+  // absent header is the normal case and stays allowed.
+  const origin = request.headers.get('origin');
+
+  if (origin && origin !== url.origin) {
+    return new Response(JSON.stringify({ error: 'forbidden_origin' }), { status: 403, headers: JSON_HEADERS });
+  }
+
   const ctx = await resolveContext(request, url.origin);
   if (!ctx) return unauthorized(url.origin);
 
