@@ -23,6 +23,13 @@ export type MetricDefinition = {
    * says nothing about today.
    */
   freshnessDays?: number;
+  /**
+   * Set where the published interval only describes a fasting draw. A glucose
+   * taken after breakfast is expected to sit above it, so comparing the two
+   * reports a problem that is not there, and putting both in one series draws a
+   * trend out of the meal rather than the body.
+   */
+  intervalAssumesFasting?: boolean;
   calculation?: {
     dependencies: string[];
     /**
@@ -38,7 +45,7 @@ export type MetricDefinition = {
 };
 
 const labMetricCatalog: MetricDefinition[] = [
-  { key: 'triglycerides', canonicalLabel: 'Triglycerides', testType: 'blood', categories: ['fat', 'metabolism'], aliases: ['triglyceride', 'tg', '中性脂肪', 'tg 中性脂肪'] },
+  { key: 'triglycerides', canonicalLabel: 'Triglycerides', testType: 'blood', categories: ['fat', 'metabolism'], aliases: ['triglyceride', 'tg', '中性脂肪', 'tg 中性脂肪'], intervalAssumesFasting: true },
   { key: 'acth', canonicalLabel: 'ACTH', testType: 'blood', categories: ['hormone', 'endocrine'], aliases: ['acth'] },
   { key: 'ckd-stage', canonicalLabel: 'CKD Stage', testType: 'other', categories: ['kidney', 'renal'], aliases: ['ckd stage', 'ckdステージ'] },
   { key: 'cortisol', canonicalLabel: 'Cortisol', testType: 'blood', categories: ['hormone', 'adrenal', 'endocrine'], aliases: ['cortisol', 'ｺﾙﾁｿﾞｰﾙ'] },
@@ -107,8 +114,8 @@ const labMetricCatalog: MetricDefinition[] = [
   { key: 'hba1c', canonicalLabel: 'HbA1c (NGSP)', testType: 'blood', categories: ['glucose', 'diabetes'], aliases: ['hba1c ngsp', 'hba1c'] },
   { key: 'ldl', canonicalLabel: 'LDL Cholesterol', testType: 'blood', categories: ['fat', 'cardiometabolic'], aliases: ['ldl-c', 'ldl cholesterol'] },
   { key: 'lymphocytes', canonicalLabel: 'Lymphocytes', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['lymphocyte'] },
-  { key: 'blood-glucose', canonicalLabel: 'Blood Glucose', testType: 'blood', categories: ['glucose', 'diabetes'], aliases: ['blood glucose', 'plasma glucose', 'blood sugar'] },
-  { key: 'serum-glucose', canonicalLabel: 'Serum Glucose', testType: 'blood', categories: ['glucose', 'diabetes'], aliases: ['serum glucose'] },
+  { key: 'blood-glucose', canonicalLabel: 'Blood Glucose', testType: 'blood', categories: ['glucose', 'diabetes'], aliases: ['blood glucose', 'plasma glucose', 'blood sugar'], intervalAssumesFasting: true },
+  { key: 'serum-glucose', canonicalLabel: 'Serum Glucose', testType: 'blood', categories: ['glucose', 'diabetes'], aliases: ['serum glucose'], intervalAssumesFasting: true },
   { key: 'mch', canonicalLabel: 'MCH', testType: 'blood', categories: ['blood-cell'] },
   { key: 'band-neutrophils', canonicalLabel: 'Band Neutrophils', testType: 'blood', categories: ['blood-cell', 'immune'], aliases: ['band neutrophils', 'bands'] },
   { key: 'cholinesterase', canonicalLabel: 'Cholinesterase', testType: 'blood', categories: ['liver', 'enzyme'] },

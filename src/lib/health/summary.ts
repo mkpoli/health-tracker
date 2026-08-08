@@ -20,6 +20,7 @@ export type SummarySource = {
     unit: string | null;
     refRange: string | null;
     status: string | null;
+    extraData?: unknown;
   }>;
   patient: PatientContext;
   /** Reference instant for every age and staleness calculation. */
@@ -40,7 +41,33 @@ export type SeriesPoint = {
   calculated: boolean;
   /** For a calculated value, the date of the oldest reading behind it. */
   basisDate: string | null;
+  /** Whether the draw was fasting, after a meal, or casual, when the report said. */
+  collectionContext: CollectionContext;
+  hoursSinceMeal: number | null;
 };
+
+export type CollectionContext = 'fasting' | 'post-meal' | 'random' | null;
+
+function readContext(extraData: unknown): { context: CollectionContext; hoursSinceMeal: number | null } {
+  const parsed =
+    typeof extraData === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(extraData) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })()
+      : ((extraData || {}) as Record<string, unknown>);
+
+  const raw = typeof parsed.collectionContext === 'string' ? parsed.collectionContext : null;
+  const hours = Number(parsed.hoursSinceMeal);
+
+  return {
+    context: raw === 'fasting' || raw === 'post-meal' || raw === 'random' ? raw : null,
+    hoursSinceMeal: Number.isFinite(hours) ? hours : null,
+  };
+}
 
 export type MetricSeries = {
   metricKey: string;
@@ -76,8 +103,27 @@ export type SummaryEntry = {
   calculated: boolean;
   /** Change against the previous reading, in the same comparable unit. */
   delta: number | null;
+  /** Conditions of the draw, when the report stated them. */
+  collectionContext: CollectionContext;
+  hoursSinceMeal: number | null;
   readingCount: number;
 };
+
+function assumesFasting(metricKey: string) {
+  return Boolean(getMetricDefinitionByKey(metricKey)?.intervalAssumesFasting);
+}
+
+/**
+ * Whether two readings describe the same thing well enough to subtract. Where
+ * eating moves the number, a fasting draw and a post-meal draw are two
+ * different measurements, and their difference is a meal rather than a change.
+ */
+function comparableDraw(metricKey: string, latest: SeriesPoint, previous?: SeriesPoint) {
+  if (!previous) return false;
+  if (!assumesFasting(metricKey)) return true;
+
+  return latest.collectionContext === previous.collectionContext;
+}
 
 function pointTime(date: string | null) {
   if (!date) return 0;
@@ -124,6 +170,7 @@ export function buildSeries(source: SummarySource): Map<string, MetricSeries> {
     valuesByReport.set(item.reportId, values);
 
     const report = reportById.get(item.reportId);
+    const { context, hoursSinceMeal } = readContext(item.extraData);
 
     push(definition, {
       date: report?.testDate ?? null,
@@ -136,6 +183,8 @@ export function buildSeries(source: SummarySource): Map<string, MetricSeries> {
       reportKind: report?.kind || 'lab',
       calculated: false,
       basisDate: report?.testDate ?? null,
+      collectionContext: context,
+      hoursSinceMeal,
     });
   }
 
@@ -153,6 +202,8 @@ export function buildSeries(source: SummarySource): Map<string, MetricSeries> {
       reportKind: report?.kind || 'lab',
       calculated: true,
       basisDate: point.basisDate ?? report?.testDate ?? null,
+      collectionContext: null,
+      hoursSinceMeal: null,
     });
   }
 
@@ -264,6 +315,19 @@ function unitsAgree(entryUnit: string | null | undefined, valueUnit: string | nu
 }
 
 function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
+  // A glucose an hour after breakfast is expected to sit above the fasting
+  // interval printed beside it. Judging it there manufactures a High and, read
+  // over several visits, a rising trend that is a record of meals.
+  if (assumesFasting(metricKey) && point.collectionContext && point.collectionContext !== 'fasting') {
+    return {
+      status: null,
+      statusSource: null,
+      refRange: null,
+      rangeLabel: null,
+      rangeNotes: `Taken ${point.collectionContext === 'post-meal' ? 'after a meal' : 'at a casual time'}; the published interval for this metric describes a fasting draw and does not apply.`,
+    };
+  }
+
   const reportRange = parseReferenceRange(point.refRange);
 
   if (reportRange) {
@@ -328,7 +392,11 @@ export function buildSummary(source: SummarySource, series = buildSeries(source)
       horizonDays: freshness?.horizonDays ?? null,
       stale: freshness?.stale ?? false,
       calculated: latest.calculated,
-      delta: previous ? round(latest.value - previous.value) : null,
+      collectionContext: latest.collectionContext,
+      hoursSinceMeal: latest.hoursSinceMeal,
+      // Two readings only subtract when they were taken under the same
+      // conditions; fasting minus post-meal is not a change in the body.
+      delta: comparableDraw(group.metricKey, latest, previous) ? round(latest.value - previous!.value) : null,
       readingCount: group.points.length,
     });
   }

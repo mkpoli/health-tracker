@@ -55,11 +55,15 @@ Extract the document source and the metrics into a strictly typed JSON object li
       "referenceRange": "string representing the normal/reference range (e.g. '90-120', '< 150')",
       "date": "string representing the metric date in ISO-like format if visible (prefer YYYY-MM-DD or YYYY-MM-DDTHH:mm); otherwise empty string",
       "status": "Normal" | "High" | "Low" | "Review Required" | "Stable",
+      "collectionContext": "fasting" | "post-meal" | "random" | "" ,
+      "hoursSinceMeal": "number of hours between the last meal and the draw when the document states it; otherwise empty",
       "notes": "string any brief notes or symptoms mentioned"
     }
   ]
 };
 Use the exact facility/hospital wording from the source document when present. Do not translate the source language.
+A glucose or triglyceride value means something different depending on whether the person had eaten, and documents usually say which. Set "collectionContext" to "fasting" for a fasting draw (空腹時, 絶食, FBS, fasting), "post-meal" when the document says the person had eaten (食後, 食後2時間, PPBS, postprandial, non-fasting, 随時 when it states a recent meal), and "random" for an explicitly casual draw (随時, casual) with no meal stated. Leave it empty when the document does not say — do not guess.
+When the document states the interval since eating (e.g. 食後2時間), put that number in "hoursSinceMeal". If the document gives the condition once for the whole panel, apply it to every metric drawn in that panel.
 For each metric, preserve the original metric label exactly in "originalLabel", and provide a concise English normalized version in "parsedLabel".
 When units contain multipliers or local counting notation such as 百, 千, 万, ×100, ×10^2, ×10^3, or similar, calculate a normalized comparable numeric value and unit for cross-report comparison while still preserving the original value and original unit exactly as shown.
 If the metric is textual or cannot be normalized safely, leave comparableValue empty or equal to the original numeric value and explain nothing extra.

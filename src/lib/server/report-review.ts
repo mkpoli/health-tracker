@@ -47,6 +47,21 @@ function getDerivedCategory(label?: string | null) {
   return tags.categories[0] || 'other';
 }
 
+/**
+ * What the draw was: fasting, after a meal, or casual. A glucose is a different
+ * measurement in each case, and the documents say which — dropping it is what
+ * turns one series into two measurements averaged together.
+ */
+function readCollectionContext(value: unknown) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return text === 'fasting' || text === 'post-meal' || text === 'random' ? text : null;
+}
+
+function readHoursSinceMeal(value: unknown) {
+  const hours = Number(value);
+  return Number.isFinite(hours) && hours >= 0 && hours <= 24 ? hours : null;
+}
+
 export async function saveReviewedReport(input: {
   patientId: string;
   metricsStr: string;
@@ -175,6 +190,8 @@ export async function saveReviewedReport(input: {
           derivedCategory,
           originalLabel,
           parsedLabel,
+          collectionContext: readCollectionContext(m.collectionContext),
+          hoursSinceMeal: readHoursSinceMeal(m.hoursSinceMeal),
           comparableValue: Number.isFinite(comparableValue) ? comparableValue : null,
           comparableUnit,
           comparableReferenceRange,
@@ -212,6 +229,8 @@ export async function saveReviewedReport(input: {
         extraData: JSON.stringify({
           ...extraDataWithoutLegacyCategory,
           notes: m.notes,
+          collectionContext: readCollectionContext(m.collectionContext),
+          hoursSinceMeal: readHoursSinceMeal(m.hoursSinceMeal),
           derivedCategory,
           originalLabel,
           parsedLabel,
