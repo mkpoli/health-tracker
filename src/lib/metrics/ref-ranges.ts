@@ -11,6 +11,13 @@ export type RefRangeEntry = {
   unit?: string | null;
   notes?: string;
   source?: string;
+  /**
+   * `on-therapy` marks an interval that describes someone taking hormones —
+   * where a clinician aims, or what the therapy usually does to a value. A
+   * reading outside one of these is a matter for the treatment, and it is not
+   * evidence of disease. Absent means the entry is a physiological interval.
+   */
+  context?: 'on-therapy';
 };
 
 export type PatientContext = {
@@ -35,6 +42,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '8-60', unit: 'ng/dL' },
     {
       label: 'Transfeminine HRT target (suppressed)',
+      context: 'on-therapy',
       range: '<50',
       unit: 'ng/dL',
       notes: 'On feminizing HRT with anti-androgen or orchiectomy. Endocrine Society 2017 cites <55 ng/dL.',
@@ -42,6 +50,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     },
     {
       label: 'Transmasculine HRT target',
+      context: 'on-therapy',
       range: '320-1000',
       unit: 'ng/dL',
       notes: 'On masculinizing testosterone therapy — aim for the cis male physiological range.',
@@ -60,6 +69,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '<10', unit: 'pg/mL' },
     {
       label: 'Transfeminine HRT target',
+      context: 'on-therapy',
       range: '100-200',
       unit: 'pg/mL',
       notes: 'Common feminizing-HRT target (premenopausal female range). Some clinicians and patients on monotherapy aim higher (up to ~250-300).',
@@ -67,6 +77,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     },
     {
       label: 'Transmasculine on T (suppressed)',
+      context: 'on-therapy',
       range: '<50',
       unit: 'pg/mL',
       notes: 'On masculinizing testosterone therapy, endogenous estradiol is typically suppressed.',
@@ -87,6 +98,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '25.8-134.8', unit: 'mIU/mL' },
     {
       label: 'On HRT (suppressed)',
+      context: 'on-therapy',
       range: '<5',
       unit: 'mIU/mL',
       notes: 'Both feminizing and masculinizing HRT typically suppress endogenous gonadotropins. Not a hard target; trended for context.',
@@ -100,6 +112,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Female, postmenopausal', sex: 'Female', notes: 'Postmenopausal', range: '7.7-58.5', unit: 'mIU/mL' },
     {
       label: 'On HRT (suppressed)',
+      context: 'on-therapy',
       range: '<5',
       unit: 'mIU/mL',
       notes: 'Both feminizing and masculinizing HRT typically suppress endogenous gonadotropins. Not a hard target; trended for context.',
@@ -133,6 +146,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '12.0-15.5', unit: 'g/dL' },
     {
       label: 'On masculinizing T therapy',
+      context: 'on-therapy',
       range: '13.5-17.5',
       unit: 'g/dL',
       notes: 'Trends toward cis male range on testosterone. Monitor for erythrocytosis.',
@@ -144,6 +158,7 @@ const refRangeCatalog: Partial<Record<string, RefRangeEntry[]>> = {
     { label: 'Adult female', sex: 'Female', ageMin: 18, range: '36-44', unit: '%' },
     {
       label: 'On masculinizing T therapy (safety cap)',
+      context: 'on-therapy',
       range: '<52',
       unit: '%',
       notes: 'Hematocrit >52% on testosterone therapy is the commonly cited threshold for clinical action (dose review, phlebotomy).',
