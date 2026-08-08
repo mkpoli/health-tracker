@@ -1,7 +1,5 @@
 import { getOwnedPatient } from '$lib/server/ownership';
-import { getActiveGrant, grantPatientIds, MCP_SCOPES, readAccessToken, resourceUrl } from './oauth';
-
-const READ_SCOPE = MCP_SCOPES[0];
+import { getActiveGrant, grantPatientIds, READ_SCOPE, WRITE_SCOPE, readAccessToken, resourceUrl } from './oauth';
 
 export type McpContext = {
   /** Auth0 subject — the same value `patient.ownerUserId` stores. */
@@ -10,6 +8,8 @@ export type McpContext = {
   clientId: string;
   patientIds: string[];
   shareDemographics: boolean;
+  /** Whether both the token and the grant behind it carry the write scope. */
+  canWrite: boolean;
   /** Where this server is reachable, for the absolute URLs it hands back. */
   origin: string;
   now: number;
@@ -34,12 +34,19 @@ export async function resolveContext(request: Request, origin: string): Promise<
   if (claims.client && grant.clientId !== claims.client) return null;
   if (!grant.scope.split(' ').includes(READ_SCOPE)) return null;
 
+  const tokenScopes = claims.scope.split(' ');
+  const grantScopes = grant.scope.split(' ');
+
   return {
     userId: claims.sub,
     grant: { id: grant.id, lastUsedAt: grant.lastUsedAt },
     clientId: grant.clientId,
     patientIds: grantPatientIds(grant),
     shareDemographics: grant.shareDemographics === 1,
+    // Both sides must carry it: an old token cannot gain a scope its grant was
+    // later given, and a re-consent that removed write cannot be outlived by a
+    // token that still claims it.
+    canWrite: tokenScopes.includes(WRITE_SCOPE) && grantScopes.includes(WRITE_SCOPE),
     origin,
     now: Date.now(),
   };

@@ -701,5 +701,8 @@
   "therapy_position_below": "该值低于范围",
   "therapy_position_unknown": "无法判定位置",
   "change_not_comparable": "上次采样条件不同，未作比较",
-  "mixed_draw_conditions": "采样条件不一致"
+  "mixed_draw_conditions": "采样条件不一致",
+  "consent_write_label": "允许记录测量值",
+  "consent_write_help": "可以添加你告知的身体测量与生命体征（腰围、体重、血压等）。化验结果仍只能来自上传的报告，已保存的数据无法修改或删除。",
+  "consent_never_body_with_write": "打开你上传的文档与图片，修改或删除已保存的数据，或添加化验结果。"
 }

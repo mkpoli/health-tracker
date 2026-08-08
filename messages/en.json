@@ -701,5 +701,8 @@
   "therapy_position_below": "this reading is below it",
   "therapy_position_unknown": "position not determined",
   "change_not_comparable": "Not compared — the previous reading was taken under different conditions",
-  "mixed_draw_conditions": "Mixed draw conditions"
+  "mixed_draw_conditions": "Mixed draw conditions",
+  "consent_write_label": "Let it record measurements",
+  "consent_write_help": "It can add body measurements and vitals you tell it — a waist measurement, a weight, a blood pressure. Lab results still come only from uploaded reports, and nothing already saved can be changed or deleted.",
+  "consent_never_body_with_write": "Open the documents and images you uploaded, change or delete anything already saved, or add laboratory results."
 }

@@ -9,6 +9,8 @@
   // access to all of them.
   let selected = $state<string[]>([]);
   let shareDemographics = $state(false);
+  // Writing is never implied by connecting; it is ticked on purpose or not at all.
+  let allowWrite = $state(false);
 
   function toggle(id: string, checked: boolean) {
     selected = checked ? [...new Set([...selected, id])] : selected.filter((item) => item !== id);
@@ -64,6 +66,19 @@
       <label class="flex gap-3 rounded-xl border border-slate-200 px-3 py-3">
         <input
           type="checkbox"
+          name="allow_write"
+          bind:checked={allowWrite}
+          class="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+        />
+        <span class="text-sm">
+          <span class="font-medium text-slate-900">{m.consent_write_label()}</span>
+          <span class="mt-1 block text-slate-600">{m.consent_write_help()}</span>
+        </span>
+      </label>
+
+      <label class="flex gap-3 rounded-xl border border-slate-200 px-3 py-3">
+        <input
+          type="checkbox"
           name="share_demographics"
           bind:checked={shareDemographics}
           class="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
@@ -81,7 +96,7 @@
         </div>
         <div>
           <p class="font-medium text-slate-900">{m.consent_never_title()}</p>
-          <p class="mt-0.5">{m.consent_never_body()}</p>
+          <p class="mt-0.5">{allowWrite ? m.consent_never_body_with_write() : m.consent_never_body()}</p>
         </div>
         <p class="text-slate-600">{m.consent_provider_warning()}</p>
       </div>

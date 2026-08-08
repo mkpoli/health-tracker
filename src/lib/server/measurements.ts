@@ -143,6 +143,8 @@ export async function saveMeasurementSession(input: {
   measuredAt: string;
   notes?: string | null;
   entries: unknown;
+  /** Who wrote the session, when it did not come from the person at the keyboard. */
+  source?: { via: string; clientId: string } | null;
 }) {
   const measuredAt = input.measuredAt;
   const notes = input.notes?.trim() || null;
@@ -190,7 +192,7 @@ export async function saveMeasurementSession(input: {
           patientId: input.patientId,
           kind: input.kind,
           testDate: measuredAt,
-          extraData: JSON.stringify({ notes }),
+          extraData: JSON.stringify({ notes, ...(input.source ? { source: input.source } : {}) }),
         })
         .returning();
 

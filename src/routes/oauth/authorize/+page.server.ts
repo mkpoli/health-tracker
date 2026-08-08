@@ -10,6 +10,8 @@ import {
   getClient,
   issueAuthCode,
   MCP_SCOPES,
+  READ_SCOPE,
+  WRITE_SCOPE,
   mcpEnabled,
   resourceUrl,
   revokePriorGrants,
@@ -80,7 +82,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       redirectOrigin: new URL(params.redirectUri).origin,
     },
     patients,
-    scope: MCP_SCOPES.join(' '),
+    scope: READ_SCOPE,
     query: url.search,
   };
 };
@@ -121,7 +123,9 @@ export const actions: Actions = {
       clientId: client.id,
       patientIds,
       shareDemographics: form.get('share_demographics') === 'on',
-      scope: MCP_SCOPES.join(' '),
+      // Reading is the whole point of connecting; writing is added only when
+      // the account holder ticks it on this screen.
+      scope: form.get('allow_write') === 'on' ? `${READ_SCOPE} ${WRITE_SCOPE}` : READ_SCOPE,
     });
 
     const code = await issueAuthCode({

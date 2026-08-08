@@ -9,7 +9,14 @@ import { mcpAuthCode, mcpClient, mcpGrant } from '$lib/server/db/schema';
 // possible: an identity provider can issue a scope, it cannot say "this client
 // may read this one profile and not the other".
 
-export const MCP_SCOPES = ['health:read'] as const;
+export const READ_SCOPE = 'health:read';
+/**
+ * Writing is a separate grant, never implied by reading. A connection that can
+ * log a measurement can also put a number into the record that the account
+ * holder will later read back as their own history.
+ */
+export const WRITE_SCOPE = 'health:write';
+export const MCP_SCOPES = [READ_SCOPE, WRITE_SCOPE] as const;
 // Short, because the only thing that ends a token early is its own expiry —
 // revocation is immediate in practice because the grant is re-read on every
 // call, but a token that has left the machine should not stay useful for long.

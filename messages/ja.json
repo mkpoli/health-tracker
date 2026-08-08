@@ -701,5 +701,8 @@
   "therapy_position_below": "この値は範囲より下",
   "therapy_position_unknown": "位置は判定できません",
   "change_not_comparable": "前回は条件が異なるため比較していません",
-  "mixed_draw_conditions": "採血条件が混在"
+  "mixed_draw_conditions": "採血条件が混在",
+  "consent_write_label": "測定値の記録を許可する",
+  "consent_write_help": "伝えた身体測定値やバイタル（腹囲、体重、血圧など）を追加できます。検査結果はアップロードした報告書からのみ取り込まれ、保存済みのデータは変更も削除もできません。",
+  "consent_never_body_with_write": "アップロードした書類や画像を開くこと、保存済みのデータを変更・削除すること、検査結果を追加すること。"
 }

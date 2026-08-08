@@ -1,5 +1,5 @@
 import { ToolError, type McpContext } from './context';
-import { serverInstructions, tools } from './tools';
+import { serverInstructions, tools, toolsFor } from './tools';
 import { touchGrant } from './oauth';
 
 // Model Context Protocol over JSON-RPC 2.0. Only the stateless half is served:
@@ -60,13 +60,17 @@ function fail(id: string | number | null, code: number, message: string): JsonRp
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 
-function describeTools() {
-  return tools.map((tool) => ({
+function describeTools(ctx: McpContext) {
+  // Only what this connection may call: a tool listed and then refused is a
+  // worse experience than one that was never offered.
+  return toolsFor(ctx).map((tool) => ({
     name: tool.name,
     title: tool.title,
     description: tool.description,
     inputSchema: tool.inputSchema,
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: tool.writes
+      ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+      : { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }));
 }
 
@@ -103,13 +107,25 @@ export async function dispatch(message: JsonRpcRequest, ctx: McpContext): Promis
       return ok(id, {});
 
     case 'tools/list':
-      return ok(id, { tools: describeTools() });
+      return ok(id, { tools: describeTools(ctx) });
 
     case 'tools/call': {
       const name = message.params?.name;
       const tool = tools.find((candidate) => candidate.name === name);
 
       if (!tool) return fail(id, INVALID_PARAMS, `No tool named ${String(name)}`);
+
+      if (tool.writes && !ctx.canWrite) {
+        return ok(id, {
+          content: [
+            {
+              type: 'text',
+              text: 'This connection may only read. Writing needs the write permission, which the account holder grants on the connection screen.',
+            },
+          ],
+          isError: true,
+        });
+      }
 
       const args = (message.params?.arguments as Record<string, unknown>) || {};
 

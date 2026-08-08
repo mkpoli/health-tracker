@@ -13,6 +13,12 @@ import {
 } from '$lib/health/summary';
 import { allMetricDefinitions, getMetricDefinition, getMetricDefinitionByKey } from '$lib/metrics/catalog';
 import { getRefRangesForMetric } from '$lib/metrics/ref-ranges';
+import { BODY_REPORT_KIND, VITAL_REPORT_KIND } from '$lib/report-kind';
+import {
+  InvalidMeasurementsError,
+  parseMeasuredAt,
+  saveMeasurementSession,
+} from '$lib/server/measurements';
 import { requirePatient, ToolError, type McpContext } from './context';
 import { capResult } from './budget';
 
@@ -25,6 +31,8 @@ export type ToolDefinition = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Tools that change the record; absent means the tool only reads. */
+  writes?: true;
   handler: (ctx: McpContext, args: Record<string, unknown>) => Promise<unknown>;
 };
 
@@ -559,6 +567,125 @@ const getReferenceRanges: ToolDefinition = {
   },
 };
 
+
+const logMeasurement: ToolDefinition = {
+  name: 'log_measurement',
+  title: 'Record a measurement',
+  description:
+    'Write a body measurement or vital sign the person just took — a waist circumference, a weight, a blood pressure. Requires the write permission, granted separately from reading. Laboratory results cannot be written here; those come from the uploaded report. Confirm the numbers with the person before calling, and report back what was stored.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      patient_id: { type: 'string' },
+      kind: { type: 'string', enum: ['body', 'vital'], description: 'body for size and composition, vital for blood pressure, pulse, temperature.' },
+      measured_at: { type: 'string', description: 'ISO timestamp. Defaults to now; pass the real time when logging something taken earlier.' },
+      entries: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 40,
+        items: {
+          type: 'object',
+          properties: {
+            metric: { type: 'string', description: 'Catalog key or name, e.g. waist-circumference. Resolve with search_metrics when unsure.' },
+            value: { type: 'number' },
+            unit: { type: 'string' },
+            notes: { type: 'string' },
+          },
+          required: ['metric', 'value'],
+          additionalProperties: false,
+        },
+      },
+      notes: { type: 'string' },
+    },
+    required: ['patient_id', 'kind', 'entries'],
+    additionalProperties: false,
+  },
+  writes: true,
+  handler: async (ctx, args) => {
+    const owned = await requirePatient(ctx, args.patient_id);
+    const kind = str(args.kind);
+
+    // Laboratory records carry a parsed source document and a review flow; a
+    // conversation is not a place to mint one.
+    if (kind !== BODY_REPORT_KIND && kind !== VITAL_REPORT_KIND) {
+      throw new ToolError('kind must be body or vital');
+    }
+
+    const measuredAt = parseMeasuredAt(str(args.measured_at)) ?? new Date(ctx.now).toISOString();
+    const entries = Array.isArray(args.entries) ? args.entries : [];
+
+    const resolved = entries.map((raw) => {
+      const entry = (raw || {}) as Record<string, unknown>;
+      const name = str(entry.metric);
+      const definition = name ? getMetricDefinitionByKey(name.toLowerCase()) : null;
+
+      return {
+        key: definition?.key ?? null,
+        label: definition?.canonicalLabel ?? name,
+        value: entry.value,
+        unit: entry.unit,
+        notes: entry.notes,
+      };
+    });
+
+    // A retried call must not become a second session. An identical timestamp
+    // and kind is treated as the same act rather than a new one, because the
+    // alternative — reusing the session id — reaches the path that prunes
+    // records the payload does not mention.
+    const sameMoment = await db
+      .select({ id: report.id })
+      .from(report)
+      .where(and(eq(report.patientId, owned.id), eq(report.kind, kind), eq(report.testDate, measuredAt)));
+
+    if (sameMoment.length > 0) {
+      return {
+        stored: false,
+        reason: 'A session for this profile already exists at that exact time; nothing was written.',
+        session_id: sameMoment[0].id,
+      };
+    }
+
+    let saved;
+
+    try {
+      saved = await saveMeasurementSession({
+        kind,
+        patientId: owned.id,
+        // Never a session id: with one, the save prunes every record the
+        // payload omits, which would let one logged number delete the rest.
+        sessionId: null,
+        measuredAt,
+        notes: str(args.notes),
+        entries: resolved,
+        source: { via: 'mcp', clientId: ctx.clientId },
+      });
+    } catch (error) {
+      if (error instanceof InvalidMeasurementsError) {
+        throw new ToolError('No usable measurements — each entry needs a known metric and a numeric value.');
+      }
+      throw error;
+    }
+
+    // Read the session back through the same model the summary uses, so the
+    // agent reflects the stored numbers rather than the ones it sent.
+    const { source } = await loadSource(ctx, owned.id);
+    const summary = buildSummary(source);
+    const written = resolved
+      .map((entry) => summary.find((item) => item.metricKey === (entry.key ?? getMetricDefinition(entry.label || '').key)))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .map(serializeSummaryEntry);
+
+    return {
+      stored: true,
+      session_id: saved.sessionId,
+      kind,
+      measured_at: measuredAt,
+      saved_count: saved.savedCount,
+      metrics: written,
+    };
+  },
+};
+
 export const tools: ToolDefinition[] = [
   listPatients,
   getHealthSummary,
@@ -567,7 +694,13 @@ export const tools: ToolDefinition[] = [
   getReport,
   searchMetrics,
   getReferenceRanges,
+  logMeasurement,
 ];
+
+/** The tools a connection may actually call, given what it was granted. */
+export function toolsFor(ctx: McpContext) {
+  return tools.filter((tool) => !tool.writes || ctx.canWrite);
+}
 
 export const serverInstructions = [
   'This server reads one account holder’s health records: lab results they uploaded and measurements they logged by hand.',

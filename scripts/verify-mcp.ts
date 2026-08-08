@@ -51,7 +51,13 @@ async function register(name = 'Test Agent') {
   return (await response.json()) as { client_id: string };
 }
 
-async function consent(clientId: string, challenge: string, chosen: string[], demographics: boolean) {
+async function consent(
+  clientId: string,
+  challenge: string,
+  chosen: string[],
+  demographics: boolean,
+  allowWrite = false,
+) {
   const query = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
@@ -65,6 +71,7 @@ async function consent(clientId: string, challenge: string, chosen: string[], de
   const body = new URLSearchParams();
   for (const id of chosen) body.append('patient_id', id);
   if (demographics) body.set('share_demographics', 'on');
+  if (allowWrite) body.set('allow_write', 'on');
 
   const response = await fetch(`${BASE}/oauth/authorize?${query}&%2Fapprove=`, {
     method: 'POST',
@@ -290,6 +297,118 @@ const crossSite = await fetch(`${BASE}/settings/connections?%2Frevoke=`, {
   body: new URLSearchParams({ grant_id: 'x' }),
 });
 step('cross-site form post still refused', crossSite.status === 403, `status=${crossSite.status}`);
+
+// Writing: a read-only connection must be refused, and a granted one must
+// store exactly what it was given and nothing more.
+const readOnlyWrite = await call('log_measurement', {
+  patient_id: patients[0].id,
+  kind: 'body',
+  entries: [{ metric: 'waist-circumference', value: 96, unit: 'cm' }],
+});
+step(
+  'a read-only connection cannot write',
+  readOnlyWrite.result?.isError === true || readOnlyWrite.error !== undefined,
+  readOnlyWrite.result?.content?.[0]?.text ?? readOnlyWrite.error?.message,
+);
+
+const listedForReader = (await rpc('tools/list')).result?.tools?.map((t: any) => t.name) ?? [];
+step('the write tool is not offered without the scope', !listedForReader.includes('log_measurement'));
+
+const writer = await register('Writing Agent');
+const writeConsent = await consent(writer.client_id, challenge, [patients[0].id], true, true);
+const writeTokens = (await (
+  await tokenRequest({
+    grant_type: 'authorization_code',
+    code: writeConsent.code!,
+    code_verifier: verifier,
+    client_id: writer.client_id,
+    redirect_uri: REDIRECT,
+  })
+).json()) as { access_token?: string };
+
+const writerTools = (await rpc('tools/list', undefined, writeTokens.access_token!)).result?.tools ?? [];
+const writeTool = writerTools.find((t: any) => t.name === 'log_measurement');
+step('the write tool appears once granted', Boolean(writeTool));
+step('it is annotated as changing the record', writeTool?.annotations?.readOnlyHint === false);
+
+const measuredAt = '2026-08-08T09:00:00.000Z';
+const stored = await call(
+  'log_measurement',
+  {
+    patient_id: patients[0].id,
+    kind: 'body',
+    measured_at: measuredAt,
+    entries: [
+      { metric: 'waist-circumference', value: 96, unit: 'cm' },
+      { metric: 'body-weight', value: 137.2, unit: 'kg' },
+    ],
+    notes: 'logged from a conversation',
+  },
+  writeTokens.access_token!,
+);
+const storedData = stored.result?.structuredContent;
+step('a measurement is stored', storedData?.stored === true, `saved=${storedData?.saved_count}`);
+step(
+  'the stored numbers come back through the read model',
+  (storedData?.metrics ?? []).some((metric: any) => metric.metric === 'waist-circumference' && metric.value === 96),
+  (storedData?.metrics ?? []).map((metric: any) => `${metric.metric}=${metric.value}`).join(', '),
+);
+
+const repeat = await call(
+  'log_measurement',
+  {
+    patient_id: patients[0].id,
+    kind: 'body',
+    measured_at: measuredAt,
+    entries: [{ metric: 'waist-circumference', value: 96, unit: 'cm' }],
+  },
+  writeTokens.access_token!,
+);
+step('a retry does not write a second session', repeat.result?.structuredContent?.stored === false);
+
+const labAttempt = await call(
+  'log_measurement',
+  { patient_id: patients[0].id, kind: 'lab', entries: [{ metric: 'hba1c', value: 5.5, unit: '%' }] },
+  writeTokens.access_token!,
+);
+step('laboratory results cannot be written', labAttempt.result?.isError === true);
+
+const nonsense = await call(
+  'log_measurement',
+  { patient_id: patients[0].id, kind: 'body', entries: [{ metric: 'waist-circumference', value: 'lots' }] },
+  writeTokens.access_token!,
+);
+step('a non-numeric value is refused', nonsense.result?.isError === true);
+
+const foreignWrite = await call(
+  'log_measurement',
+  { patient_id: '00000000-0000-0000-0000-000000000000', kind: 'body', entries: [{ metric: 'body-weight', value: 80 }] },
+  writeTokens.access_token!,
+);
+step('writing to a profile outside the grant is refused', foreignWrite.result?.isError === true);
+
+// The session must carry its provenance, and must not have pruned anything.
+const written = db
+  .query("select id, extra_data from report where kind = 'body' and test_date = ?")
+  .all(measuredAt) as Array<{ id: string; extra_data: string }>;
+step('exactly one session exists for that moment', written.length === 1, `${written.length} session(s)`);
+// `extra_data` is a `mode: 'json'` column that the app also JSON.stringifies
+// into, so the stored text is encoded twice. It round-trips because the reader
+// parses whatever it gets, but a raw read has to unwrap both layers.
+const sessionExtra = (() => {
+  let value: unknown = written[0]?.extra_data ?? '{}';
+  for (let i = 0; i < 2 && typeof value === 'string'; i++) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
+  }
+  return (value || {}) as Record<string, any>;
+})();
+step('the session records that an agent wrote it', sessionExtra?.source?.via === 'mcp', JSON.stringify(sessionExtra?.source));
+const writtenRecords = db.query('select count(*) n from record where report_id = ?').get(written[0]?.id) as { n: number };
+step('both entries were kept', writtenRecords.n === 2, `${writtenRecords.n} record(s)`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
