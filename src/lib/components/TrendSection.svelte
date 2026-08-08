@@ -26,7 +26,7 @@
     type TrendMetricGroup,
     type TrendPoint,
   } from '$lib/metrics/trends';
-  import { contextsComparable, therapyRangesForValue, verdictApplies } from '$lib/health/summary';
+  import { assessEvidence, contextsComparable, therapyRangesForValue, verdictApplies } from '$lib/health/summary';
   import RefRangePicker from './RefRangePicker.svelte';
 
   // The diachronic view, shared by every dashboard section so lab results,
@@ -364,6 +364,9 @@
     const hasMixedUnits = rawUnits.size > 1;
     // Where eating moves the number, a line through fasting and post-meal
     // readings charts the meals rather than the body.
+    // Whether this series can carry a direction at all. A line through five
+    // points spread over nine years looks like a trend and is not one.
+    const evidence = assessEvidence(metricKey, series as never, Date.now());
     const drawContexts = [...new Set(series.map((point) => point.collectionContext))];
     const hasMixedDraws =
       drawContexts.length > 1 && !contextsComparable(metricKey, drawContexts[0], drawContexts[1]);
@@ -401,6 +404,7 @@
       refRangeFill,
       hasMixedUnits,
       hasMixedDraws,
+      evidence,
       overrideActive,
       unitOptions,
     };
@@ -837,6 +841,14 @@
                             </span>
                           {/if}
                         </div>
+                        {#if !trendChart.evidence.sufficient}
+                          <p class="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                            {m.evidence_too_sparse()}
+                            {#if trendChart.evidence.shortfall}
+                              <span class="mt-1 block text-slate-600">{trendChart.evidence.shortfall}</span>
+                            {/if}
+                          </p>
+                        {/if}
                         {#if !trendChart.verdictHolds}
                           <p class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                             {m.status_withheld_after_meal()}

@@ -704,5 +704,6 @@
   "mixed_draw_conditions": "采样条件不一致",
   "consent_write_label": "允许记录测量值",
   "consent_write_help": "可以添加你告知的身体测量与生命体征（腰围、体重、血压等）。化验结果仍只能来自上传的报告，已保存的数据无法修改或删除。",
-  "consent_never_body_with_write": "打开你上传的文档与图片，修改或删除已保存的数据，或添加化验结果。"
+  "consent_never_body_with_write": "打开你上传的文档与图片，修改或删除已保存的数据，或添加化验结果。",
+  "evidence_too_sparse": "读数太少、间隔太长，无法判断变化方向。"
 }

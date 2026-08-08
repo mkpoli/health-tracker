@@ -704,5 +704,6 @@
   "mixed_draw_conditions": "Mixed draw conditions",
   "consent_write_label": "Let it record measurements",
   "consent_write_help": "It can add body measurements and vitals you tell it — a waist measurement, a weight, a blood pressure. Lab results still come only from uploaded reports, and nothing already saved can be changed or deleted.",
-  "consent_never_body_with_write": "Open the documents and images you uploaded, change or delete anything already saved, or add laboratory results."
+  "consent_never_body_with_write": "Open the documents and images you uploaded, change or delete anything already saved, or add laboratory results.",
+  "evidence_too_sparse": "Too few readings, too far apart, to say which way this is going."
 }
