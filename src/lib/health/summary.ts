@@ -131,15 +131,70 @@ function assumesFasting(metricKey: string) {
 }
 
 /**
- * Whether two readings describe the same thing well enough to subtract. Where
- * eating moves the number, a fasting draw and a post-meal draw are two
- * different measurements, and their difference is a meal rather than a change.
+ * Whether a printed interval says anything about a reading taken under these
+ * conditions. A fasting interval describes a fasting draw; applying it to one
+ * taken after a meal produces a verdict about the meal.
+ *
+ * Exported because every surface that renders a status has to answer this the
+ * same way — the dashboard and the agent reading the same number must not
+ * disagree about whether it is abnormal.
  */
+export function verdictApplies(metricKey: string, context: CollectionContext) {
+  return !(assumesFasting(metricKey) && context && context !== 'fasting');
+}
+
+/**
+ * Intervals for a metric that describe someone on hormone therapy, with where
+ * this value falls in each. Takes a bare value so a renderer holding a chart
+ * point can ask the same question the read model asks.
+ */
+export function therapyRangesForValue(
+  metricKey: string,
+  value: number,
+  unit: string | null,
+  patient: PatientContext = {},
+): TherapyRange[] {
+  return getRefRangesForMetric(metricKey, patient)
+    .filter((entry) => entry.context === 'on-therapy' && unitsAgree(entry.unit, unit))
+    .map((entry) => {
+      const parsed = parseReferenceRange(entry.range);
+      let position: TherapyRange['position'] = 'unknown';
+
+      if (parsed) {
+        if (parsed.low !== null && value < parsed.low) position = 'below';
+        else if (parsed.high !== null && value > parsed.high) position = 'above';
+        else if (parsed.low !== null || parsed.high !== null) position = 'within';
+      }
+
+      return {
+        label: entry.label,
+        range: entry.range,
+        unit: entry.unit ?? null,
+        notes: entry.notes ?? null,
+        source: entry.source ?? null,
+        position,
+      };
+    });
+}
+
+/**
+ * Whether two readings describe the same thing well enough to subtract or plot
+ * as one line. Where eating moves the number, a fasting draw and a post-meal
+ * draw are two different measurements, and their difference is a meal rather
+ * than a change.
+ *
+ * Exported for the same reason the verdict rule is: a chart and an agent
+ * looking at the same two numbers must agree on whether their difference means
+ * anything.
+ */
+export function contextsComparable(metricKey: string, a: CollectionContext, b: CollectionContext) {
+  return !assumesFasting(metricKey) || a === b;
+}
+
 function comparableDraw(metricKey: string, latest: SeriesPoint, previous?: SeriesPoint) {
   if (!previous) return false;
-  if (!assumesFasting(metricKey)) return true;
 
-  return latest.collectionContext === previous.collectionContext;
+  return contextsComparable(metricKey, latest.collectionContext, previous.collectionContext);
 }
 
 function pointTime(date: string | null) {
@@ -335,7 +390,7 @@ function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
   // A glucose an hour after breakfast is expected to sit above the fasting
   // interval printed beside it. Judging it there manufactures a High and, read
   // over several visits, a rising trend that is a record of meals.
-  if (assumesFasting(metricKey) && point.collectionContext && point.collectionContext !== 'fasting') {
+  if (!verdictApplies(metricKey, point.collectionContext)) {
     return {
       status: null,
       statusSource: null,
@@ -382,27 +437,7 @@ function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
  * that context is not left with only the laboratory's cis-referenced verdict.
  */
 function therapyRangesFor(metricKey: string, point: SeriesPoint, patient: PatientContext): TherapyRange[] {
-  return getRefRangesForMetric(metricKey, patient)
-    .filter((entry) => entry.context === 'on-therapy' && unitsAgree(entry.unit, point.unit))
-    .map((entry) => {
-      const parsed = parseReferenceRange(entry.range);
-      let position: TherapyRange['position'] = 'unknown';
-
-      if (parsed) {
-        if (parsed.low !== null && point.value < parsed.low) position = 'below';
-        else if (parsed.high !== null && point.value > parsed.high) position = 'above';
-        else if (parsed.low !== null || parsed.high !== null) position = 'within';
-      }
-
-      return {
-        label: entry.label,
-        range: entry.range,
-        unit: entry.unit ?? null,
-        notes: entry.notes ?? null,
-        source: entry.source ?? null,
-        position,
-      };
-    });
+  return therapyRangesForValue(metricKey, point.value, point.unit, patient);
 }
 
 /** Latest reading per metric, judged and aged. */
@@ -486,11 +521,7 @@ export function downsample(points: SeriesPoint[], granularity: 'all' | 'monthly'
  * that interval, the verdict is withdrawn rather than repeated.
  */
 export function statusForPoint(metricKey: string, point: SeriesPoint) {
-  if (assumesFasting(metricKey) && point.collectionContext && point.collectionContext !== 'fasting') {
-    return null;
-  }
-
-  return point.storedStatus;
+  return verdictApplies(metricKey, point.collectionContext) ? point.storedStatus : null;
 }
 
 /** Whether a set of readings was drawn under conditions that let them form one line. */

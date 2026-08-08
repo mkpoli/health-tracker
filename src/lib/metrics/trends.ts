@@ -21,6 +21,8 @@ export type TrendPoint = {
   rawRefRange: string | null;
   reportId: string | null;
   calculated: boolean;
+  /** Conditions of the draw, when the report stated them. */
+  collectionContext: 'fasting' | 'post-meal' | 'random' | null;
 };
 
 export type TrendMetricGroup = {
@@ -33,6 +35,23 @@ export type ParsedRefRange = {
   high: number | null;
   label: string;
 };
+
+/** The draw conditions a record was stored with, when the document stated them. */
+function readCollectionContext(extraData: unknown): 'fasting' | 'post-meal' | 'random' | null {
+  const parsed =
+    typeof extraData === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(extraData) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })()
+      : ((extraData || {}) as Record<string, unknown>);
+
+  const value = parsed.collectionContext;
+  return value === 'fasting' || value === 'post-meal' || value === 'random' ? value : null;
+}
 
 export function parseReferenceRange(refRange?: string | null): ParsedRefRange | null {
   if (!refRange) return null;
@@ -157,6 +176,7 @@ export function buildTrendMetrics<R extends TrendSourceRecord, P extends TrendSo
       rawRefRange: item.refRange,
       reportId: item.reportId,
       calculated: false,
+      collectionContext: readCollectionContext(item.extraData),
     };
 
     const existing = grouped.get(seriesName) || [];
@@ -184,6 +204,7 @@ export function buildTrendMetrics<R extends TrendSourceRecord, P extends TrendSo
       rawRefRange: null,
       reportId: point.reportId,
       calculated: true,
+      collectionContext: null,
     };
 
     const existing = grouped.get(point.definition.canonicalLabel) || [];

@@ -693,5 +693,13 @@
   "connections_never_used": "未利用",
   "connections_revoke": "取り消す",
   "consent_destination_label": "アクセスの送信先",
-  "connections_profiles_separator": "、"
+  "connections_profiles_separator": "、",
+  "status_withheld_after_meal": "食後の採血のため、横の基準範囲（空腹時のもの）は適用していません。",
+  "therapy_ranges_heading": "ホルモン治療中は、この項目は次の範囲で読みます：",
+  "therapy_position_within": "この値は範囲内",
+  "therapy_position_above": "この値は範囲より上",
+  "therapy_position_below": "この値は範囲より下",
+  "therapy_position_unknown": "位置は判定できません",
+  "change_not_comparable": "前回は条件が異なるため比較していません",
+  "mixed_draw_conditions": "採血条件が混在"
 }

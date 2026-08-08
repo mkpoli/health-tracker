@@ -693,5 +693,13 @@
   "connections_never_used": "not used yet",
   "connections_revoke": "Revoke",
   "consent_destination_label": "Access will be sent to",
-  "connections_profiles_separator": ", "
+  "connections_profiles_separator": ", ",
+  "status_withheld_after_meal": "This reading was taken after a meal, so the reference range beside it — which describes a fasting draw — is not applied.",
+  "therapy_ranges_heading": "On hormone therapy, this metric is read against:",
+  "therapy_position_within": "this reading is inside it",
+  "therapy_position_above": "this reading is above it",
+  "therapy_position_below": "this reading is below it",
+  "therapy_position_unknown": "position not determined",
+  "change_not_comparable": "Not compared — the previous reading was taken under different conditions",
+  "mixed_draw_conditions": "Mixed draw conditions"
 }

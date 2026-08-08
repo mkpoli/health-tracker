@@ -26,6 +26,7 @@
     type TrendMetricGroup,
     type TrendPoint,
   } from '$lib/metrics/trends';
+  import { contextsComparable, therapyRangesForValue, verdictApplies } from '$lib/health/summary';
   import RefRangePicker from './RefRangePicker.svelte';
 
   // The diachronic view, shared by every dashboard section so lab results,
@@ -312,13 +313,24 @@
     const area = `${line} ${xForIndex(series.length - 1)},${height - bottom} ${xForIndex(0)},${height - bottom}`;
 
     const previous = series.length > 1 ? series[series.length - 2] : null;
-    const delta = previous ? latest.value - previous.value : null;
     const activeRange =
       overrideRange ||
       parseReferenceRange(latest.refRange) ||
       parsedRanges.find((range) => range.low !== null || range.high !== null) ||
       null;
-    const latestDisplayStatus = getStatusFromRange(latest.value, activeRange, latest.status);
+    // The same two rules the read model applies, called rather than restated:
+    // a fasting interval says nothing about a draw taken after a meal, and a
+    // laboratory's interval describes someone who is not on hormone therapy.
+    const metricKey = getMetricDefinition(latest.metricName).key;
+    const verdictHolds = verdictApplies(metricKey, latest.collectionContext);
+    const latestDisplayStatus = verdictHolds
+      ? getStatusFromRange(latest.value, activeRange, latest.status)
+      : null;
+    const therapyRanges = therapyRangesForValue(metricKey, latest.value, latest.unit);
+    // Subtracting a post-meal reading from a fasting one measures the meal.
+    const deltaComparable =
+      !previous || contextsComparable(metricKey, latest.collectionContext, previous.collectionContext);
+    const delta = previous && deltaComparable ? latest.value - previous.value : null;
 
     let refRangePath = '';
     // 'solid' = both bounds; 'fadeDown' = only upper bound (<X), fade toward
@@ -350,6 +362,11 @@
 
     const rawUnits = new Set(series.map((point) => point.rawUnit || '').filter(Boolean));
     const hasMixedUnits = rawUnits.size > 1;
+    // Where eating moves the number, a line through fasting and post-meal
+    // readings charts the meals rather than the body.
+    const drawContexts = [...new Set(series.map((point) => point.collectionContext))];
+    const hasMixedDraws =
+      drawContexts.length > 1 && !contextsComparable(metricKey, drawContexts[0], drawContexts[1]);
     const overrideActive = Boolean(overrideRange);
 
     const unitCandidateSet = new Set<string>();
@@ -375,11 +392,15 @@
       lastDate: latest.formattedDate,
       latest,
       latestDisplayStatus,
+      verdictHolds,
+      therapyRanges,
       delta,
+      deltaComparable,
       refRange: activeRange,
       refRangePath,
       refRangeFill,
       hasMixedUnits,
+      hasMixedDraws,
       overrideActive,
       unitOptions,
     };
@@ -397,7 +418,9 @@
 
     const points = selectedTrend.points;
     let delta: number | null = null;
-    if (points.length > 1) {
+    // Same rule as the chart: readings drawn under different conditions are not
+    // subtracted, whichever unit they are displayed in.
+    if (points.length > 1 && trendChart.deltaComparable) {
       const previousRendered = renderTrendPointLabel(points[points.length - 2], mode);
       const latestNum = Number(latestRendered.value);
       const previousNum = Number(previousRendered.value);
@@ -814,6 +837,24 @@
                             </span>
                           {/if}
                         </div>
+                        {#if !trendChart.verdictHolds}
+                          <p class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {m.status_withheld_after_meal()}
+                          </p>
+                        {/if}
+                        {#if trendChart.therapyRanges.length > 0}
+                          <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            <p class="font-medium text-slate-900">{m.therapy_ranges_heading()}</p>
+                            <ul class="mt-1 space-y-1">
+                              {#each trendChart.therapyRanges as range (range.label)}
+                                <li>
+                                  {range.label}: {range.range}{range.unit ? ` ${range.unit}` : ''} —
+                                  <span class="font-medium">{m[`therapy_position_${range.position}`]()}</span>
+                                </li>
+                              {/each}
+                            </ul>
+                          </div>
+                        {/if}
                         {#if currentTrendUnitMode !== 'asRecorded' && trendChart.latest.rawUnit && canonicalUnitForm(trendChart.latest.rawUnit) !== trendDisplay?.latestUnit}
                           <p class="mt-2 text-sm {tone.link}">
                             {m.original_prefix({ value: `${trendChart.latest.rawValue}${trendChart.latest.rawUnit ? ` ${trendChart.latest.rawUnit}` : ''}` })}
@@ -827,7 +868,9 @@
                       >
                         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.change()}</p>
                         <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                          {#if trendDisplay?.delta === null || trendDisplay?.delta === undefined}
+                          {#if !trendChart.deltaComparable}
+                            <span class="text-lg font-normal text-slate-500">{m.change_not_comparable()}</span>
+                          {:else if trendDisplay?.delta === null || trendDisplay?.delta === undefined}
                             --
                           {:else if trendDisplay.delta > 0}
                             +{trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
@@ -835,7 +878,9 @@
                             {trendDisplay.delta.toFixed(1)}{#if trendDisplay.latestUnit}<span class="ml-1 text-lg font-medium text-slate-500">{trendDisplay.latestUnit}</span>{/if}
                           {/if}
                         </p>
-                        <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
+                        {#if trendChart.deltaComparable}
+                          <p class="mt-2 text-sm text-slate-500">{m.compared_previous()}</p>
+                        {/if}
                       </div>
 
                       <div
@@ -915,6 +960,11 @@
                       {#if trendChart.hasMixedUnits}
                         <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                           {m.mixed_units_detected()}
+                        </span>
+                      {/if}
+                      {#if trendChart.hasMixedDraws}
+                        <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                          {m.mixed_draw_conditions()}
                         </span>
                       {/if}
                     </div>

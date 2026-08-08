@@ -693,5 +693,13 @@
   "connections_never_used": "尚未使用",
   "connections_revoke": "撤销",
   "consent_destination_label": "访问将发送至",
-  "connections_profiles_separator": "、"
+  "connections_profiles_separator": "、",
+  "status_withheld_after_meal": "该次采血在餐后进行，因此旁边的参考范围（空腹标准）不适用。",
+  "therapy_ranges_heading": "在激素治疗期间，该项目参照以下范围：",
+  "therapy_position_within": "该值在范围内",
+  "therapy_position_above": "该值高于范围",
+  "therapy_position_below": "该值低于范围",
+  "therapy_position_unknown": "无法判定位置",
+  "change_not_comparable": "上次采样条件不同，未作比较",
+  "mixed_draw_conditions": "采样条件不一致"
 }
