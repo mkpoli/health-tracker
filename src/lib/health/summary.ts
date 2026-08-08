@@ -432,6 +432,27 @@ export function downsample(points: SeriesPoint[], granularity: 'all' | 'monthly'
   return [...kept].sort((a, b) => pointTime(b.date) - pointTime(a.date));
 }
 
+/**
+ * The stored status was computed when the report was parsed, against whatever
+ * interval was printed beside the value. Where the draw conditions do not match
+ * that interval, the verdict is withdrawn rather than repeated.
+ */
+export function statusForPoint(metricKey: string, point: SeriesPoint) {
+  if (assumesFasting(metricKey) && point.collectionContext && point.collectionContext !== 'fasting') {
+    return null;
+  }
+
+  return point.storedStatus;
+}
+
+/** Whether a set of readings was drawn under conditions that let them form one line. */
+export function drawsAreComparable(metricKey: string, points: SeriesPoint[]) {
+  if (!assumesFasting(metricKey)) return true;
+
+  const seen = new Set(points.map((point) => point.collectionContext));
+  return seen.size <= 1;
+}
+
 /** Direction and size of change across a window, so a reader gets the trend without doing arithmetic over every point. */
 export function describeTrend(points: SeriesPoint[]) {
   if (points.length < 2) return null;

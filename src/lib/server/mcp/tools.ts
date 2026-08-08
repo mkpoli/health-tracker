@@ -7,6 +7,8 @@ import {
   buildSummary,
   describeTrend,
   downsample,
+  drawsAreComparable,
+  statusForPoint,
   type SummarySource,
 } from '$lib/health/summary';
 import { allMetricDefinitions, getMetricDefinition, getMetricDefinitionByKey } from '$lib/metrics/catalog';
@@ -228,12 +230,6 @@ function readDrawContext(extraData: unknown) {
   return value === 'fasting' || value === 'post-meal' || value === 'random' ? value : null;
 }
 
-/** Whether a window mixes draw conditions, which makes its points incommensurable. */
-function mixedDraws(points: Array<{ collectionContext: string | null }>) {
-  const seen = new Set(points.map((point) => point.collectionContext).filter(Boolean));
-  return seen.size > 1;
-}
-
 function serializeSummaryEntry(entry: ReturnType<typeof buildSummary>[number]) {
   return {
     metric: entry.metricKey,
@@ -301,19 +297,26 @@ const getMetricHistory: ToolDefinition = {
 
       const reduced = downsample(windowed, granularity);
       const points = reduced.slice(0, MAX_POINTS_PER_METRIC);
+      // A trend across a fasting and a post-meal draw measures the meals.
+      const comparable = drawsAreComparable(key, windowed);
 
       return {
         metric: key,
         label,
         unit: group.unit,
-        trend: describeTrend(windowed),
+        trend: comparable ? describeTrend(windowed) : null,
         points: points.map((point) => [
           point.date,
           Math.round(point.value * 1000) / 1000,
-          point.storedStatus ?? undefined,
+          statusForPoint(key, point) ?? undefined,
           point.collectionContext ?? undefined,
         ]),
-        ...(mixedDraws(windowed) ? { mixed_collection_contexts: true } : {}),
+        ...(comparable
+          ? {}
+          : {
+              mixed_collection_contexts: true,
+              note: 'These readings were drawn under different conditions, so they are not one comparable series and no trend is given. Split them by the fourth field before comparing.',
+            }),
         reading_count: windowed.length,
         ...(group.setAside ? { set_aside_other_units: group.setAside } : {}),
         truncated: points.length < reduced.length,

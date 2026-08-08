@@ -1,7 +1,7 @@
 // The failure this guards against: a glucose drawn after breakfast was judged
 // against the fasting interval printed beside it and reported as High, and a
 // run of such readings mixed with fasting ones looked like a rising trend.
-import { buildSummary } from '../src/lib/health/summary';
+import { buildSummary, buildSeries, statusForPoint, drawsAreComparable } from '../src/lib/health/summary';
 
 const reports = [
   { id: 'r1', kind: 'lab', testDate: '2026-08-05T10:13:00.000Z' },
@@ -91,5 +91,28 @@ const hb = buildSummary({
 
 check('meal state does not suppress unrelated metrics', hb.status === 'Normal', `status=${hb.status}`);
 
-console.log(failures === 0 ? '\nall checks passed' : `\n${failures} failed`);
+
+// History-level rules: a stored verdict computed against the wrong interval is
+// withdrawn, and a window mixing draw conditions yields no trend.
+
+const mixedSeries = buildSeries({
+  reports,
+  records: [
+    { id: 'e', reportId: 'r1', metricName: 'Blood Glucose', value: '114', unit: 'mg/dL', refRange: '73-109', status: 'High', extraData: JSON.stringify({ collectionContext: 'post-meal' }) },
+    { id: 'f', reportId: 'r2', metricName: 'Blood Glucose', value: '88', unit: 'mg/dL', refRange: '73-109', status: 'Normal', extraData: JSON.stringify({ collectionContext: 'fasting' }) },
+  ],
+  patient: {},
+  now: Date.parse('2026-08-08T00:00:00.000Z'),
+}).get('blood-glucose')!;
+
+const postMeal = mixedSeries.points.find((p) => p.collectionContext === 'post-meal')!;
+const fastingPoint = mixedSeries.points.find((p) => p.collectionContext === 'fasting')!;
+
+check('parse-time High on a post-meal draw is withdrawn', statusForPoint('blood-glucose', postMeal) === null, `status=${statusForPoint('blood-glucose', postMeal)}`);
+check('a fasting draw keeps its verdict', statusForPoint('blood-glucose', fastingPoint) === 'Normal', `status=${statusForPoint('blood-glucose', fastingPoint)}`);
+check('mixed draws are not one series', drawsAreComparable('blood-glucose', mixedSeries.points) === false, '');
+check('uniform draws are one series', drawsAreComparable('blood-glucose', [postMeal]) === true, '');
+check('meal state does not split unrelated metrics', drawsAreComparable('hemoglobin', mixedSeries.points) === true, '');
+
+console.log(failures === 0 ? 'history checks passed' : `${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);
