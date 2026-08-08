@@ -1612,6 +1612,12 @@
 
                 <div class="p-2">
                   <a
+                    href="/settings/connections"
+                    class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    {m.connections_title()}
+                  </a>
+                  <a
                     href="/admin"
                     class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
                   >

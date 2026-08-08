@@ -174,6 +174,11 @@ export const metricSuggestions = labMetricCatalog.map((definition) => definition
 
 const definitionsByKey = new Map(metricCatalog.map((definition) => [definition.key, definition]));
 
+/** Every catalog entry — lab, body and vital alike — for search over the whole vocabulary. */
+export function allMetricDefinitions(): MetricDefinition[] {
+  return metricCatalog;
+}
+
 export function getMetricDefinitionByKey(key: string): MetricDefinition | null {
   return definitionsByKey.get(key) || null;
 }

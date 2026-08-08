@@ -73,3 +73,4 @@ export const recordRelations = relations(record, ({ one }) => ({
 }));
 
 export * from './auth.schema';
+export * from './mcp.schema';
