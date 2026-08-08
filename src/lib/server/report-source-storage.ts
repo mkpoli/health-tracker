@@ -39,11 +39,13 @@ function buildSourceUrl(key: string) {
 export async function buildRawReportSource(
   textContext: string | null,
   file: File | null,
-  options?: { patientId?: string; bucket?: R2Bucket | null },
+  options?: { patientId: string; bucket?: R2Bucket | null },
 ) {
   if (file && file.size > 0) {
-    if (options?.bucket) {
-      const key = `report-sources/${options.patientId || 'unknown'}/${crypto.randomUUID()}-${sanitizeFileName(file.name || 'document')}`;
+    // The patient segment of the key is what authorizes a later read, so a
+    // document is only stored in R2 once it is known who it belongs to.
+    if (options?.bucket && options.patientId) {
+      const key = `report-sources/${options.patientId}/${crypto.randomUUID()}-${sanitizeFileName(file.name || 'document')}`;
       await options.bucket.put(key, file, {
         httpMetadata: {
           contentType: file.type || 'application/octet-stream',

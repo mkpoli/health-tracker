@@ -1,14 +1,27 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getOwnedPatient, requireUserId } from '$lib/server/ownership';
 
-export const GET: RequestHandler = async ({ url, platform }) => {
+// Keys are written as `report-sources/<patientId>/<uuid>-<filename>`, so the
+// patient a document belongs to is readable from the key itself. Being signed
+// in says nothing about who owns the scan behind a given key, and the UUID is
+// not an access control.
+const SOURCE_KEY_PATTERN = /^report-sources\/([^/]+)\/[^/]+$/;
+
+export const GET: RequestHandler = async ({ url, platform, locals }) => {
+  const userId = requireUserId(locals);
   const key = url.searchParams.get('key');
+  const patientId = key?.match(SOURCE_KEY_PATTERN)?.[1];
 
-  if (!key || !key.startsWith('report-sources/')) {
+  if (!patientId) {
     throw error(400, 'Invalid source key');
   }
 
-  const object = await platform?.env.REPORT_SOURCES?.get(key);
+  if (!(await getOwnedPatient(userId, patientId))) {
+    throw error(404, 'Source not found');
+  }
+
+  const object = await platform?.env.REPORT_SOURCES?.get(key!);
 
   if (!object) {
     throw error(404, 'Source not found');
