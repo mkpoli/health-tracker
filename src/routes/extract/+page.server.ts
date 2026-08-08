@@ -1,4 +1,5 @@
 import { redirect, fail } from '@sveltejs/kit';
+import { dev } from '$app/environment';
 import type { Actions, PageServerLoad } from './$types';
 import { and, eq, desc, ne } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -51,6 +52,10 @@ export const actions: Actions = {
       const rawSource = await buildRawReportSource(textContext, file, {
         patientId,
         bucket: platform?.env.REPORT_SOURCES,
+        // A dev server is bound to the preview bucket, so the object lands
+        // somewhere the deployed app cannot read. Recording that is what stops
+        // the document from silently going missing later.
+        localOnly: dev,
       });
 
       return {

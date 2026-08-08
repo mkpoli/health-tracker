@@ -24,7 +24,10 @@ export const GET: RequestHandler = async ({ url, platform, locals }) => {
   const object = await platform?.env.REPORT_SOURCES?.get(key!);
 
   if (!object) {
-    throw error(404, 'Source not found');
+    // Documents uploaded from a local dev server went to the bucket that server
+    // was bound to, so the key resolves to nothing here. Saying which case this
+    // is turns an unexplained 404 into something recoverable.
+    throw error(404, 'The original document is not in storage for this deployment');
   }
 
   const headers = new Headers();

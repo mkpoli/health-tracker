@@ -15,6 +15,12 @@ type ReportSourceDescriptor =
       sourceUrl: string;
       mimeType: string | null;
       fileName: string | null;
+      /**
+       * Set when the object went to the bucket a local dev server is bound to.
+       * The key is recorded either way, so without this the row points at an
+       * object the deployed app cannot fetch and the document looks lost.
+       */
+      localOnly?: true;
     };
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -39,7 +45,7 @@ function buildSourceUrl(key: string) {
 export async function buildRawReportSource(
   textContext: string | null,
   file: File | null,
-  options?: { patientId: string; bucket?: R2Bucket | null },
+  options?: { patientId: string; bucket?: R2Bucket | null; localOnly?: boolean },
 ) {
   if (file && file.size > 0) {
     // The patient segment of the key is what authorizes a later read, so a
@@ -58,6 +64,7 @@ export async function buildRawReportSource(
         sourceUrl: buildSourceUrl(key),
         mimeType: file.type || null,
         fileName: file.name || null,
+        ...(options.localOnly ? { localOnly: true as const } : {}),
       } satisfies ReportSourceDescriptor);
     }
 

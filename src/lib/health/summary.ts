@@ -106,7 +106,24 @@ export type SummaryEntry = {
   /** Conditions of the draw, when the report stated them. */
   collectionContext: CollectionContext;
   hoursSinceMeal: number | null;
+  /**
+   * Intervals for this metric that describe someone on hormone therapy, with
+   * where the value falls in each. A laboratory prints the interval for someone
+   * who is not on therapy, so on these metrics its verdict can be exactly
+   * backwards for a patient who is.
+   */
+  therapyRanges: TherapyRange[];
   readingCount: number;
+};
+
+export type TherapyRange = {
+  label: string;
+  range: string;
+  unit: string | null;
+  notes: string | null;
+  source: string | null;
+  /** Where the reading sits against this interval. */
+  position: 'within' | 'above' | 'below' | 'unknown';
 };
 
 function assumesFasting(metricKey: string) {
@@ -358,6 +375,36 @@ function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
   return { status: point.storedStatus, statusSource: null, refRange: null, rangeLabel: null, rangeNotes: null };
 }
 
+/**
+ * How a reading sits against the intervals that describe someone on hormone
+ * therapy. Nothing here asserts that the patient is on therapy — it says what
+ * the alternative intervals are and where the number falls, so a reader with
+ * that context is not left with only the laboratory's cis-referenced verdict.
+ */
+function therapyRangesFor(metricKey: string, point: SeriesPoint, patient: PatientContext): TherapyRange[] {
+  return getRefRangesForMetric(metricKey, patient)
+    .filter((entry) => entry.context === 'on-therapy' && unitsAgree(entry.unit, point.unit))
+    .map((entry) => {
+      const parsed = parseReferenceRange(entry.range);
+      let position: TherapyRange['position'] = 'unknown';
+
+      if (parsed) {
+        if (parsed.low !== null && point.value < parsed.low) position = 'below';
+        else if (parsed.high !== null && point.value > parsed.high) position = 'above';
+        else if (parsed.low !== null || parsed.high !== null) position = 'within';
+      }
+
+      return {
+        label: entry.label,
+        range: entry.range,
+        unit: entry.unit ?? null,
+        notes: entry.notes ?? null,
+        source: entry.source ?? null,
+        position,
+      };
+    });
+}
+
 /** Latest reading per metric, judged and aged. */
 export function buildSummary(source: SummarySource, series = buildSeries(source)): SummaryEntry[] {
   const entries: SummaryEntry[] = [];
@@ -394,6 +441,7 @@ export function buildSummary(source: SummarySource, series = buildSeries(source)
       calculated: latest.calculated,
       collectionContext: latest.collectionContext,
       hoursSinceMeal: latest.hoursSinceMeal,
+      therapyRanges: therapyRangesFor(group.metricKey, latest, source.patient),
       // Two readings only subtract when they were taken under the same
       // conditions; fasting minus post-meal is not a change in the body.
       delta: comparableDraw(group.metricKey, latest, previous) ? round(latest.value - previous!.value) : null,
