@@ -50,9 +50,19 @@ Useful commands:
 
 ```sh
 bun run check
+bun run test
 bun run build
 bun run preview
 ```
+
+## Tests
+
+`bun run test` covers the read model in `src/lib/health/` and the metric library
+in `src/lib/metrics/` — unit normalization, reference-range selection,
+freshness, derived values, and the rules that decide whether a reading may be
+called high or low and whether a series may be given a direction. These are the
+functions a page render and a connected assistant both read, so a wrong answer
+here is a wrong answer in both places.
 
 ## Tech Stack
 

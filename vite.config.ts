@@ -2,7 +2,7 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import devtoolsJson from 'vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import Icons from 'unplugin-icons/vite'
 
 export default defineConfig({
@@ -14,5 +14,14 @@ export default defineConfig({
 		Icons({
 			compiler: 'svelte',
 		})
-	]
+	],
+	test: {
+		// The suite covers the read model and the metric library — pure functions
+		// over records, no DOM and no network.
+		environment: 'node',
+		include: ['src/**/*.test.ts'],
+		// Message functions resolve through the paraglide output the plugin writes,
+		// so the run compiles messages first the same way the app does.
+		globals: false
+	}
 });
