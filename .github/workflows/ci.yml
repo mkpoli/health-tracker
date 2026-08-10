@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Types
+        run: bun run check
+
+      - name: Tests
+        run: bun run test
+
+      # The build compiles the message catalogs and runs the Cloudflare adapter,
+      # neither of which the other two steps exercise. It reads no secrets: the
+      # database client and the extraction client are constructed on first use.
+      - name: Build
+        run: bun run build
