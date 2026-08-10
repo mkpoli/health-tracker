@@ -3,7 +3,11 @@
 	"compilerOptions": {
 		"rewriteRelativeImportExtensions": true,
 		"allowJs": true,
-		"checkJs": true,
+		// Every .js under src is compiled from the message catalogs by paraglide on
+		// each build. Its Request handling does not typecheck against the Workers
+		// global, and the file is regenerated, so the error is not one an edit can
+		// clear. Authored code is .ts and .svelte and stays checked.
+		"checkJs": false,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
