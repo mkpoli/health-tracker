@@ -48,6 +48,23 @@ describe('pickCatalogRange', () => {
     expect(pickCatalogRange('testosterone', 'ng/dL', { agab: 'Male' })).toBeNull();
   });
 
+  it('measures the age at the instant it is given, not at the machine clock', () => {
+    const born = '2008-06-15';
+    const dayBefore = pickCatalogRange('testosterone', 'ng/dL', {
+      agab: 'Male',
+      birthday: born,
+      now: Date.parse('2026-06-14T00:00:00.000Z'),
+    });
+    const onTheDay = pickCatalogRange('testosterone', 'ng/dL', {
+      agab: 'Male',
+      birthday: born,
+      now: Date.parse('2026-06-15T00:00:00.000Z'),
+    });
+
+    expect(dayBefore).toBeNull();
+    expect(onTheDay?.label).toBe('Adult male');
+  });
+
   it('never returns a hormone-therapy interval as the one to judge against', () => {
     const entry = pickCatalogRange('testosterone', 'ng/dL', { agab: 'Male', birthday: '1990-01-01' });
 

@@ -13,7 +13,7 @@ import {
   type SummarySource,
 } from '$lib/health/summary';
 import { allMetricDefinitions, getMetricDefinition, getMetricDefinitionByKey } from '$lib/metrics/catalog';
-import { getRefRangesForMetric } from '$lib/metrics/ref-ranges';
+import { ageInYearsAt, getRefRangesForMetric } from '$lib/metrics/ref-ranges';
 import { BODY_REPORT_KIND, VITAL_REPORT_KIND } from '$lib/report-kind';
 import {
   InvalidMeasurementsError,
@@ -43,20 +43,6 @@ const MAX_REPORTS_PER_PAGE = 25;
 
 function str(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function computeAgeYears(birthday: string | null) {
-  if (!birthday) return null;
-
-  const born = new Date(birthday);
-  if (Number.isNaN(born.getTime())) return null;
-
-  const now = new Date();
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const monthDelta = now.getUTCMonth() - born.getUTCMonth();
-  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < born.getUTCDate())) age -= 1;
-
-  return age >= 0 ? age : null;
 }
 
 async function loadSource(ctx: McpContext, requestedId: unknown, options?: { asOf?: string | null }) {
@@ -175,7 +161,7 @@ const listPatients: ToolDefinition = {
           patient_id: row.id,
           name: row.name,
           ...(ctx.shareDemographics
-            ? { agab: row.agab, age_years: computeAgeYears(row.birthday) }
+            ? { agab: row.agab, age_years: ageInYearsAt(row.birthday, ctx.now) }
             : { demographics_shared: false }),
           report_count: reports.length,
           first_reading: dates[0] ?? null,
@@ -557,7 +543,11 @@ const getReferenceRanges: ToolDefinition = {
     const patientId = str(args.patient_id);
     const context =
       patientId && ctx.shareDemographics
-        ? await requirePatient(ctx, patientId).then((row) => ({ agab: row.agab, birthday: row.birthday }))
+        ? await requirePatient(ctx, patientId).then((row) => ({
+            agab: row.agab,
+            birthday: row.birthday,
+            now: ctx.now,
+          }))
         : {};
 
     return {
