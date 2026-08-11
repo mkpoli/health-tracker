@@ -66,6 +66,36 @@ describe('pickCatalogRange', () => {
   it('refuses an interval written in another unit', () => {
     expect(pickCatalogRange('testosterone', 'nmol/L', { agab: 'Male', birthday: '1990-01-01' })).toBeNull();
   });
+
+  it('accepts an interval published in a scaled unit against a reading held in the base one', () => {
+    const entry = pickCatalogRange('rbc', '/uL', { agab: 'Male', birthday: '1990-01-01' });
+
+    expect(entry?.unit).toBe('10^6/uL');
+  });
+});
+
+describe('an interval published in a scaled unit', () => {
+  const redCells = (value: string) =>
+    summarise([record({ id: 'a', reportId: 'recent', metricName: 'RBC', value, unit: '×10^6/μL' })], {
+      agab: 'Male',
+      birthday: '1990-01-01',
+    })[0];
+
+  it('judges a red-cell count instead of leaving it unjudged', () => {
+    const entry = redCells('4.7');
+
+    expect(entry.value).toBe(4_700_000);
+    expect(entry.status).toBe('Normal');
+    expect(entry.statusSource).toBe('catalog');
+  });
+
+  it('states the interval in the unit the reading is held in', () => {
+    expect(redCells('4.7').refRange).toBe('4700000-6100000');
+  });
+
+  it('calls a count below the interval Low', () => {
+    expect(redCells('3.1').status).toBe('Low');
+  });
 });
 
 describe('where a verdict comes from', () => {

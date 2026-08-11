@@ -2,7 +2,12 @@ import { getMetricDefinition, getMetricDefinitionByKey, type MetricDefinition } 
 import { computeDerivedMetrics } from '$lib/metrics/derived';
 import { freshnessHorizon, measureFreshness } from '$lib/metrics/freshness';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
-import { getRefRangesForMetric, type PatientContext, type RefRangeEntry } from '$lib/metrics/ref-ranges';
+import {
+  formatRefRangeForUnit,
+  getRefRangesForMetric,
+  type PatientContext,
+  type RefRangeEntry,
+} from '$lib/metrics/ref-ranges';
 import { getStatusFromRange, parseReferenceRange } from '$lib/metrics/trends';
 
 // The chart a reader would open first: one current value per metric, with the
@@ -157,7 +162,8 @@ export function therapyRangesForValue(
   return getRefRangesForMetric(metricKey, patient)
     .filter((entry) => entry.context === 'on-therapy' && unitsAgree(entry.unit, unit))
     .map((entry) => {
-      const parsed = parseReferenceRange(entry.range);
+      const range = rangeInUnit(entry, unit);
+      const parsed = parseReferenceRange(range);
       let position: TherapyRange['position'] = 'unknown';
 
       if (parsed) {
@@ -168,8 +174,8 @@ export function therapyRangesForValue(
 
       return {
         label: entry.label,
-        range: entry.range,
-        unit: entry.unit ?? null,
+        range,
+        unit: unit ?? entry.unit ?? null,
         notes: entry.notes ?? null,
         source: entry.source ?? null,
         position,
@@ -379,11 +385,16 @@ function unitsAgree(entryUnit: string | null | undefined, valueUnit: string | nu
   const entryScale = normalizeComparableMeasurement(1, left, null);
   const valueScale = normalizeComparableMeasurement(1, right, null);
 
-  return (
-    Boolean(entryScale.comparableUnit) &&
-    entryScale.comparableUnit === valueScale.comparableUnit &&
-    entryScale.multiplier === valueScale.multiplier
-  );
+  // Readings arrive already scaled to the base unit, while an interval may be
+  // published in a scaled one — the red-cell range is written in 10^6/uL
+  // against a value held in /uL. Requiring the two multipliers to match
+  // discarded exactly those intervals, leaving the metric with no range at all.
+  return Boolean(entryScale.comparableUnit) && entryScale.comparableUnit === valueScale.comparableUnit;
+}
+
+/** An interval's bounds written in the unit the reading is held in. */
+function rangeInUnit(entry: RefRangeEntry, unit: string | null) {
+  return formatRefRangeForUnit(entry, unit).range;
 }
 
 function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
@@ -415,10 +426,12 @@ function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
   const catalogEntry = pickCatalogRange(metricKey, point.unit, patient);
 
   if (catalogEntry) {
+    const range = rangeInUnit(catalogEntry, point.unit);
+
     return {
-      status: getStatusFromRange(point.value, parseReferenceRange(catalogEntry.range), point.storedStatus),
+      status: getStatusFromRange(point.value, parseReferenceRange(range), point.storedStatus),
       statusSource: 'catalog' as const,
-      refRange: catalogEntry.range,
+      refRange: range,
       rangeLabel: catalogEntry.label,
       // Some intervals carry the caveat that decides how to read them — the
       // body-fat entry says a value below it is not necessarily abnormal.
