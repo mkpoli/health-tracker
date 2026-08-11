@@ -312,7 +312,7 @@ const getMetricHistory: ToolDefinition = {
       const comparable = drawsAreComparable(key, windowed);
 
       // What the series can carry, before anything is read into it.
-      const evidence = assessEvidence(key, windowed, ctx.now);
+      const evidence = assessEvidence(key, windowed);
 
       return {
         metric: key,

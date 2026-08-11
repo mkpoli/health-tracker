@@ -592,7 +592,8 @@ export type EvidenceAssessment = {
   rule: string;
 };
 
-export function assessEvidence(metricKey: string, points: SeriesPoint[], now: number): EvidenceAssessment {
+/** Takes no reference instant: the assessment is about the readings against each other. */
+export function assessEvidence(metricKey: string, points: SeriesPoint[]): EvidenceAssessment {
   const dated = points.filter((point) => point.date).sort((a, b) => pointTime(a.date) - pointTime(b.date));
   const first = dated[0]?.date ?? null;
   const last = dated[dated.length - 1]?.date ?? null;

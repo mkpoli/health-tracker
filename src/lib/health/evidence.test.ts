@@ -10,8 +10,6 @@ import {
 // years were charted as a line, and a reader — human or model — took a slope
 // off them. A series states a direction only once it can carry one.
 
-const NOW = Date.parse('2026-08-08T00:00:00.000Z');
-
 function points(dates: string[]): SeriesPoint[] {
   return dates.map((date, index) => ({
     date,
@@ -34,7 +32,6 @@ describe('assessEvidence', () => {
     const sparse = assessEvidence(
       'waist-circumference',
       points(['2017-06-01', '2019-03-01', '2022-08-01', '2026-02-12', '2026-08-01']),
-      NOW,
     );
 
     expect(sparse.sufficient).toBe(false);
@@ -45,24 +42,23 @@ describe('assessEvidence', () => {
     const sparse = assessEvidence(
       'waist-circumference',
       points(['2017-06-01', '2019-03-01', '2022-08-01', '2026-02-12', '2026-08-01']),
-      NOW,
     );
 
     expect(sparse.shortfall).toMatch(/1 more/);
   });
 
   it('states the rule so a reader can disagree with it', () => {
-    const sparse = assessEvidence('waist-circumference', points(['2026-08-01']), NOW);
+    const sparse = assessEvidence('waist-circumference', points(['2026-08-01']));
 
-    expect(sparse.rule).toContain(String(DIRECTION_MIN_POINTS));
-    expect(sparse.rule).toContain(String(DIRECTION_MIN_SPAN_DAYS));
+    expect(sparse.rule).toBe(
+      `A direction is stated once there are ${DIRECTION_MIN_POINTS} readings spanning ${DIRECTION_MIN_SPAN_DAYS} days or more.`,
+    );
   });
 
   it('accepts six weekly readings', () => {
     const weekly = assessEvidence(
       'waist-circumference',
       points(['2026-06-27', '2026-07-04', '2026-07-11', '2026-07-18', '2026-07-25', '2026-08-01']),
-      NOW,
     );
 
     expect(weekly.sufficient).toBe(true);
@@ -74,7 +70,6 @@ describe('assessEvidence', () => {
     const crammed = assessEvidence(
       'body-weight',
       points(['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06']),
-      NOW,
     );
 
     expect(crammed.sufficient).toBe(false);
@@ -83,7 +78,7 @@ describe('assessEvidence', () => {
   });
 
   it('handles an empty series', () => {
-    const empty = assessEvidence('waist-circumference', [], NOW);
+    const empty = assessEvidence('waist-circumference', []);
 
     expect(empty.sufficient).toBe(false);
     expect(empty.readingCount).toBe(0);
@@ -92,7 +87,7 @@ describe('assessEvidence', () => {
   });
 
   it('reports no span for a single reading', () => {
-    const single = assessEvidence('waist-circumference', points(['2026-08-01']), NOW);
+    const single = assessEvidence('waist-circumference', points(['2026-08-01']));
 
     expect(single.spanDays).toBe(0);
     expect(single.sufficient).toBe(false);
@@ -108,7 +103,7 @@ describe('assessEvidence', () => {
       '2026-08-01',
     ]).map((point, index) => (index < 2 ? { ...point, date: null } : point));
 
-    const assessment = assessEvidence('waist-circumference', undated, NOW);
+    const assessment = assessEvidence('waist-circumference', undated);
 
     expect(assessment.readingCount).toBe(4);
     expect(assessment.sufficient).toBe(false);

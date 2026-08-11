@@ -366,7 +366,7 @@
     // readings charts the meals rather than the body.
     // Whether this series can carry a direction at all. A line through five
     // points spread over nine years looks like a trend and is not one.
-    const evidence = assessEvidence(metricKey, series as never, Date.now());
+    const evidence = assessEvidence(metricKey, series as never);
     const drawContexts = [...new Set(series.map((point) => point.collectionContext))];
     const hasMixedDraws =
       drawContexts.length > 1 && !contextsComparable(metricKey, drawContexts[0], drawContexts[1]);
