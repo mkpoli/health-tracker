@@ -64,6 +64,43 @@ describe('a reading judged against the interval that describes it', () => {
     expect(postMeal.hoursSinceMeal).toBe(2);
   });
 
+  it('reports an unstated interval since eating as unstated', () => {
+    const withNull = entryFor(
+      {
+        reports: [reports[0]],
+        records: [glucose('r1', '114', { collectionContext: 'post-meal', hoursSinceMeal: null })],
+        patient: {},
+      },
+      'blood-glucose',
+    );
+    const withoutKey = entryFor(
+      {
+        reports: [reports[0]],
+        records: [glucose('r1', '114', { collectionContext: 'post-meal' })],
+        patient: {},
+      },
+      'blood-glucose',
+    );
+
+    expect(withNull.hoursSinceMeal).toBeNull();
+    expect(withoutKey.hoursSinceMeal).toBeNull();
+  });
+
+  it('withholds a verdict on a draw taken at a casual time', () => {
+    const random = entryFor(
+      {
+        reports: [reports[0]],
+        records: [glucose('r1', '114', { collectionContext: 'random' })],
+        patient: {},
+      },
+      'blood-glucose',
+    );
+
+    expect(random.collectionContext).toBe('random');
+    expect(random.status).toBeNull();
+    expect(random.rangeNotes).toContain('casual');
+  });
+
   it('judges a fasting reading normally', () => {
     const fasting = entryFor(
       {
