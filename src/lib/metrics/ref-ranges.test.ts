@@ -36,9 +36,17 @@ describe('getRefRangesForMetric', () => {
     }
   });
 
-  it('gives every interval a unit, so nothing is compared unit-blind', () => {
+  it('gives a measured metric intervals in a stated unit', () => {
     for (const entry of getRefRangesForMetric('testosterone')) {
       expect(entry.unit).toBeTruthy();
+    }
+  });
+
+  it('leaves a dimensionless index without one', () => {
+    // A waist-to-hip ratio is a ratio, so an interval for it carries no unit
+    // and nothing downstream should look for one.
+    for (const entry of getRefRangesForMetric('waist-to-hip-ratio')) {
+      expect(entry.unit ?? null).toBeNull();
     }
   });
 

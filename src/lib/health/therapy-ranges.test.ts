@@ -67,15 +67,16 @@ describe('hormone-therapy intervals alongside the laboratory verdict', () => {
 });
 
 describe('therapyRangesForValue', () => {
-  it('answers for a bare value the way the read model does for a record', () => {
+  it('places 72 ng/dL above the suppression target and below the masculinizing one', () => {
     const direct = therapyRangesForValue('testosterone', 72, 'ng/dL', {
       agab: 'Other',
       birthday: '1999-07-25',
     });
 
-    expect(direct.map((range) => range.position)).toEqual(
-      panel('testosterone').therapyRanges.map((range) => range.position),
-    );
+    expect(direct.map((range) => `${range.label}=${range.position}`)).toEqual([
+      'Transfeminine HRT target (suppressed)=above',
+      'Transmasculine HRT target=below',
+    ]);
   });
 
   it('withholds an interval whose unit does not match the reading', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getRefRangesForMetric } from '$lib/metrics/ref-ranges';
 import {
   buildSeries,
   buildSummary,
@@ -51,6 +52,15 @@ describe('pickCatalogRange', () => {
     const entry = pickCatalogRange('testosterone', 'ng/dL', { agab: 'Male', birthday: '1990-01-01' });
 
     expect(entry?.context).toBeUndefined();
+  });
+
+  it('answers nothing where the only interval that fits describes someone on therapy', () => {
+    // Every physiological FSH interval states a sex, so with none known the
+    // on-therapy entry is the only survivor — and it must not be the answer.
+    const surviving = getRefRangesForMetric('fsh').filter((entry) => entry.sex === undefined);
+
+    expect(surviving.every((entry) => entry.context === 'on-therapy')).toBe(true);
+    expect(pickCatalogRange('fsh', 'mIU/mL', {})).toBeNull();
   });
 
   it('refuses an interval written in another unit', () => {
@@ -249,7 +259,7 @@ describe('downsample', () => {
   });
 
   it('buckets more coarsely by year', () => {
-    expect(downsample(daily, 'yearly').length).toBeLessThanOrEqual(3);
+    expect(downsample(daily, 'yearly')).toHaveLength(3);
   });
 
   it('returns points newest first', () => {
