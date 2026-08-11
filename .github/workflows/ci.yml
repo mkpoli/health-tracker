@@ -5,15 +5,26 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# A force-push while a run is in flight leaves the old one racing the new one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # A floating version puts the runtime's release schedule in the path of
+          # every pull request. The suite reads Intl output, which moves with it.
+          bun-version-file: .bun-version
 
       - run: bun install --frozen-lockfile
 
