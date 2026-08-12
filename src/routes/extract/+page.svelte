@@ -73,17 +73,21 @@
       </form>
     </div>
   {:else}
-    <ReportReviewWorkspace
-      patientId={data.currentPatient.id}
-      patient={data.currentPatient}
-      saveAction={saveAction}
-      {cancelHref}
-      initialMetrics={initialMetrics}
-      initialFacilityName={form.review.facilityName}
-      initialTestDate={form.review.reportDate}
-      initialRawSource={form.review.rawSource}
-      reportOptions={data.reports}
-      allowTargetSelection={true}
-    />
+    <!-- A second extraction replaces form.review without this branch closing, so
+         the instance would carry the previous document's rows. -->
+    {#key form.review}
+      <ReportReviewWorkspace
+        patientId={data.currentPatient.id}
+        patient={data.currentPatient}
+        saveAction={saveAction}
+        {cancelHref}
+        initialMetrics={initialMetrics}
+        initialFacilityName={form.review.facilityName}
+        initialTestDate={form.review.reportDate}
+        initialRawSource={form.review.rawSource}
+        reportOptions={data.reports}
+        allowTargetSelection={true}
+      />
+    {/key}
   {/if}
 </div>

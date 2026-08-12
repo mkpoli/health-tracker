@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
@@ -76,10 +77,13 @@
 
   const currentLocale = $derived(getLocale());
 
-  let metrics = $state(structuredClone(initialMetrics));
-  let reportFacilityName = $state(initialFacilityName);
-  let reportTestDate = $state(initialTestDate);
-  let reviewTargetReportId = $state(initialTargetReportId);
+  // Editable copies taken once, at mount. Both call sites wrap this in {#key},
+  // so a different report arrives as a new instance rather than as new props to
+  // an instance already holding someone's half-finished edits.
+  let metrics = $state(untrack(() => structuredClone(initialMetrics)));
+  let reportFacilityName = $state(untrack(() => initialFacilityName));
+  let reportTestDate = $state(untrack(() => initialTestDate));
+  let reviewTargetReportId = $state(untrack(() => initialTargetReportId));
   let deletedRecordIds = $state<string[]>([]);
   let metricCards = $state<Array<HTMLDivElement | null>>([]);
   let parsedLabelInputs = $state<Array<HTMLInputElement | null>>([]);
