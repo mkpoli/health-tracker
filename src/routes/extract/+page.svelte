@@ -1,6 +1,8 @@
 <script lang="ts">
   import ReportReviewWorkspace from '$lib/components/ReportReviewWorkspace.svelte';
   import * as m from '$lib/paraglide/messages.js';
+  import { fitImageForUpload } from '$lib/image-fit';
+  import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
   type ReviewMetric = {
     type: string;
@@ -24,6 +26,32 @@
 
   function startExtractSubmit() {
     extractSubmitting = true;
+  }
+
+  /** Set when a photograph was redrawn small enough to send. */
+  let resizedNotice = $state('');
+
+  // A phone photograph of a report is routinely larger than the server can
+  // hold. Redrawing it here, before the form carries it, is the difference
+  // between a scan that works and a refusal the person cannot act on.
+  async function fitSelectedFile(event: Event & { currentTarget: HTMLInputElement }) {
+    const input = event.currentTarget;
+    const original = input.files?.[0];
+    resizedNotice = '';
+
+    if (!original) return;
+
+    const fitted = await fitImageForUpload(original, MAX_UPLOAD_BYTES);
+    if (!fitted.resizedFrom) return;
+
+    const transfer = new DataTransfer();
+    transfer.items.add(fitted.file);
+    input.files = transfer.files;
+
+    resizedNotice = m.file_resized_to_fit({
+      before: String(Math.round(fitted.resizedFrom.bytes / 1024 / 1024)),
+      after: String(Math.round((fitted.file.size / 1024 / 1024) * 10) / 10),
+    });
   }
 
   const cancelHref = $derived(`/?patientId=${data.currentPatient.id}`);
@@ -52,7 +80,12 @@
       <form method="POST" action={extractAction} enctype="multipart/form-data" class="mt-8 space-y-5" onsubmit={startExtractSubmit}>
         <div>
           <span class="mb-1.5 block text-sm font-semibold text-slate-700">{m.upload_document()}</span>
-          <input type="file" name="file" accept="image/*,application/pdf" class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700" />
+          <input type="file" name="file" accept="image/*,application/pdf" onchange={fitSelectedFile} class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700" />
+          {#if resizedNotice}
+            <p class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" role="status">
+              {resizedNotice}
+            </p>
+          {/if}
         </div>
         <div>
           <label for="extract-text" class="mb-1.5 block text-sm font-semibold text-slate-700">{m.paste_raw_text()}</label>

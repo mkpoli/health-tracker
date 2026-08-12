@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import { env } from '$env/dynamic/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
+import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
+export { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
@@ -22,18 +24,54 @@ function getReasoningEffort(): ReasoningEffort {
   return REASONING_EFFORTS.find((effort) => effort === configured) ?? 'medium';
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
 
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+/** Long enough to be a paste of something that is not a report. */
+export const MAX_TEXT_CHARS = 200_000;
+
+/** How long a scan may run before the person waiting is told it did not finish. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+/** Rejected for what the caller sent, rather than for anything upstream. */
+export class ExtractionInputError extends Error {}
+
+/**
+ * Base64 of the bytes, prefixed, in one allocation.
+ *
+ * Encoding chunk by chunk and concatenating the *encoded* pieces avoids ever
+ * holding a binary string as long as the document, and joining the prefix in
+ * with them means the data URL is built once rather than assembled from a
+ * finished base64 string. On a scan-sized file that is two fewer copies alive
+ * at the same moment, which is what the memory ceiling is spent on.
+ *
+ * The chunk size is a multiple of three so each piece encodes without padding;
+ * padding mid-stream would corrupt everything after it.
+ */
+export function toBase64DataUrl(buffer: ArrayBuffer, prefix: string) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 32_760; // a multiple of 3, and under the argument limit
+  const parts: string[] = [prefix];
+
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    const slice = bytes.subarray(offset, offset + chunkSize);
+    parts.push(btoa(String.fromCharCode(...slice)));
   }
 
-  return btoa(binary);
+  return parts.join('');
 }
 
 export async function extractMedicalData(textContext: string | null, file: File | null) {
+  if (file && file.size > MAX_UPLOAD_BYTES) {
+    throw new ExtractionInputError(
+      `That document is ${Math.round(file.size / 1024 / 1024)} MB. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB — photograph the pages separately, or export a smaller PDF.`,
+    );
+  }
+
+  if (textContext && textContext.length > MAX_TEXT_CHARS) {
+    throw new ExtractionInputError(
+      `That text is ${textContext.length} characters. The limit is ${MAX_TEXT_CHARS} — paste one report at a time.`,
+    );
+  }
+
   const messages: any[] = [
     {
       role: 'system',
@@ -83,24 +121,16 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   if (file && file.size > 0) {
     const arrayBuffer = await file.arrayBuffer();
-    const base64String = arrayBufferToBase64(arrayBuffer);
     const mimeType = file.type || 'image/jpeg';
+    const dataUrl = toBase64DataUrl(arrayBuffer, `data:${mimeType};base64,`);
 
     if (mimeType === 'application/pdf') {
       content.push({
         type: 'file',
-        file: {
-          file_data: `data:application/pdf;base64,${base64String}`,
-          filename: file.name || 'document.pdf',
-        },
+        file: { file_data: dataUrl, filename: file.name || 'document.pdf' },
       });
     } else {
-      content.push({
-        type: 'image_url',
-        image_url: {
-          url: `data:${mimeType};base64,${base64String}`,
-        },
-      });
+      content.push({ type: 'image_url', image_url: { url: dataUrl } });
     }
   }
 
@@ -110,11 +140,17 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   messages.push({ role: 'user', content });
 
-  const response = await getOpenAI().chat.completions.create({
-    model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
-    messages,
-    reasoning_effort: getReasoningEffort(),
-  });
+  const response = await getOpenAI().chat.completions.create(
+    {
+      model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
+      messages,
+      reasoning_effort: getReasoningEffort(),
+    },
+    // Without a deadline the request runs until the platform kills the worker,
+    // and the person waiting is told nothing. One retry, because a scan is
+    // expensive and the caller is sitting in front of it.
+    { timeout: REQUEST_TIMEOUT_MS, maxRetries: 1 },
+  );
 
   const outputRaw = response.choices[0]?.message?.content || '{}';
   const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
