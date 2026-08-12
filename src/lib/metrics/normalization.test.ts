@@ -71,6 +71,27 @@ describe('counting notation with a multiplier', () => {
     expect(normalizeComparableMeasurement('7.2', '×10^9/L', null).comparableValue).toBeCloseTo(7.2e9, 0);
   });
 
+  it('reads an exponent raised instead of written with a caret', () => {
+    const raised = normalizeComparableMeasurement('4.7', '×10⁶/μL', null);
+
+    expect(raised.multiplier).toBe(1_000_000);
+    expect(raised.comparableValue).toBe(4_700_000);
+    expect(raised.comparableUnit).toBe('/uL');
+  });
+
+  it('reads a raised two-digit exponent', () => {
+    expect(normalizeComparableMeasurement('4.7', '×10¹²/L', null).multiplier).toBe(1e12);
+    expect(normalizeComparableMeasurement('7.2', '×10⁹/L', null).multiplier).toBe(1e9);
+  });
+
+  it('puts a raised and a caret exponent in one bucket', () => {
+    const raised = normalizeComparableMeasurement('4.7', '×10⁶/μL', null);
+    const caret = normalizeComparableMeasurement('4.7', '×10^6/μL', null);
+
+    expect(raised.comparableUnit).toBe(caret.comparableUnit);
+    expect(raised.comparableValue).toBe(caret.comparableValue);
+  });
+
   it('reads 千 and 万', () => {
     expect(normalizeComparableMeasurement('5', '×千/μL', null).comparableValue).toBe(5000);
     expect(normalizeComparableMeasurement('5', '×万/μL', null).comparableValue).toBe(50000);

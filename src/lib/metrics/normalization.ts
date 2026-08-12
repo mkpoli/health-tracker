@@ -33,6 +33,11 @@ function normalizeUnitText(unit?: string | null) {
     .replace(/／/g, '/')
     .replace(/・/g, '')
     .replace(/\*\*/g, '^')
+    // A typeset report raises the exponent instead of writing a caret, and
+    // ×10⁶/μL has to reach the same multiplier as ×10^6/μL.
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (digits) =>
+      `^${[...digits].map((digit) => '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(digit)).join('')}`,
+    )
     // Canonicalize "L" (liter) casing in denominators: mg/dl → mg/dL, x10^6/uL stays.
     // This is the single most common casing inconsistency in lab reports.
     .replace(/(\/[a-zA-Z]*)l\b/g, '$1L');
