@@ -32,10 +32,17 @@ assigned gender at birth and age go with them; reference-range selection needs
 those two, and withholding them yields general ranges. Connections are listed
 and withdrawn under **Connected assistants**.
 
-Seven read-only tools are served: `list_patients`, `get_health_summary`,
-`get_metric_history`, `list_reports`, `get_report`, `search_metrics` and
-`get_reference_ranges`. Uploaded documents, the R2 source bucket and every
-write path stay out of reach.
+Seven tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
+`list_reports`, `get_report`, `search_metrics` and `get_reference_ranges`.
+
+One writes. `log_measurement` records a body measurement or a vital sign — a
+waist circumference, a weight, a blood pressure — and is served only where the
+consent screen's write permission was ticked, which is a separate choice from
+picking the profiles. Without it the tool is not listed and a call to it is
+refused. Laboratory results cannot be written this way; those come from an
+uploaded report.
+
+Uploaded documents and the R2 bucket holding them stay out of reach either way.
 
 ## Development
 

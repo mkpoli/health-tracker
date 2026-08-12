@@ -25,7 +25,9 @@ import { capResult } from './budget';
 
 // The surface is the questions a reader asks, not the tables underneath: which
 // profiles, how is this person now, how has one number moved, what was on that
-// one report. Nothing here writes, and nothing reaches an uploaded document.
+// one report. One tool records a measurement the person just took, and it is
+// served only to a connection granted the write permission. Nothing here
+// reaches an uploaded document.
 
 export type ToolDefinition = {
   name: string;
