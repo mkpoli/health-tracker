@@ -24,6 +24,17 @@ jobs:
           # readable by every step that runs after it.
           persist-credentials: false
 
+      # Type checking is off for JavaScript, because the compiled message output
+      # is the only JavaScript under src and it does not check against the
+      # Workers global. That stays true only while nobody writes any by hand.
+      - name: No authored JavaScript under src
+        run: |
+          found=$(git ls-files 'src/*.js' 'src/**/*.js' 'src/**/*.jsx')
+          if [ -n "$found" ]; then
+            echo "Nothing type-checks these. Write them in TypeScript:"
+            echo "$found"
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@v2
         with:
