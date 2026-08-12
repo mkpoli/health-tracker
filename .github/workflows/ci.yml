@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A force-push while a run is in flight leaves the old one racing the new one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # A floating version puts the runtime's release schedule in the path of
+          # every pull request. The suite reads Intl output, which moves with it.
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: Types
+        run: bun run check
+
+      - name: Tests
+        run: bun run test
+
+      # The build compiles the message catalogs and runs the Cloudflare adapter,
+      # neither of which the other two steps exercise. It reads no secrets: the
+      # database client and the extraction client are constructed on first use.
+      - name: Build
+        run: bun run build
