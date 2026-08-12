@@ -1,9 +1,9 @@
 import OpenAI from 'openai';
 import { env } from '$env/dynamic/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
-import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
+import { MAX_INLINE_IMAGE_BYTES, MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
-export { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
+export { MAX_INLINE_IMAGE_BYTES, MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
@@ -59,10 +59,25 @@ export function toBase64DataUrl(buffer: ArrayBuffer, prefix: string) {
   return parts.join('');
 }
 
+function megabytes(bytes: number) {
+  return Math.round(bytes / 1024 / 1024);
+}
+
 export async function extractMedicalData(textContext: string | null, file: File | null) {
+  const isImage = Boolean(file && file.type.startsWith('image/'));
+
   if (file && file.size > MAX_UPLOAD_BYTES) {
     throw new ExtractionInputError(
-      `That document is ${Math.round(file.size / 1024 / 1024)} MB. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB — photograph the pages separately, or export a smaller PDF.`,
+      `That document is ${megabytes(file.size)} MB, and ${megabytes(MAX_UPLOAD_BYTES)} MB is as much as the model accepts in one file. Split it and send the parts.`,
+    );
+  }
+
+  // An image is inlined as a data URL, which the worker holds several times
+  // over. The browser shrinks anything above this before it is sent, so what
+  // arrives too large is a format it could not decode.
+  if (file && isImage && file.size > MAX_INLINE_IMAGE_BYTES) {
+    throw new ExtractionInputError(
+      `That image is ${megabytes(file.size)} MB and could not be resized in the browser — HEIC is the usual reason. Export it as JPEG or PNG, or keep it under ${megabytes(MAX_INLINE_IMAGE_BYTES)} MB.`,
     );
   }
 
@@ -119,18 +134,23 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
     content.push({ type: 'text', text: `Here is the medical record text:\n${textContext}` });
   }
 
-  if (file && file.size > 0) {
-    const arrayBuffer = await file.arrayBuffer();
-    const mimeType = file.type || 'image/jpeg';
-    const dataUrl = toBase64DataUrl(arrayBuffer, `data:${mimeType};base64,`);
+  // A document is uploaded and referenced by id rather than inlined as base64.
+  // Inlining meant the worker held it as bytes, again as a data URL, and again
+  // inside the JSON body — several times its own size against a 128 MB
+  // isolate, which is what used to decide how large a scan could be. The upload
+  // is streamed, so the file is held about once. Images stay inline because the
+  // chat API takes them only as a URL, and the browser has already shrunk them.
+  let uploadedFileId: string | null = null;
 
-    if (mimeType === 'application/pdf') {
-      content.push({
-        type: 'file',
-        file: { file_data: dataUrl, filename: file.name || 'document.pdf' },
-      });
-    } else {
+  if (file && file.size > 0) {
+    if (isImage) {
+      const mimeType = file.type || 'image/jpeg';
+      const dataUrl = toBase64DataUrl(await file.arrayBuffer(), `data:${mimeType};base64,`);
       content.push({ type: 'image_url', image_url: { url: dataUrl } });
+    } else {
+      const uploaded = await getOpenAI().files.create({ file, purpose: 'user_data' });
+      uploadedFileId = uploaded.id;
+      content.push({ type: 'file', file: { file_id: uploaded.id } });
     }
   }
 
@@ -140,20 +160,31 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   messages.push({ role: 'user', content });
 
-  const response = await getOpenAI().chat.completions.create(
-    {
-      model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
-      messages,
-      reasoning_effort: getReasoningEffort(),
-    },
-    // Without a deadline the request runs until the platform kills the worker,
-    // and the person waiting is told nothing. One retry, because a scan is
-    // expensive and the caller is sitting in front of it.
-    { timeout: REQUEST_TIMEOUT_MS, maxRetries: 1 },
-  );
+  try {
+    const response = await getOpenAI().chat.completions.create(
+      {
+        model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
+        messages,
+        reasoning_effort: getReasoningEffort(),
+      },
+      // Without a deadline the request runs until the platform kills the worker,
+      // and the person waiting is told nothing. One retry, because a scan is
+      // expensive and the caller is sitting in front of it.
+      { timeout: REQUEST_TIMEOUT_MS, maxRetries: 1 },
+    );
 
-  const outputRaw = response.choices[0]?.message?.content || '{}';
-  const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const outputRaw = response.choices[0]?.message?.content || '{}';
+    const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-  return JSON.parse(cleanedOutput);
+    return JSON.parse(cleanedOutput);
+  } finally {
+    // The document is a person's medical record, so it does not stay in the
+    // model provider's file storage beyond the request that needed it. A
+    // failure to delete must not replace whatever the caller was going to get.
+    if (uploadedFileId) {
+      await getOpenAI()
+        .files.delete(uploadedFileId)
+        .catch((error) => console.error('[extraction] could not delete uploaded file', error));
+    }
+  }
 }

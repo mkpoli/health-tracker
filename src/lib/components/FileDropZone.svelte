@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as m from '$lib/paraglide/messages.js';
   import { fitImageForUpload } from '$lib/image-fit';
-  import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
+  import { MAX_INLINE_IMAGE_BYTES } from '$lib/upload-limits';
 
   // One upload surface for the whole app: click to browse, drag onto it, or
   // drop a file anywhere inside it. Every zone stops its own drop from reaching
@@ -60,7 +60,7 @@
     // A phone photograph of a report routinely exceeds what the server can
     // hold. Redrawing it here is the difference between a scan that works and
     // a refusal the person cannot act on.
-    const fitted = await fitImageForUpload(original, MAX_UPLOAD_BYTES);
+    const fitted = await fitImageForUpload(original, MAX_INLINE_IMAGE_BYTES);
     const file = fitted.file;
 
     if (fitted.resizedFrom) {

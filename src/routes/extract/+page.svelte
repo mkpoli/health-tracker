@@ -2,7 +2,7 @@
   import ReportReviewWorkspace from '$lib/components/ReportReviewWorkspace.svelte';
   import * as m from '$lib/paraglide/messages.js';
   import { fitImageForUpload } from '$lib/image-fit';
-  import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
+  import { MAX_INLINE_IMAGE_BYTES } from '$lib/upload-limits';
 
   type ReviewMetric = {
     type: string;
@@ -41,7 +41,7 @@
 
     if (!original) return;
 
-    const fitted = await fitImageForUpload(original, MAX_UPLOAD_BYTES);
+    const fitted = await fitImageForUpload(original, MAX_INLINE_IMAGE_BYTES);
     if (!fitted.resizedFrom) return;
 
     const transfer = new DataTransfer();

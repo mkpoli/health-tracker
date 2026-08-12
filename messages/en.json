@@ -307,7 +307,7 @@
   "auto_detected_facility": "Auto-detected from the document, or enter manually",
   "upload_document": "Upload Document (Image or PDF)",
   "upload_file": "Upload a file",
-  "file_size_hint": "PNG, JPG, PDF up to 16MB",
+  "file_size_hint": "PNG, JPG, PDF up to 50MB",
   "selected_file": "Selected: {name}",
   "paste_raw_text": "Or Paste Raw Text",
   "paste_lab_results": "Paste lab results here...",

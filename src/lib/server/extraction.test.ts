@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ExtractionInputError,
+  MAX_INLINE_IMAGE_BYTES,
   MAX_TEXT_CHARS,
   MAX_UPLOAD_BYTES,
   extractMedicalData,
@@ -11,8 +12,9 @@ import {
 // What has to hold without a network call is that an input too large to carry
 // is refused before either of those starts.
 
-function fileOfSize(bytes: number) {
-  return new File([new Uint8Array(bytes)], 'scan.pdf', { type: 'application/pdf' });
+function fileOfSize(bytes: number, type = 'application/pdf') {
+  const name = type === 'application/pdf' ? 'scan.pdf' : 'scan.jpg';
+  return new File([new Uint8Array(bytes)], name, { type });
 }
 
 describe('an upload larger than the limit', () => {
@@ -23,7 +25,7 @@ describe('an upload larger than the limit', () => {
   });
 
   it('says the size and the limit, so the person knows what to do', async () => {
-    await expect(extractMedicalData(null, fileOfSize(MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/16 MB/);
+    await expect(extractMedicalData(null, fileOfSize(MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/50 MB/);
   });
 
   it('is refused before the model is reached, so no key is needed to prove it', async () => {
@@ -32,6 +34,32 @@ describe('an upload larger than the limit', () => {
     const error = await extractMedicalData(null, fileOfSize(MAX_UPLOAD_BYTES + 1)).catch((e) => e);
 
     expect(error).toBeInstanceOf(ExtractionInputError);
+  });
+});
+
+describe('an image too large to inline', () => {
+  // A document is uploaded and referenced, so it is bounded by what the model
+  // accepts. An image is still sent as a data URL, so it is bounded by the
+  // worker's memory — a lower ceiling, and one the browser normally keeps a
+  // photograph under by resizing it first.
+  it('is refused above the inline ceiling even though it is under the upload one', async () => {
+    const image = fileOfSize(MAX_INLINE_IMAGE_BYTES + 1, 'image/jpeg');
+
+    expect(image.size).toBeLessThan(MAX_UPLOAD_BYTES);
+    await expect(extractMedicalData(null, image)).rejects.toBeInstanceOf(ExtractionInputError);
+  });
+
+  it('names the format that cannot be resized in the browser', async () => {
+    await expect(
+      extractMedicalData(null, fileOfSize(MAX_INLINE_IMAGE_BYTES + 1, 'image/jpeg')),
+    ).rejects.toThrow(/HEIC/);
+  });
+
+  it('lets a document of the same size through, because it is uploaded', async () => {
+    const document = fileOfSize(MAX_INLINE_IMAGE_BYTES + 1, 'application/pdf');
+    const error = await extractMedicalData(null, document).catch((e) => e);
+
+    expect(error).not.toBeInstanceOf(ExtractionInputError);
   });
 });
 
