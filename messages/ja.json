@@ -307,7 +307,7 @@
   "auto_detected_facility": "文書から自動検出、または手動入力",
   "upload_document": "文書をアップロード (画像またはPDF)",
   "upload_file": "ファイルをアップロード",
-  "file_size_hint": "PNG、JPG、PDF、最大16MB",
+  "file_size_hint": "PNG、JPG、PDF、最大50MB",
   "selected_file": "選択中: {name}",
   "paste_raw_text": "またはテキストを貼り付け",
   "paste_lab_results": "検査結果テキストを貼り付け...",

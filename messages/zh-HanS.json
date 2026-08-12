@@ -297,7 +297,7 @@
   "facility": "机构",
   "facility_example": "例如：St. Mary Medical Center",
   "female": "女",
-  "file_size_hint": "PNG、JPG、PDF，最大16MB",
+  "file_size_hint": "PNG、JPG、PDF，最大50MB",
   "full_name": "姓名",
   "item_count_one": "{count} 项",
   "item_count_other": "{count} 项",
