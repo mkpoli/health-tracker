@@ -1,5 +1,7 @@
 <script lang="ts">
   import * as m from '$lib/paraglide/messages.js';
+  import { fitImageForUpload } from '$lib/image-fit';
+  import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
   // One upload surface for the whole app: click to browse, drag onto it, or
   // drop a file anywhere inside it. Every zone stops its own drop from reaching
@@ -31,6 +33,8 @@
 
   let dragging = $state(false);
   let rejected = $state('');
+  /** Set when a photograph was redrawn small enough to send. */
+  let resized = $state('');
 
   const toneRing = $derived(tone === 'teal' ? 'border-teal-500 bg-teal-50/60' : 'border-violet-500 bg-violet-50/60');
   const toneText = $derived(tone === 'teal' ? 'text-teal-700' : 'text-violet-700');
@@ -42,20 +46,34 @@
     return extensions.some((extension) => lower.endsWith(extension));
   }
 
-  function take(file: File | undefined, list: FileList | null) {
-    if (!file) return;
+  async function take(original: File | undefined, list: FileList | null) {
+    if (!original) return;
 
-    if (!accepts(file)) {
+    if (!accepts(original)) {
       rejected = m.file_type_not_accepted({ types: extensions.join(', ') });
       return;
     }
 
     rejected = '';
+    resized = '';
+
+    // A phone photograph of a report routinely exceeds what the server can
+    // hold. Redrawing it here is the difference between a scan that works and
+    // a refusal the person cannot act on.
+    const fitted = await fitImageForUpload(original, MAX_UPLOAD_BYTES);
+    const file = fitted.file;
+
+    if (fitted.resizedFrom) {
+      resized = m.file_resized_to_fit({
+        before: String(Math.round(fitted.resizedFrom.bytes / 1024 / 1024)),
+        after: String(Math.round((file.size / 1024 / 1024) * 10) / 10),
+      });
+    }
 
     // A dropped file has to end up on the input itself, or the surrounding
     // form submits with nothing attached. DataTransfer is the only way to
     // build a FileList that `input.files` will accept.
-    let files = list;
+    let files = fitted.resizedFrom ? null : list;
 
     if (!files) {
       const transfer = new DataTransfer();
@@ -148,6 +166,12 @@
   {#if rejected}
     <p class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
       {rejected}
+    </p>
+  {/if}
+
+  {#if resized}
+    <p class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" role="status">
+      {resized}
     </p>
   {/if}
 </div>

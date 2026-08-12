@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ExtractionInputError, MAX_TEXT_CHARS, MAX_UPLOAD_BYTES, extractMedicalData } from './extraction';
+import {
+  ExtractionInputError,
+  MAX_TEXT_CHARS,
+  MAX_UPLOAD_BYTES,
+  extractMedicalData,
+  toBase64DataUrl,
+} from './extraction';
 
 // The scan calls a paid model and holds the document in memory while it does.
 // What has to hold without a network call is that an input too large to carry
@@ -17,7 +23,7 @@ describe('an upload larger than the limit', () => {
   });
 
   it('says the size and the limit, so the person knows what to do', async () => {
-    await expect(extractMedicalData(null, fileOfSize(MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/10 MB/);
+    await expect(extractMedicalData(null, fileOfSize(MAX_UPLOAD_BYTES + 1))).rejects.toThrow(/16 MB/);
   });
 
   it('is refused before the model is reached, so no key is needed to prove it', async () => {
@@ -50,5 +56,45 @@ describe('input within the limits', () => {
     const error = await extractMedicalData(null, null).catch((e) => e);
 
     expect(error).toBeInstanceOf(Error);
+  });
+});
+
+describe('encoding a document for the model', () => {
+  const PREFIX = 'data:image/jpeg;base64,';
+
+  function roundTrip(length: number) {
+    const source = new Uint8Array(length);
+    for (let i = 0; i < length; i++) source[i] = (i * 31 + 7) & 0xff;
+
+    const url = toBase64DataUrl(source.buffer, PREFIX);
+    const decoded = Uint8Array.from(atob(url.slice(PREFIX.length)), (c) => c.charCodeAt(0));
+
+    return { source, decoded, url };
+  }
+
+  // Encoding runs chunk by chunk, and a chunk whose length is not a multiple of
+  // three is padded — mid-stream padding corrupts everything after it. These
+  // sizes straddle the chunk boundary, which is where that shows up.
+  it.each([0, 1, 2, 3, 100, 32_759, 32_760, 32_761, 65_527, 1_000_003])(
+    'returns the same bytes for a %i byte document',
+    (length) => {
+      const { source, decoded } = roundTrip(length);
+
+      expect(decoded.length).toBe(length);
+      expect(Array.from(decoded)).toEqual(Array.from(source));
+    },
+  );
+
+  it('carries the prefix the caller asked for', () => {
+    expect(roundTrip(10).url.startsWith(PREFIX)).toBe(true);
+  });
+
+  it('pads only at the end', () => {
+    // 65,527 leaves one byte over, which encodes to two padding characters.
+    // Any '=' before those would be a chunk padding itself mid-stream.
+    const body = roundTrip(65_527).url.slice(PREFIX.length);
+
+    expect(body.slice(0, -2)).not.toContain('=');
+    expect(body.slice(-2)).toBe('==');
   });
 });

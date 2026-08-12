@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import { env } from '$env/dynamic/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
+import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
+export { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
@@ -22,12 +24,6 @@ function getReasoningEffort(): ReasoningEffort {
   return REASONING_EFFORTS.find((effort) => effort === configured) ?? 'medium';
 }
 
-/**
- * A scan is held in memory several times over — the bytes, the base64 of them,
- * and the request body carrying it — against a worker's fixed memory. The cap
- * is what keeps a large upload from ending the isolate instead of the request.
- */
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Long enough to be a paste of something that is not a report. */
 export const MAX_TEXT_CHARS = 200_000;
@@ -38,19 +34,29 @@ const REQUEST_TIMEOUT_MS = 120_000;
 /** Rejected for what the caller sent, rather than for anything upstream. */
 export class ExtractionInputError extends Error {}
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
+/**
+ * Base64 of the bytes, prefixed, in one allocation.
+ *
+ * Encoding chunk by chunk and concatenating the *encoded* pieces avoids ever
+ * holding a binary string as long as the document, and joining the prefix in
+ * with them means the data URL is built once rather than assembled from a
+ * finished base64 string. On a scan-sized file that is two fewer copies alive
+ * at the same moment, which is what the memory ceiling is spent on.
+ *
+ * The chunk size is a multiple of three so each piece encodes without padding;
+ * padding mid-stream would corrupt everything after it.
+ */
+export function toBase64DataUrl(buffer: ArrayBuffer, prefix: string) {
   const bytes = new Uint8Array(buffer);
-  // Appending a character at a time leaves the engine holding one string
-  // fragment per byte of the document; in chunks it holds a few hundred. The
-  // chunk size stays under the argument limit of String.fromCharCode.
-  const chunkSize = 0x8000;
-  const chunks: string[] = [];
+  const chunkSize = 32_760; // a multiple of 3, and under the argument limit
+  const parts: string[] = [prefix];
 
   for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
-    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
+    const slice = bytes.subarray(offset, offset + chunkSize);
+    parts.push(btoa(String.fromCharCode(...slice)));
   }
 
-  return btoa(chunks.join(''));
+  return parts.join('');
 }
 
 export async function extractMedicalData(textContext: string | null, file: File | null) {
@@ -115,24 +121,16 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   if (file && file.size > 0) {
     const arrayBuffer = await file.arrayBuffer();
-    const base64String = arrayBufferToBase64(arrayBuffer);
     const mimeType = file.type || 'image/jpeg';
+    const dataUrl = toBase64DataUrl(arrayBuffer, `data:${mimeType};base64,`);
 
     if (mimeType === 'application/pdf') {
       content.push({
         type: 'file',
-        file: {
-          file_data: `data:application/pdf;base64,${base64String}`,
-          filename: file.name || 'document.pdf',
-        },
+        file: { file_data: dataUrl, filename: file.name || 'document.pdf' },
       });
     } else {
-      content.push({
-        type: 'image_url',
-        image_url: {
-          url: `data:${mimeType};base64,${base64String}`,
-        },
-      });
+      content.push({ type: 'image_url', image_url: { url: dataUrl } });
     }
   }
 
