@@ -19,6 +19,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Nothing here pushes, and a token left in the local git config is
+          # readable by every step that runs after it.
+          persist-credentials: false
+
 
       - uses: oven-sh/setup-bun@v2
         with:
