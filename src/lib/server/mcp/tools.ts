@@ -25,7 +25,9 @@ import { capResult } from './budget';
 
 // The surface is the questions a reader asks, not the tables underneath: which
 // profiles, how is this person now, how has one number moved, what was on that
-// one report. Nothing here writes, and nothing reaches an uploaded document.
+// one report. One tool records a body measurement or vital sign, and it is
+// served only to a connection granted the write permission. Nothing here
+// reaches an uploaded document.
 
 export type ToolDefinition = {
   name: string;
@@ -574,7 +576,7 @@ const logMeasurement: ToolDefinition = {
   name: 'log_measurement',
   title: 'Record a measurement',
   description:
-    'Write a body measurement or vital sign the person just took — a waist circumference, a weight, a blood pressure. Requires the write permission, granted separately from reading. Laboratory results cannot be written here; those come from the uploaded report. Confirm the numbers with the person before calling, and report back what was stored.',
+    'Write a body measurement or vital sign — a waist circumference, a weight, a blood pressure. Requires the write permission, granted separately from reading. Laboratory results cannot be written here; those come from the uploaded report. Confirm the numbers with the person before calling, and report back what was stored.',
   inputSchema: {
     type: 'object',
     properties: {
