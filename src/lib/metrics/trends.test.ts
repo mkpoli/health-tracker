@@ -30,6 +30,30 @@ describe('parseReferenceRange', () => {
     expect(parseReferenceRange('73-109')?.label).toBe('73-109');
   });
 
+  it('reads a two-sided range separated by a wave dash or an en dash', () => {
+    expect(parseReferenceRange('73～109')).toMatchObject({ low: 73, high: 109 });
+    expect(parseReferenceRange('73–109')).toMatchObject({ low: 73, high: 109 });
+  });
+
+  it('reads the upper bound a Japanese report prints', () => {
+    expect(parseReferenceRange('≦150')).toMatchObject({ low: null, high: 150 });
+    expect(parseReferenceRange('≤150')).toMatchObject({ low: null, high: 150 });
+    expect(parseReferenceRange('150以下')).toMatchObject({ low: null, high: 150 });
+    expect(parseReferenceRange('150未満')).toMatchObject({ low: null, high: 150 });
+  });
+
+  it('reads the lower bound a Japanese report prints', () => {
+    expect(parseReferenceRange('≧40')).toMatchObject({ low: 40, high: null });
+    expect(parseReferenceRange('≥40')).toMatchObject({ low: 40, high: null });
+    expect(parseReferenceRange('40以上')).toMatchObject({ low: 40, high: null });
+  });
+
+  it('judges against a bound written the Japanese way', () => {
+    expect(getStatusFromRange(200, parseReferenceRange('150以下'))).toBe('High');
+    expect(getStatusFromRange(100, parseReferenceRange('≦150'))).toBe('Normal');
+    expect(getStatusFromRange(20, parseReferenceRange('40以上'))).toBe('Low');
+  });
+
   it('says nothing about a qualitative range', () => {
     expect(parseReferenceRange('Negative')).toBeNull();
     expect(parseReferenceRange('(-)')).toBeNull();

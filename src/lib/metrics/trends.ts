@@ -53,6 +53,12 @@ function readCollectionContext(extraData: unknown): 'fasting' | 'post-meal' | 'r
   return value === 'fasting' || value === 'post-meal' || value === 'random' ? value : null;
 }
 
+// A Japanese report writes an upper bound as ≦ or 以下 and a lower one as ≧ or
+// 以上. Reading only ASCII < and > left those values with no interval, and so
+// with no verdict, on reports this app is given more often than not.
+const UPPER_BOUND = /[<≤≦]|以下|未満/;
+const LOWER_BOUND = /[>≥≧]|以上|超/;
+
 export function parseReferenceRange(refRange?: string | null): ParsedRefRange | null {
   if (!refRange) return null;
 
@@ -72,11 +78,11 @@ export function parseReferenceRange(refRange?: string | null): ParsedRefRange | 
   if (matches.length === 1) {
     const value = matches[0];
 
-    if (refRange.includes('<')) {
+    if (UPPER_BOUND.test(refRange)) {
       return { low: null, high: value, label: refRange };
     }
 
-    if (refRange.includes('>')) {
+    if (LOWER_BOUND.test(refRange)) {
       return { low: value, high: null, label: refRange };
     }
   }
