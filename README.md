@@ -50,9 +50,22 @@ Useful commands:
 
 ```sh
 bun run check
+bun run test
 bun run build
 bun run preview
 ```
+
+## Tests
+
+`bun run test` covers the read model in `src/lib/health/` and, in
+`src/lib/metrics/`, the parts of the metric library that carry a judgement: unit
+normalization, reference-range selection, freshness, derived values, and the
+rules deciding whether a reading may be called high or low and whether a series
+may be given a direction. The catalogs themselves — `body.ts`, `vitals.ts`,
+`catalog.ts`, `labels.ts` — are data and are not covered.
+
+These are the functions a page render and a connected assistant both read, so a
+wrong answer here is a wrong answer in both places.
 
 ## Tech Stack
 

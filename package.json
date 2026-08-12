@@ -11,6 +11,8 @@
 		"prepare": "bun run messages && (svelte-kit sync || echo '')",
 		"check": "bun run messages && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "bun run messages && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"test:watch": "vitest",
 		"gen": "wrangler types",
 		"db:push": "drizzle-kit push",
 		"db:studio": "drizzle-kit studio",
@@ -37,6 +39,7 @@
 		"unplugin-icons": "^23.0.1",
 		"vite": "^8.0.1",
 		"vite-plugin-devtools-json": "^1.0.0",
+		"vitest": "^4.1.10",
 		"wrangler": "^4.76.0"
 	},
 	"dependencies": {
