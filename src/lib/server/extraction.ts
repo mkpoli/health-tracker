@@ -22,18 +22,50 @@ function getReasoningEffort(): ReasoningEffort {
   return REASONING_EFFORTS.find((effort) => effort === configured) ?? 'medium';
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
+/**
+ * A scan is held in memory several times over — the bytes, the base64 of them,
+ * and the request body carrying it — against a worker's fixed memory. The cap
+ * is what keeps a large upload from ending the isolate instead of the request.
+ */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+/** Long enough to be a paste of something that is not a report. */
+export const MAX_TEXT_CHARS = 200_000;
+
+/** How long a scan may run before the person waiting is told it did not finish. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+/** Rejected for what the caller sent, rather than for anything upstream. */
+export class ExtractionInputError extends Error {}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  // Appending a character at a time leaves the engine holding one string
+  // fragment per byte of the document; in chunks it holds a few hundred. The
+  // chunk size stays under the argument limit of String.fromCharCode.
+  const chunkSize = 0x8000;
+  const chunks: string[] = [];
+
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
   }
 
-  return btoa(binary);
+  return btoa(chunks.join(''));
 }
 
 export async function extractMedicalData(textContext: string | null, file: File | null) {
+  if (file && file.size > MAX_UPLOAD_BYTES) {
+    throw new ExtractionInputError(
+      `That document is ${Math.round(file.size / 1024 / 1024)} MB. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB — photograph the pages separately, or export a smaller PDF.`,
+    );
+  }
+
+  if (textContext && textContext.length > MAX_TEXT_CHARS) {
+    throw new ExtractionInputError(
+      `That text is ${textContext.length} characters. The limit is ${MAX_TEXT_CHARS} — paste one report at a time.`,
+    );
+  }
+
   const messages: any[] = [
     {
       role: 'system',
@@ -110,11 +142,17 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
 
   messages.push({ role: 'user', content });
 
-  const response = await getOpenAI().chat.completions.create({
-    model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
-    messages,
-    reasoning_effort: getReasoningEffort(),
-  });
+  const response = await getOpenAI().chat.completions.create(
+    {
+      model: env.OPENAI_API_MODEL || 'gpt-5.6-sol',
+      messages,
+      reasoning_effort: getReasoningEffort(),
+    },
+    // Without a deadline the request runs until the platform kills the worker,
+    // and the person waiting is told nothing. One retry, because a scan is
+    // expensive and the caller is sitting in front of it.
+    { timeout: REQUEST_TIMEOUT_MS, maxRetries: 1 },
+  );
 
   const outputRaw = response.choices[0]?.message?.content || '{}';
   const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();

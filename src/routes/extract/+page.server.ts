@@ -4,7 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { and, eq, desc, ne } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { patient, report } from '$lib/server/db/schema';
-import { buildRawReportSource, extractMedicalData } from '$lib/server/extraction';
+import { buildRawReportSource, ExtractionInputError, extractMedicalData } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
 import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
 import { BODY_REPORT_KIND } from '$lib/report-kind';
@@ -68,7 +68,13 @@ export const actions: Actions = {
           metrics: extracted.metrics || [],
         },
       };
-    } catch {
+    } catch (error) {
+      // A document too large, or a paste of the wrong thing, is the person's to
+      // fix. Reporting it as a server failure hides what would.
+      if (error instanceof ExtractionInputError) {
+        return fail(413, { error: error.message });
+      }
+
       return fail(500, { error: 'Failed to extract medical data' });
     }
   },
