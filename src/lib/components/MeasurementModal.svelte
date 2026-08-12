@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
   import { untrack } from 'svelte';
+  import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import type { MeasurementDomain } from '$lib/metrics/measurement-domains';
   import { getMetricDefinitionByKey } from '$lib/metrics/catalog';
@@ -50,7 +50,9 @@
     onClose: () => void;
   } = $props();
 
-  const catalogKeys = new Set(domain.fields.flatMap((field) => [field.key, field.leftKey, field.rightKey].filter(Boolean) as string[]));
+  const catalogKeys = $derived(
+    new Set(domain.fields.flatMap((field) => [field.key, field.leftKey, field.rightKey].filter(Boolean) as string[])),
+  );
 
   function initialValues() {
     const values: Record<string, string> = {};
@@ -95,15 +97,20 @@
 
   let values = $state<Record<string, string | number | null>>({ ...initial });
   let units = $state<Record<string, string>>(initialUnits());
-  let customRows = $state<CustomRow[]>(initialCustomRows());
-  let customRowSeed = customRows.length;
+  // The modal is mounted behind {#if modalOpen}, so it opens fresh every time
+  // and these read the props once on purpose. untrack says so, rather than
+  // leaving a warning that looks like an oversight.
+  let customRows = $state<CustomRow[]>(untrack(initialCustomRows));
+  // Only a seed for the next row id, so it wants the count at mount, not a
+  // number that tracks the array.
+  let customRowSeed = untrack(() => customRows.length);
 
-  let sessionDate = $state(measuredAt || toLocalInput(new Date()));
-  let sessionNotes = $state(notes);
+  let sessionDate = $state(untrack(() => measuredAt) || toLocalInput(new Date()));
+  let sessionNotes = $state(untrack(() => notes));
   let query = $state('');
   let submitting = $state(false);
   let saveError = $state('');
-  let commonOnly = $state(!sessionId && entries.length === 0);
+  let commonOnly = $state(untrack(() => !sessionId && entries.length === 0));
   // Fields the user opened in this session stay on screen even once emptied,
   // so clearing a value does not make the input disappear under the cursor.
   let revealedKeys = $state<string[]>([]);
@@ -134,16 +141,18 @@
     return bySite;
   });
   let expandedSides = $state<Record<string, boolean>>(
-    Object.fromEntries(
-      domain.fields
-        .filter((field) => field.sided)
-        .map((field) => [
-          field.key,
-          Boolean(
-            (field.leftKey && initial[field.leftKey] !== undefined) ||
-              (field.rightKey && initial[field.rightKey] !== undefined),
-          ),
-        ]),
+    untrack(() =>
+      Object.fromEntries(
+        domain.fields
+          .filter((field) => field.sided)
+          .map((field) => [
+            field.key,
+            Boolean(
+              (field.leftKey && initial[field.leftKey] !== undefined) ||
+                (field.rightKey && initial[field.rightKey] !== undefined),
+            ),
+          ]),
+      ),
     ),
   );
 

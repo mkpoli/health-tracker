@@ -83,20 +83,25 @@
 </script>
 
 <div class="mx-auto max-w-7xl px-6 py-10">
-  <ReportReviewWorkspace
-    patientId={data.currentPatient.id}
-    patient={data.currentPatient}
-    saveAction="?/save"
-    {cancelHref}
-    heading={`Review report: ${getReportTitle()}`}
-    subtitle="Inspect the original source and update this report side by side."
-    initialMetrics={initialMetrics}
-    initialFacilityName={typeof metadata.facilityName === 'string' ? metadata.facilityName : ''}
-    initialTestDate={normalizeDateTimeLocal(data.report.testDate)}
-    initialTargetReportId={data.report.id}
-    initialRawSource={typeof data.report.rawData === 'string' ? data.report.rawData : ''}
-    reportOptions={[data.report]}
-    allowTargetSelection={false}
-    allowManualAdd={true}
-  />
+  <!-- The workspace copies the report into editable state when it mounts. Both
+       review pages share one route, so moving between two reports would reuse
+       the instance and leave the previous report's rows on screen. -->
+  {#key data.report.id}
+    <ReportReviewWorkspace
+      patientId={data.currentPatient.id}
+      patient={data.currentPatient}
+      saveAction="?/save"
+      {cancelHref}
+      heading={`Review report: ${getReportTitle()}`}
+      subtitle="Inspect the original source and update this report side by side."
+      initialMetrics={initialMetrics}
+      initialFacilityName={typeof metadata.facilityName === 'string' ? metadata.facilityName : ''}
+      initialTestDate={normalizeDateTimeLocal(data.report.testDate)}
+      initialTargetReportId={data.report.id}
+      initialRawSource={typeof data.report.rawData === 'string' ? data.report.rawData : ''}
+      reportOptions={[data.report]}
+      allowTargetSelection={false}
+      allowManualAdd={true}
+    />
+  {/key}
 </div>

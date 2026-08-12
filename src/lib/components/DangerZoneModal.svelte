@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { downloadPatientExport } from '$lib/export';
@@ -15,7 +16,9 @@
     onClose: () => void;
   } = $props();
 
-  let hasExported = $state(records.length === 0);
+  // Mounted behind {#if showDeleteModal}, so this reads the prop once on
+  // purpose: the export a person did in one opening does not carry to the next.
+  let hasExported = $state(untrack(() => records.length === 0));
   let confirmName = $state('');
 
   function exportPatientData() {
