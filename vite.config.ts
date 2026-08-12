@@ -15,13 +15,15 @@ export default defineConfig({
 			compiler: 'svelte',
 		})
 	],
+	// The suite covers the read model and the metric library — pure functions over
+	// records, no DOM and no network. It runs against this config rather than one
+	// of its own because those modules import the compiled messages, which the
+	// paraglide plugin above writes.
 	test: {
-		// The suite covers the read model and the metric library — pure functions
-		// over records, no DOM and no network.
 		environment: 'node',
 		include: ['src/**/*.test.ts'],
-		// Message functions resolve through the paraglide output the plugin writes,
-		// so the run compiles messages first the same way the app does.
-		globals: false
+		// An age is whole years in UTC, and a date-only birthday falls either side
+		// of one depending on where the machine thinks it is.
+		env: { TZ: 'UTC' }
 	}
 });

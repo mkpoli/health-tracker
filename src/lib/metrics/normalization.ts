@@ -74,17 +74,23 @@ function getUnitScale(unit?: string | null) {
     .replace(/[xX×]?万/gi, '')
     .trim() || null;
 
+  // Exponent notation carries any magnitude, and a red-cell count in ×10^6/μL
+  // or ×10^12/L is as ordinary on a report as ×10^3/μL. Reading the exponent
+  // rather than enumerating a few of them is what keeps 4.7 ×10^6/μL from
+  // arriving as 47.
+  const exponent = /[xX×*]?10\^(\d+)/.exec(normalized);
+
+  if (exponent) {
+    return { multiplier: 10 ** Number(exponent[1]), comparableUnit: baseUnit };
+  }
+
   const patterns: Array<[RegExp, number]> = [
-    [/[xX×*]?10\^?4/, 10000],
     [/[xX×*]?10000/, 10000],
     [/[xX×]?万/, 10000],
-    [/[xX×*]?10\^?3/, 1000],
     [/[xX×*]?1000/, 1000],
     [/[xX×]?千/, 1000],
-    [/[xX×*]?10\^?2/, 100],
     [/[xX×*]?100/, 100],
     [/[xX×]?百/, 100],
-    [/[xX×*]?10\^?1/, 10],
     [/[xX×*]?10/, 10],
   ];
 

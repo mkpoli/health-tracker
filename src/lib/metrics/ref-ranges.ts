@@ -23,7 +23,32 @@ export type RefRangeEntry = {
 export type PatientContext = {
   agab?: string | null;
   birthday?: string | null;
+  /**
+   * Instant the age is measured at. A reader asking what a draw from three
+   * years ago meant wants the age the person was then, and a test wants an
+   * answer that does not change when the machine crosses a birthday.
+   */
+  now?: number;
 };
+
+/**
+ * Whole years between a birthday and an instant, in UTC. One definition,
+ * because two of them disagree by a day around a birthday whenever the
+ * machine's timezone is not UTC.
+ */
+export function ageInYearsAt(birthday?: string | null, now?: number): number | null {
+  if (!birthday) return null;
+
+  const born = new Date(birthday);
+  if (Number.isNaN(born.getTime())) return null;
+
+  const at = new Date(now ?? Date.now());
+  let age = at.getUTCFullYear() - born.getUTCFullYear();
+  const months = at.getUTCMonth() - born.getUTCMonth();
+  if (months < 0 || (months === 0 && at.getUTCDate() < born.getUTCDate())) age -= 1;
+
+  return age >= 0 ? age : null;
+}
 
 // Endogenous adult intervals collated from publicly available lab references
 // (Mayo Clinic Labs, Quest, LabCorp). Real clinical ranges vary by lab and assay;
@@ -290,16 +315,6 @@ function normalizeAgab(value?: string | null): RefRangeSex | null {
   return null;
 }
 
-function computeAgeYears(birthday?: string | null): number | null {
-  if (!birthday) return null;
-  const dob = new Date(birthday);
-  if (Number.isNaN(dob.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - dob.getFullYear();
-  const monthDiff = now.getMonth() - dob.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < dob.getDate())) age--;
-  return age;
-}
 
 function entryMatchesSex(entry: RefRangeEntry, sex: RefRangeSex | null): boolean {
   if (!entry.sex || entry.sex === 'Any') return true;
@@ -318,7 +333,7 @@ function entryMatchesAge(entry: RefRangeEntry, age: number | null): boolean {
 
 function scoreEntry(entry: RefRangeEntry, patient: PatientContext): number {
   const sex = normalizeAgab(patient.agab);
-  const age = computeAgeYears(patient.birthday);
+  const age = ageInYearsAt(patient.birthday, patient.now);
 
   let score = 0;
   if (entryMatchesSex(entry, sex)) score += 10;

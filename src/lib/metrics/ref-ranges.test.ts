@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatRefRangeForUnit, getRefRangesForMetric, hasRefRangesForMetric } from './ref-ranges';
+import {
+  ageInYearsAt,
+  formatRefRangeForUnit,
+  getRefRangesForMetric,
+  hasRefRangesForMetric,
+} from './ref-ranges';
 
 // The catalog ranks every published interval by how well it fits the person and
 // discards none, so the caller decides what a partial fit means. What must hold
@@ -54,6 +59,59 @@ describe('getRefRangesForMetric', () => {
     expect(getRefRangesForMetric('something-uncatalogued')).toEqual([]);
     expect(hasRefRangesForMetric('something-uncatalogued')).toBe(false);
     expect(hasRefRangesForMetric('testosterone')).toBe(true);
+  });
+});
+
+describe('ageInYearsAt', () => {
+  const at = (date: string) => Date.parse(date);
+
+  it('counts whole years', () => {
+    expect(ageInYearsAt('1990-06-15', at('2026-06-15T00:00:00.000Z'))).toBe(36);
+  });
+
+  it('does not count the year until the birthday arrives', () => {
+    expect(ageInYearsAt('1990-06-15', at('2026-06-14T23:59:59.000Z'))).toBe(35);
+  });
+
+  it('measures the age the person was at the instant asked about', () => {
+    expect(ageInYearsAt('1990-06-15', at('2020-06-15T00:00:00.000Z'))).toBe(30);
+  });
+
+  it('answers nothing for a missing or unreadable birthday', () => {
+    expect(ageInYearsAt(null, at('2026-06-15T00:00:00.000Z'))).toBeNull();
+    expect(ageInYearsAt('not a date', at('2026-06-15T00:00:00.000Z'))).toBeNull();
+  });
+
+  it('answers nothing rather than a negative age', () => {
+    expect(ageInYearsAt('2030-01-01', at('2026-06-15T00:00:00.000Z'))).toBeNull();
+  });
+});
+
+describe('an interval banded by age', () => {
+  const at = (date: string) => Date.parse(date);
+
+  it('does not apply the adult interval the day before adulthood', () => {
+    const almost = getRefRangesForMetric('testosterone', {
+      agab: 'Male',
+      birthday: '2008-06-15',
+      now: at('2026-06-14T00:00:00.000Z'),
+    });
+
+    expect(almost.find((entry) => entry.label === 'Adult male')?.ageMin).toBe(18);
+    expect(ageInYearsAt('2008-06-15', at('2026-06-14T00:00:00.000Z'))).toBe(17);
+  });
+
+  it('picks the band the person falls in', () => {
+    const banded = getRefRangesForMetric('dhea-s', {
+      agab: 'Female',
+      birthday: '1990-06-15',
+      now: at('2026-06-15T00:00:00.000Z'),
+    });
+
+    const top = banded[0];
+
+    expect(top.ageMin === undefined || top.ageMin <= 36).toBe(true);
+    expect(top.ageMax === undefined || top.ageMax >= 36).toBe(true);
   });
 });
 

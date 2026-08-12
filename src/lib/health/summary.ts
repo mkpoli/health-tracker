@@ -2,7 +2,13 @@ import { getMetricDefinition, getMetricDefinitionByKey, type MetricDefinition } 
 import { computeDerivedMetrics } from '$lib/metrics/derived';
 import { freshnessHorizon, measureFreshness } from '$lib/metrics/freshness';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
-import { getRefRangesForMetric, type PatientContext, type RefRangeEntry } from '$lib/metrics/ref-ranges';
+import {
+  ageInYearsAt,
+  formatRefRangeForUnit,
+  getRefRangesForMetric,
+  type PatientContext,
+  type RefRangeEntry,
+} from '$lib/metrics/ref-ranges';
 import { getStatusFromRange, parseReferenceRange } from '$lib/metrics/trends';
 
 // The chart a reader would open first: one current value per metric, with the
@@ -61,7 +67,10 @@ function readContext(extraData: unknown): { context: CollectionContext; hoursSin
       : ((extraData || {}) as Record<string, unknown>);
 
   const raw = typeof parsed.collectionContext === 'string' ? parsed.collectionContext : null;
-  const hours = Number(parsed.hoursSinceMeal);
+  // Number(null) is 0, which would report a draw taken the moment after eating
+  // where the record in fact says nothing about when the person last ate.
+  const stated = parsed.hoursSinceMeal;
+  const hours = typeof stated === 'number' || typeof stated === 'string' ? Number(stated) : Number.NaN;
 
   return {
     context: raw === 'fasting' || raw === 'post-meal' || raw === 'random' ? raw : null,
@@ -157,7 +166,8 @@ export function therapyRangesForValue(
   return getRefRangesForMetric(metricKey, patient)
     .filter((entry) => entry.context === 'on-therapy' && unitsAgree(entry.unit, unit))
     .map((entry) => {
-      const parsed = parseReferenceRange(entry.range);
+      const range = rangeInUnit(entry, unit);
+      const parsed = parseReferenceRange(range);
       let position: TherapyRange['position'] = 'unknown';
 
       if (parsed) {
@@ -168,8 +178,8 @@ export function therapyRangesForValue(
 
       return {
         label: entry.label,
-        range: entry.range,
-        unit: entry.unit ?? null,
+        range,
+        unit: unit ?? entry.unit ?? null,
         notes: entry.notes ?? null,
         source: entry.source ?? null,
         position,
@@ -316,7 +326,7 @@ export function pickCatalogRange(
   unit: string | null,
   patient: PatientContext,
 ): RefRangeEntry | null {
-  const known = { sex: normalizeSex(patient.agab), age: ageInYears(patient.birthday) };
+  const known = { sex: normalizeSex(patient.agab), age: ageInYearsAt(patient.birthday, patient.now) };
 
   const candidates = getRefRangesForMetric(metricKey, patient).filter(
     (entry) => entry.context !== 'on-therapy' && entryApplies(entry, known),
@@ -332,19 +342,6 @@ function normalizeSex(agab?: string | null) {
   return null;
 }
 
-function ageInYears(birthday?: string | null) {
-  if (!birthday) return null;
-
-  const born = new Date(birthday);
-  if (Number.isNaN(born.getTime())) return null;
-
-  const now = new Date();
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const months = now.getUTCMonth() - born.getUTCMonth();
-  if (months < 0 || (months === 0 && now.getUTCDate() < born.getUTCDate())) age -= 1;
-
-  return age >= 0 ? age : null;
-}
 
 /** An entry applies only when every condition it states is satisfied by something known. */
 function entryApplies(entry: RefRangeEntry, known: { sex: 'Male' | 'Female' | null; age: number | null }) {
@@ -379,11 +376,16 @@ function unitsAgree(entryUnit: string | null | undefined, valueUnit: string | nu
   const entryScale = normalizeComparableMeasurement(1, left, null);
   const valueScale = normalizeComparableMeasurement(1, right, null);
 
-  return (
-    Boolean(entryScale.comparableUnit) &&
-    entryScale.comparableUnit === valueScale.comparableUnit &&
-    entryScale.multiplier === valueScale.multiplier
-  );
+  // Readings arrive already scaled to the base unit, while an interval may be
+  // published in a scaled one — the red-cell range is written in 10^6/uL
+  // against a value held in /uL. Requiring the two multipliers to match
+  // discarded exactly those intervals, leaving the metric with no range at all.
+  return Boolean(entryScale.comparableUnit) && entryScale.comparableUnit === valueScale.comparableUnit;
+}
+
+/** An interval's bounds written in the unit the reading is held in. */
+function rangeInUnit(entry: RefRangeEntry, unit: string | null) {
+  return formatRefRangeForUnit(entry, unit).range;
 }
 
 function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
@@ -415,10 +417,12 @@ function judge(metricKey: string, point: SeriesPoint, patient: PatientContext) {
   const catalogEntry = pickCatalogRange(metricKey, point.unit, patient);
 
   if (catalogEntry) {
+    const range = rangeInUnit(catalogEntry, point.unit);
+
     return {
-      status: getStatusFromRange(point.value, parseReferenceRange(catalogEntry.range), point.storedStatus),
+      status: getStatusFromRange(point.value, parseReferenceRange(range), point.storedStatus),
       statusSource: 'catalog' as const,
-      refRange: catalogEntry.range,
+      refRange: range,
       rangeLabel: catalogEntry.label,
       // Some intervals carry the caveat that decides how to read them — the
       // body-fat entry says a value below it is not necessarily abnormal.
@@ -443,6 +447,10 @@ function therapyRangesFor(metricKey: string, point: SeriesPoint, patient: Patien
 /** Latest reading per metric, judged and aged. */
 export function buildSummary(source: SummarySource, series = buildSeries(source)): SummaryEntry[] {
   const entries: SummaryEntry[] = [];
+  // The age an interval is chosen against is measured at the same instant as
+  // staleness, so a caller reading the record as of a past date gets the age
+  // the person was then rather than the age they are today.
+  const patient = { ...source.patient, now: source.patient.now ?? source.now };
 
   for (const group of series.values()) {
     const [latest, previous] = group.points;
@@ -452,7 +460,7 @@ export function buildSummary(source: SummarySource, series = buildSeries(source)
     // A calculated value ages with its oldest input, so a BMI resting on a
     // three-year-old height is not presented as this morning's number.
     const freshness = measureFreshness(latest.basisDate, freshnessHorizon(group.label), source.now);
-    const judged = judge(group.metricKey, latest, source.patient);
+    const judged = judge(group.metricKey, latest, patient);
 
     entries.push({
       metricKey: group.metricKey,
@@ -476,7 +484,7 @@ export function buildSummary(source: SummarySource, series = buildSeries(source)
       calculated: latest.calculated,
       collectionContext: latest.collectionContext,
       hoursSinceMeal: latest.hoursSinceMeal,
-      therapyRanges: therapyRangesFor(group.metricKey, latest, source.patient),
+      therapyRanges: therapyRangesFor(group.metricKey, latest, patient),
       // Two readings only subtract when they were taken under the same
       // conditions; fasting minus post-meal is not a change in the body.
       delta: comparableDraw(group.metricKey, latest, previous) ? round(latest.value - previous!.value) : null,
@@ -584,7 +592,8 @@ export type EvidenceAssessment = {
   rule: string;
 };
 
-export function assessEvidence(metricKey: string, points: SeriesPoint[], now: number): EvidenceAssessment {
+/** Takes no reference instant: the assessment is about the readings against each other. */
+export function assessEvidence(metricKey: string, points: SeriesPoint[]): EvidenceAssessment {
   const dated = points.filter((point) => point.date).sort((a, b) => pointTime(a.date) - pointTime(b.date));
   const first = dated[0]?.date ?? null;
   const last = dated[dated.length - 1]?.date ?? null;

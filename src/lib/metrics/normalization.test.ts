@@ -61,9 +61,27 @@ describe('counting notation with a multiplier', () => {
     expect(normalizeComparableMeasurement('4.5', 'x10^4/uL', null).multiplier).toBe(10000);
   });
 
+  it('reads an exponent past the handful a ladder would enumerate', () => {
+    expect(normalizeComparableMeasurement('4.7', '×10^6/μL', null).comparableValue).toBe(4_700_000);
+    expect(normalizeComparableMeasurement('4.7', '10^6/uL', null).multiplier).toBe(1_000_000);
+  });
+
+  it('reads the SI forms a haematology report prints', () => {
+    expect(normalizeComparableMeasurement('4.7', '×10^12/L', null).comparableValue).toBeCloseTo(4.7e12, 0);
+    expect(normalizeComparableMeasurement('7.2', '×10^9/L', null).comparableValue).toBeCloseTo(7.2e9, 0);
+  });
+
   it('reads 千 and 万', () => {
     expect(normalizeComparableMeasurement('5', '×千/μL', null).comparableValue).toBe(5000);
     expect(normalizeComparableMeasurement('5', '×万/μL', null).comparableValue).toBe(50000);
+  });
+
+  it('puts a count and its Japanese equivalent on the same scale', () => {
+    const exponent = normalizeComparableMeasurement('4.7', '×10^6/μL', null);
+    const counted = normalizeComparableMeasurement('470', '×万/μL', null);
+
+    expect(exponent.comparableUnit).toBe(counted.comparableUnit);
+    expect(exponent.comparableValue).toBe(counted.comparableValue);
   });
 });
 
