@@ -67,10 +67,14 @@ function readContext(extraData: unknown): { context: CollectionContext; hoursSin
       : ((extraData || {}) as Record<string, unknown>);
 
   const raw = typeof parsed.collectionContext === 'string' ? parsed.collectionContext : null;
-  // Number(null) is 0, which would report a draw taken the moment after eating
-  // where the record in fact says nothing about when the person last ate.
+  // Number(null) and Number('') are both 0, which would report a draw taken the
+  // moment after eating where the record — a null column, or a form field left
+  // untouched — says nothing about when the person last ate.
   const stated = parsed.hoursSinceMeal;
-  const hours = typeof stated === 'number' || typeof stated === 'string' ? Number(stated) : Number.NaN;
+  const hours =
+    typeof stated === 'number' || (typeof stated === 'string' && stated.trim() !== '')
+      ? Number(stated)
+      : Number.NaN;
 
   return {
     context: raw === 'fasting' || raw === 'post-meal' || raw === 'random' ? raw : null,

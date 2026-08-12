@@ -86,6 +86,34 @@ describe('a reading judged against the interval that describes it', () => {
     expect(withoutKey.hoursSinceMeal).toBeNull();
   });
 
+  it('reads a blank interval since eating as unstated', () => {
+    for (const blank of ['', '   ']) {
+      const entry = entryFor(
+        {
+          reports: [reports[0]],
+          records: [glucose('r1', '114', { collectionContext: 'post-meal', hoursSinceMeal: blank })],
+          patient: {},
+        },
+        'blood-glucose',
+      );
+
+      expect(entry.hoursSinceMeal).toBeNull();
+    }
+  });
+
+  it('still reads an interval given as a string', () => {
+    const entry = entryFor(
+      {
+        reports: [reports[0]],
+        records: [glucose('r1', '114', { collectionContext: 'post-meal', hoursSinceMeal: '2' })],
+        patient: {},
+      },
+      'blood-glucose',
+    );
+
+    expect(entry.hoursSinceMeal).toBe(2);
+  });
+
   it('withholds a verdict on a draw taken at a casual time', () => {
     const random = entryFor(
       {
