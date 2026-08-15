@@ -5,11 +5,11 @@ import { db } from '$lib/server/db';
 import { patient } from '$lib/server/db/schema';
 import { requireUserId } from '$lib/server/ownership';
 import {
+  CLAIM_WRITE_SCOPE,
   clientRedirectUris,
   createGrant,
   getClient,
   issueAuthCode,
-  MCP_SCOPES,
   READ_SCOPE,
   WRITE_SCOPE,
   mcpEnabled,
@@ -61,8 +61,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   const client = await getClient(params.clientId);
   if (!client) throw error(400, 'unknown_client');
 
-  // An unregistered redirect is how a stolen code would be routed somewhere
-  // else, so it is refused here rather than redirected to with an error.
+  // An unregistered redirect could route a stolen code elsewhere. This request
+  // ends here without sending any response parameters to that address.
   if (!clientRedirectUris(client).includes(params.redirectUri)) throw error(400, 'invalid_redirect_uri');
 
   const patients = await db
@@ -118,14 +118,16 @@ export const actions: Actions = {
     // would not take it away.
     await revokePriorGrants(userId, client.id);
 
+    const scopes = [READ_SCOPE];
+    if (form.get('allow_measurement_write') === 'on') scopes.push(WRITE_SCOPE);
+    if (form.get('allow_claim_write') === 'on') scopes.push(CLAIM_WRITE_SCOPE);
+
     const grant = await createGrant({
       ownerUserId: userId,
       clientId: client.id,
       patientIds,
       shareDemographics: form.get('share_demographics') === 'on',
-      // Reading is the whole point of connecting; writing is added only when
-      // the account holder ticks it on this screen.
-      scope: form.get('allow_write') === 'on' ? `${READ_SCOPE} ${WRITE_SCOPE}` : READ_SCOPE,
+      scope: scopes.join(' '),
     });
 
     const code = await issueAuthCode({

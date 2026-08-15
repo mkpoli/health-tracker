@@ -1,5 +1,5 @@
 import { ToolError, type McpContext } from './context';
-import { serverInstructions, tools, toolsFor } from './tools';
+import { serverInstructions, toolAllowed, tools, toolsFor } from './tools';
 import { touchGrant } from './oauth';
 
 // Model Context Protocol over JSON-RPC 2.0. Only the stateless half is served:
@@ -13,15 +13,15 @@ const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-0
 /**
  * What a client shows next to the connection. `serverInfo` gained `icons`,
  * `title` and `websiteUrl` in 2025-11-25; a client reading an older revision
- * ignores the extra fields. PNG rather than the app's SVG because PNG is the
- * format clients are required to render — SVG support is only recommended.
+ * ignores the extra fields. PNG is the format clients are required to render;
+ * SVG support is recommended.
  */
 function serverIdentity(origin: string) {
   return {
     name: 'health-tracker',
     title: 'Health Tracker',
     version: '1.0.0',
-    description: "Lab results and body measurements from this account holder's own records.",
+    description: "Lab results, measurements, medicine claims and energy records owned by this account holder.",
     websiteUrl: origin,
     icons: [
       { src: `${origin}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },
@@ -69,7 +69,12 @@ function describeTools(ctx: McpContext) {
     description: tool.description,
     inputSchema: tool.inputSchema,
     annotations: tool.writes
-      ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+      ? {
+          readOnlyHint: false,
+          destructiveHint: Boolean(tool.destructive),
+          idempotentHint: Boolean(tool.idempotent),
+          openWorldHint: false,
+        }
       : { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }));
 }
@@ -115,12 +120,12 @@ export async function dispatch(message: JsonRpcRequest, ctx: McpContext): Promis
 
       if (!tool) return fail(id, INVALID_PARAMS, `No tool named ${String(name)}`);
 
-      if (tool.writes && !ctx.canWrite) {
+      if (!toolAllowed(ctx, tool)) {
         return ok(id, {
           content: [
             {
               type: 'text',
-              text: 'This connection may only read. Writing needs the write permission, which the account holder grants on the connection screen.',
+              text: 'This connection lacks the permission required by this tool. The account holder can grant it on the connection screen.',
             },
           ],
           isError: true,
@@ -141,7 +146,7 @@ export async function dispatch(message: JsonRpcRequest, ctx: McpContext): Promis
       } catch (error) {
         if (error instanceof ToolError) {
           // A refused argument is the model's problem to fix, so it comes back
-          // as a tool result rather than a protocol error.
+          // as a tool result while the protocol message remains valid.
           return ok(id, { content: [{ type: 'text', text: error.message }], isError: true });
         }
 

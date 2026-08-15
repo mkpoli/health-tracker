@@ -31,7 +31,6 @@ import {
   requireUserId,
 } from '$lib/server/ownership';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
-import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import { normalizeTimeZone } from '$lib/time-zone';
 import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
 import { InvalidEnergyInputError, parseEnergyInput, validateEnergyEntry } from '$lib/server/energy';
@@ -42,17 +41,19 @@ import {
   validateEnergyPhoto,
 } from '$lib/server/energy-source-storage';
 import {
-  isEnergyDirection,
-  isEnergyStatus,
-  type EnergyClaimRecord,
-} from '$lib/energy';
-import {
-  claimRevisionValues,
   parseExpectedClaimRevision,
   StaleClaimRevisionError,
   toEnergyClaimRevision,
   toMedicineClaimRevision,
 } from '$lib/server/claim-revisions';
+import {
+  createEnergyClaim,
+  createMedicineClaim,
+  normalizeEnergyClaim,
+  normalizeMedicineClaim,
+  updateEnergyClaim,
+  updateMedicineClaim,
+} from '$lib/server/claim-mutations';
 import { CURRENT_HEALTH_ARCHIVE_VERSION } from '$lib/archive-format';
 import {
   ArchiveImportError,
@@ -65,7 +66,7 @@ import {
   restoreArchiveMedia,
 } from '$lib/server/archive-media';
 
-const manualRevisionSource = { kind: 'manual', provider: 'local' } as const;
+const manualClaimSource = { kind: 'manual', provider: 'local' } as const;
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -88,21 +89,6 @@ function storedReportSourceKey(value: unknown, patientId: string) {
   const match = /^report-sources\/([^/]+)\/[^/]+$/.exec(key);
 
   return match?.[1] === patientId ? key : null;
-}
-
-function normalizeMedicineClaim(value: typeof medicineClaim.$inferSelect): MedicineClaimRecord {
-  return {
-    ...value,
-    status: isMedicineStatus(value.status) ? value.status : 'active',
-  };
-}
-
-function normalizeEnergyClaim(value: typeof energyClaim.$inferSelect): EnergyClaimRecord {
-  return {
-    ...value,
-    direction: isEnergyDirection(value.direction) ? value.direction : 'intake',
-    status: isEnergyStatus(value.status) ? value.status : 'draft',
-  };
 }
 
 function normalizeMetricMatchKey(value: unknown) {
@@ -251,23 +237,10 @@ export const actions: Actions = {
 
     try {
       const input = parseMedicineInput(data);
-      const medicine = await db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(medicineClaim)
-          .values({
-            patientId: ownedPatient.id,
-            ...input,
-            originKind: 'manual',
-            originProvider: 'local',
-          })
-          .returning();
-        const snapshot = normalizeMedicineClaim(inserted[0]);
-
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('medicine', snapshot, manualRevisionSource));
-
-        return snapshot;
+      const { claim: medicine } = await createMedicineClaim({
+        patientId: ownedPatient.id,
+        input,
+        origin: manualClaimSource,
       });
 
       return { success: true, medicine };
@@ -297,37 +270,11 @@ export const actions: Actions = {
 
     try {
       const input = parseMedicineInput(data);
-      const medicine = await db.transaction(async (tx) => {
-        const currentSnapshot = normalizeMedicineClaim(current);
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('medicine', currentSnapshot, manualRevisionSource))
-          .onConflictDoNothing();
-
-        const updated = await tx
-          .update(medicineClaim)
-          .set({
-            ...input,
-            revision: expectedRevision + 1,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(medicineClaim.id, current.id),
-              eq(medicineClaim.patientId, current.patientId),
-              eq(medicineClaim.revision, expectedRevision),
-            ),
-          )
-          .returning();
-
-        if (!updated[0]) throw new StaleClaimRevisionError();
-
-        const snapshot = normalizeMedicineClaim(updated[0]);
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('medicine', snapshot, manualRevisionSource));
-
-        return snapshot;
+      const medicine = await updateMedicineClaim({
+        current,
+        input,
+        expectedRevision,
+        source: manualClaimSource,
       });
 
       return { success: true, medicine };
@@ -399,25 +346,12 @@ export const actions: Actions = {
         });
       }
 
-      const entry = await db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(energyClaim)
-          .values({
-            id: entryId,
-            patientId: ownedPatient.id,
-            ...input,
-            originKind: 'manual',
-            originProvider: 'local',
-          })
-          .returning();
-        const snapshot = normalizeEnergyClaim(inserted[0]);
-
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('energy', snapshot, manualRevisionSource));
-
-        if (storedPhoto) await tx.insert(energySource).values(storedPhoto);
-        return snapshot;
+      const { claim: entry } = await createEnergyClaim({
+        id: entryId,
+        patientId: ownedPatient.id,
+        input,
+        origin: manualClaimSource,
+        source: storedPhoto,
       });
 
       return { success: true, entry };
@@ -460,37 +394,11 @@ export const actions: Actions = {
         .limit(1);
       validateEnergyEntry(input, existingSource.length > 0);
 
-      const entry = await db.transaction(async (tx) => {
-        const currentSnapshot = normalizeEnergyClaim(current);
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('energy', currentSnapshot, manualRevisionSource))
-          .onConflictDoNothing();
-
-        const updated = await tx
-          .update(energyClaim)
-          .set({
-            ...input,
-            revision: expectedRevision + 1,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(energyClaim.id, current.id),
-              eq(energyClaim.patientId, current.patientId),
-              eq(energyClaim.revision, expectedRevision),
-            ),
-          )
-          .returning();
-
-        if (!updated[0]) throw new StaleClaimRevisionError();
-
-        const snapshot = normalizeEnergyClaim(updated[0]);
-        await tx
-          .insert(claimRevision)
-          .values(claimRevisionValues('energy', snapshot, manualRevisionSource));
-
-        return snapshot;
+      const entry = await updateEnergyClaim({
+        current,
+        input,
+        expectedRevision,
+        source: manualClaimSource,
       });
 
       return { success: true, entry };

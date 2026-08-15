@@ -7,6 +7,7 @@ import {
   timeZoneAbbreviation,
   toDateTimeLocal,
   utcOffsetLabel,
+  utcOffsetMinutesAt,
 } from './time-zone';
 
 describe('time-zone', () => {
@@ -39,6 +40,7 @@ describe('time-zone', () => {
       'Asia/Tokyo',
     );
     expect(utcOffsetLabel('2026-08-05T01:13:00.000Z', 'Asia/Tokyo')).toBe('UTC+09:00');
+    expect(utcOffsetMinutesAt('2026-08-05T01:13:00.000Z', 'Asia/Tokyo')).toBe(540);
   });
 
   it('shows a compact timezone abbreviation', () => {

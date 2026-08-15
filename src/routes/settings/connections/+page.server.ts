@@ -3,7 +3,15 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { patient } from '$lib/server/db/schema';
 import { requireUserId } from '$lib/server/ownership';
-import { grantPatientIds, listGrants, mcpEnabled, resourceUrl, revokeGrant } from '$lib/server/mcp/oauth';
+import {
+  CLAIM_WRITE_SCOPE,
+  grantPatientIds,
+  listGrants,
+  mcpEnabled,
+  resourceUrl,
+  revokeGrant,
+  WRITE_SCOPE,
+} from '$lib/server/mcp/oauth';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   const userId = requireUserId(locals);
@@ -26,6 +34,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         clientName: grant.clientName,
         patients: grantPatientIds(grant).map((id) => nameById.get(id) || id),
         shareDemographics: grant.shareDemographics === 1,
+        canWriteMeasurements: grant.scope.split(' ').includes(WRITE_SCOPE),
+        canWriteClaims: grant.scope.split(' ').includes(CLAIM_WRITE_SCOPE),
         createdAt: grant.createdAt,
         lastUsedAt: grant.lastUsedAt,
       })),

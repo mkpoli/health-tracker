@@ -73,7 +73,7 @@ The external agent endpoint is:
 https://<host>/mcp
 ```
 
-An MCP client can add that URL directly. OAuth opens in the browser. The consent screen selects profiles, demographic sharing, and optional write access. Connections can be reviewed or revoked under **Connected assistants**.
+An MCP client can add that URL directly. OAuth opens in the browser. The consent screen selects profiles, demographic sharing, measurement writes, and medicine or energy writes. Connections can be reviewed or revoked under **Connected assistants**.
 
 The server publishes OAuth discovery at:
 
@@ -82,7 +82,7 @@ https://<host>/.well-known/oauth-protected-resource
 https://<host>/.well-known/oauth-authorization-server
 ```
 
-It supports public-client dynamic registration, authorization code flow with PKCE S256, short-lived access tokens, rotating refresh tokens, and the `health:read` and `health:write` scopes. Direct clients send JSON-RPC over Streamable HTTP:
+It supports public-client dynamic registration, authorization code flow with PKCE S256, short-lived access tokens, rotating refresh tokens, and three scopes: `health:read`, `health:write`, and `health:claims:write`. Direct clients send JSON-RPC over Streamable HTTP:
 
 ```sh
 curl 'https://<host>/mcp' \
@@ -91,7 +91,22 @@ curl 'https://<host>/mcp' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Read access currently exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, and `get_reference_ranges`. A grant with `health:write` also exposes `log_measurement` for body measurements and vital signs. Medicine and calorie tools are outside the current MCP surface.
+Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicines`, `list_energy_entries`, and `get_claim_history`.
+
+A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
+
+- `create_medicine` and `update_medicine` manage the current medicine catalog and schedule claims.
+- `log_energy_entry` and `update_energy_entry` manage food intake and energy expenditure. Exercise can be recorded as `direction: "expenditure"` with optional duration and kilocalories.
+
+The consent screen grants each write scope independently. Connections created before claim writes existed retain their measurement capability and require fresh consent for `health:claims:write`.
+
+`create_medicine` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
+
+Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the claim again before proposing another change. Every successful create and update appears in `get_claim_history` with its change source.
+
+Energy timestamps require ISO form with `Z` or a numeric UTC offset. The profile's IANA timezone is used when the call omits `timezone`. Day filters on `list_energy_entries` use each entry's retained local date. Totals include recorded entries with known kilocalories; drafts and excluded entries remain visible according to the selected filters.
+
+Medicine claims describe the catalog, plan, and schedule. Dose-taking events will use a separate event model. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
 
 The MCP endpoint and versioned archive are the supported external integration surfaces. Page actions and retained-file routes serve the web application and may change with its implementation.
 

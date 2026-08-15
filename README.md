@@ -1,6 +1,6 @@
 # Health Tracker
 
-Health Tracker is a multilingual SvelteKit app for storing patient profiles, importing lab results, and tracking clinical metrics over time.
+Health Tracker is a multilingual SvelteKit app for storing health profiles, importing lab results, tracking measurements, and managing medicine and energy claims over time.
 
 ## Features
 
@@ -8,6 +8,8 @@ Health Tracker is a multilingual SvelteKit app for storing patient profiles, imp
 - Add records manually or extract them from images, PDFs, and pasted text
 - Review and edit parsed metrics before saving
 - Track trends with localized dates and translated UI
+- Keep editable medicine plans with revision history
+- Record food intake and energy expenditure with retained source photos
 - Run on Cloudflare with SQLite/Turso-backed data storage
 - Connect an AI assistant to the data through an MCP server
 
@@ -16,7 +18,8 @@ Health Tracker is a multilingual SvelteKit app for storing patient profiles, imp
 An assistant that speaks the Model Context Protocol reads the data over
 Streamable HTTP at `/mcp`. The app is the OAuth 2.1 authorization server for
 those connections and Auth0 identifies the person, so a connection is scoped to
-the profiles chosen on the consent screen rather than to the whole account.
+the profiles chosen on the consent screen. The grant never expands to the whole
+account.
 
 Set `MCP_TOKEN_SECRET` — a long random string, separate from
 `AUTH0_SESSION_SECRET` so agent tokens can be revoked on their own — and push
@@ -27,22 +30,25 @@ bun run db:push
 ```
 
 In the assistant, add `https://<host>/mcp` as a connector. It opens the consent
-screen, where the account holder picks the profiles it may read and whether
-assigned gender at birth and age go with them; reference-range selection needs
-those two, and withholding them yields general ranges. Connections are listed
-and withdrawn under **Connected assistants**.
+screen, where the account holder picks the profiles it may read, demographic
+sharing, measurement writes, and medicine or energy writes. Reference-range
+selection uses assigned gender at birth and age; withholding them yields general
+ranges. Connections are listed and withdrawn under **Connected assistants**.
 
-Seven tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
-`list_reports`, `get_report`, `search_metrics` and `get_reference_ranges`.
+Ten tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
+`list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`,
+`list_medicines`, `list_energy_entries`, and `get_claim_history`.
 
-One writes. `log_measurement` records a body measurement or a vital sign — a
-waist circumference, a weight, a blood pressure — and is served only where the
-consent screen's write permission was ticked, which is a separate choice from
-picking the profiles. Without it the tool is not listed and a call to it is
-refused. Laboratory results cannot be written this way; those come from an
-uploaded report.
+Five tools write. `log_measurement` requires `health:write`.
+`create_medicine`, `update_medicine`, `log_energy_entry`, and
+`update_energy_entry` require `health:claims:write`. The consent screen grants
+these scopes separately. Existing measurement-write grants retain their original
+capability. The two creation tools require a `request_id` for retry safety.
+Updates require the current revision so a newer edit cannot be overwritten.
+Laboratory results continue through the uploaded report review flow.
 
-Uploaded documents and the R2 bucket holding them stay out of reach either way.
+Uploaded documents, calorie photos, and the R2 bucket holding them stay outside
+the MCP grant. Energy tools report how many source files are retained.
 
 Backup, restore, Apple Health import, MCP client flow, and connector identity are documented in [Data portability](docs/data-portability.md).
 
