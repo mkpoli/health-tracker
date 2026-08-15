@@ -1,5 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { downloadPatientExport } from '$lib/export';
@@ -735,6 +736,16 @@
 
     return '';
   }
+
+  const enhanceUpdateReport: SubmitFunction = ({ formData }) => {
+    const testDate = formData.get('testDate');
+    if (typeof testDate !== 'string') return;
+
+    const parsed = new Date(testDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      formData.set('testDate', parsed.toISOString());
+    }
+  };
 
   function inferReportDateFromMetrics(metrics: any[] | null | undefined) {
     if (!metrics?.length) return '';
@@ -2354,7 +2365,12 @@
                       <section id={`report-${group.report.id}`} class="border-t border-slate-100 first:border-t-0">
                         {#if isReportExpanded(group.report.id)}
                           <div class="border-t border-slate-100 bg-white px-6 py-5">
-                            <form method="POST" action="?/updateReport" use:enhance class="space-y-4">
+                            <form
+                              method="POST"
+                              action="?/updateReport"
+                              use:enhance={enhanceUpdateReport}
+                              class="space-y-4"
+                            >
                               <input type="hidden" name="id" value={group.report.id} />
                               <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0 flex-1 space-y-3">
