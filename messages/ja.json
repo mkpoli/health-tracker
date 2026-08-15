@@ -834,5 +834,18 @@
   "calories_source_photo": "食事の元写真",
   "calories_source_photo_hint": "JPEG、PNG、WebP、GIF、AVIF、HEIC、HEIFに対応し、上限は50 MBです。元ファイルを後から確認できるよう保存します。",
   "calories_existing_photo_retained": "入力内容を変更しても、添付済みの元写真はこの記録に保存されます。",
-  "calories_notes_placeholder": "材料、量、運動強度、覚えておきたいこと"
+  "calories_notes_placeholder": "材料、量、運動強度、覚えておきたいこと",
+  "claim_revision_history": "編集履歴",
+  "claim_revision_count": "保存済みの版: {count}件",
+  "claim_revision_version": "第{revision}版",
+  "claim_revision_current": "現在",
+  "claim_revision_saved": "{date}に保存",
+  "claim_revision_changed": "変更項目: {fields}",
+  "claim_revision_first_retained": "保存されている最初の版",
+  "claim_revision_retained_hint": "編集前に保存された値も履歴から確認できます。",
+  "claim_revision_stale": "この画面を開いた後に記録が変更されました。編集画面を閉じ、最新版を確認してからもう一度編集してください。",
+  "claim_field_source": "データ元",
+  "claim_field_source_reference": "データ元の識別子",
+  "claim_field_time_zone": "タイムゾーン",
+  "claim_field_local_date": "現地日付"
 }

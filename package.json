@@ -15,6 +15,7 @@
 		"test:watch": "vitest",
 		"gen": "wrangler types",
 		"db:push": "drizzle-kit push",
+		"db:backfill:claims": "bun scripts/backfill-claim-revisions.ts",
 		"db:studio": "drizzle-kit studio",
 		"deploy": "bun run build && wrangler deploy",
 		"secrets:push": "bun scripts/push-secrets.ts",

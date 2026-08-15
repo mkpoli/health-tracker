@@ -1,5 +1,6 @@
-import { foreignKey, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, foreignKey, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
+import type { ClaimRevisionSnapshot } from '$lib/claim-revision';
 
 export const task = sqliteTable('task', {
 	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -155,12 +156,36 @@ export const energySource = sqliteTable(
 	]
 );
 
+export const claimRevision = sqliteTable(
+	'claim_revision',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		claimKind: text('claim_kind').notNull(),
+		claimId: text('claim_id').notNull(),
+		revision: integer('revision').notNull(),
+		snapshot: text('snapshot', { mode: 'json' }).notNull().$type<ClaimRevisionSnapshot>(),
+		changedAt: text('changed_at').notNull(),
+		changeOriginKind: text('change_origin_kind').notNull().default('manual'),
+		changeOriginProvider: text('change_origin_provider')
+	},
+	(table) => [
+		check('claim_revision_kind_check', sql`${table.claimKind} in ('medicine', 'energy')`),
+		uniqueIndex('claim_revision_claim_idx').on(table.claimKind, table.claimId, table.revision),
+		index('claim_revision_patient_idx').on(table.patientId),
+		index('claim_revision_patient_changed_idx').on(table.patientId, table.changedAt)
+	]
+);
+
 export const patientRelations = relations(patient, ({ many }) => ({
 	reports: many(report),
 	records: many(record),
 	medicineClaims: many(medicineClaim),
 	energyClaims: many(energyClaim),
-	energySources: many(energySource)
+	energySources: many(energySource),
+	claimRevisions: many(claimRevision)
 }));
 
 export const reportRelations = relations(report, ({ one, many }) => ({
@@ -205,6 +230,13 @@ export const energySourceRelations = relations(energySource, ({ one }) => ({
 	energyClaim: one(energyClaim, {
 		fields: [energySource.energyClaimId],
 		references: [energyClaim.id]
+	})
+}));
+
+export const claimRevisionRelations = relations(claimRevision, ({ one }) => ({
+	patient: one(patient, {
+		fields: [claimRevision.patientId],
+		references: [patient.id]
 	})
 }));
 

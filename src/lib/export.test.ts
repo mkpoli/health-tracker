@@ -11,15 +11,17 @@ describe('buildPatientExport', () => {
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
+      claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
     });
 
     expect(payload).toMatchObject({
       format: 'health-tracker-export',
-      version: 3,
+      version: 4,
       patient: { id: 'patient-1' },
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
+      claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
     });
     expect(Number.isNaN(Date.parse(payload.exportedAt))).toBe(false);
   });
@@ -49,6 +51,7 @@ describe('buildPatientExport', () => {
           mimeType: 'image/jpeg',
         },
       ],
+      claimRevisions: [],
     };
 
     expect(listPatientArchiveMedia(input)).toEqual([
@@ -78,6 +81,7 @@ describe('buildPatientExport', () => {
           mimeType: 'image/jpeg',
         },
       ],
+      claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
     };
     const requested: string[] = [];
     const archive = await buildPatientArchiveBytes(input, 'https://health.example', async (request) => {
@@ -90,8 +94,9 @@ describe('buildPatientExport', () => {
     expect(Array.from(files['media/calories/source-1-meal.jpg'])).toEqual([1, 2, 3]);
     expect(JSON.parse(strFromU8(files['health-data.json']))).toMatchObject({
       format: 'health-tracker-export',
-      version: 3,
+      version: 4,
       energyEntries: [{ id: 'energy-1' }],
+      claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
       mediaFiles: [{ archivePath: 'media/calories/source-1-meal.jpg' }],
     });
   });
@@ -104,6 +109,7 @@ describe('buildPatientExport', () => {
       medicines: [],
       energyEntries: [],
       energySources: [{ id: 'source-1', sourceUrl: 'https://other.example/source' }],
+      claimRevisions: [],
     };
 
     await expect(buildPatientArchiveBytes(input, 'https://health.example')).rejects.toThrow(

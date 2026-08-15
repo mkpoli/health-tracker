@@ -1,29 +1,35 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
+  import { changedClaimFields, type EnergyClaimRevisionRecord } from '$lib/claim-revision';
   import type {
     EnergyClaimRecord,
     EnergyDirection,
     EnergySourceRecord,
     EnergyStatus,
   } from '$lib/energy';
+  import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
 
   let {
     patientId,
     entries = [],
     sources = [],
+    revisions = [],
   }: {
     patientId: string;
     entries: EnergyClaimRecord[];
     sources: EnergySourceRecord[];
+    revisions: EnergyClaimRevisionRecord[];
   } = $props();
 
   type EditorStatus = EnergyStatus | 'auto';
 
   type Draft = {
     id: string;
+    revision: number;
     direction: EnergyDirection;
     label: string;
     category: string;
@@ -49,6 +55,22 @@
       const current = grouped.get(source.energyClaimId) || [];
       current.push(source);
       grouped.set(source.energyClaimId, current);
+    }
+
+    return grouped;
+  });
+
+  const revisionsByEntry = $derived.by(() => {
+    const grouped = new Map<string, EnergyClaimRevisionRecord[]>();
+
+    for (const revision of revisions) {
+      const history = grouped.get(revision.claimId) || [];
+      history.push(revision);
+      grouped.set(revision.claimId, history);
+    }
+
+    for (const history of grouped.values()) {
+      history.sort((a, b) => b.revision - a.revision);
     }
 
     return grouped;
@@ -106,6 +128,7 @@
   function newDraft(direction: EnergyDirection): Draft {
     return {
       id: '',
+      revision: 0,
       direction,
       label: '',
       category: direction === 'intake' ? 'meal' : '',
@@ -133,6 +156,7 @@
   function openEdit(entry: EnergyClaimRecord) {
     draft = {
       id: entry.id,
+      revision: entry.revision,
       direction: entry.direction,
       label: entry.label || '',
       category: entry.category || '',
@@ -178,8 +202,13 @@
         return;
       }
 
+      if (result.type === 'failure' && result.status === 409) {
+        await invalidateAll();
+        saveError = m.claim_revision_stale();
+      } else {
+        saveError = m.calories_save_failed();
+      }
       saving = false;
-      saveError = m.calories_save_failed();
     };
   };
 
@@ -233,6 +262,54 @@
       minute: '2-digit',
       timeZone: 'UTC',
     }).format(shifted);
+  }
+
+  function energyFieldLabel(field: string, snapshot: EnergyClaimRecord) {
+    if (field === 'direction') return m.calories_entry_type();
+    if (field === 'label') {
+      return snapshot.direction === 'intake' ? m.calories_food_name() : m.calories_activity_name();
+    }
+    if (field === 'category') return m.calories_meal_type();
+    if (field === 'energyKcal') return m.calories_energy();
+    if (field === 'occurredAt') return m.calories_time();
+    if (field === 'localDate') return m.claim_field_local_date();
+    if (field === 'timezone' || field === 'timezoneOffsetMinutes') return m.claim_field_time_zone();
+    if (field === 'durationMinutes') return m.calories_duration();
+    if (field === 'status') return m.calories_counting_state();
+    if (field === 'notes') return m.notes();
+    if (field === 'originExternalId') return m.claim_field_source_reference();
+    if (field === 'originKind' || field === 'originProvider') return m.claim_field_source();
+    return field;
+  }
+
+  function energyRevisionItems(entry: EnergyClaimRecord) {
+    const history = revisionsByEntry.get(entry.id) || [];
+
+    return history.map((revision, index) => {
+      const previous = history[index + 1]?.snapshot || null;
+      const snapshot = revision.snapshot;
+      const fields = changedClaimFields(snapshot, previous).map((field) =>
+        energyFieldLabel(field, snapshot),
+      );
+      const energy =
+        snapshot.energyKcal === null
+          ? m.calories_estimate_needed()
+          : `${formatKcal(snapshot.energyKcal)} kcal`;
+
+      return {
+        id: revision.id,
+        revision: revision.revision,
+        changedAt: revision.changedAt,
+        current: revision.revision === entry.revision,
+        changedFields: [...new Set(fields)],
+        primary: [entryLabel(snapshot), energy].join(' · '),
+        secondary: [
+          directionLabel(snapshot.direction),
+          statusLabel(snapshot.status),
+          `${formatDateOnly(snapshot.localDate)} ${formatEntryTime(snapshot)}`,
+        ].join(' · '),
+      };
+    });
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -405,6 +482,8 @@
                       <p class="border-t border-slate-100 px-4 py-3 text-sm leading-relaxed text-slate-600">{entry.notes}</p>
                     {/if}
 
+                    <ClaimRevisionTimeline items={energyRevisionItems(entry)} />
+
                     <div class="flex justify-end border-t border-slate-100 px-4 py-2.5">
                       <form
                         method="POST"
@@ -480,7 +559,10 @@
         class="app-scroll flex-1 overflow-y-auto"
       >
         <input type="hidden" name="patientId" value={patientId} />
-        {#if draft.id}<input type="hidden" name="id" value={draft.id} />{/if}
+        {#if draft.id}
+          <input type="hidden" name="id" value={draft.id} />
+          <input type="hidden" name="revision" value={draft.revision} />
+        {/if}
         <input type="hidden" name="timezone" value={draft.timezone} />
         <input type="hidden" name="timezoneOffsetMinutes" value={draft.timezoneOffsetMinutes} />
 

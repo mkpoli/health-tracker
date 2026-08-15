@@ -834,5 +834,18 @@
   "calories_source_photo": "Original meal photo",
   "calories_source_photo_hint": "JPEG, PNG, WebP, GIF, AVIF, HEIC, or HEIF up to 50 MB. The original file is retained for later review.",
   "calories_existing_photo_retained": "Attached source photos stay with this entry when its details change.",
-  "calories_notes_placeholder": "Ingredients, portion, effort, or anything you want to remember"
+  "calories_notes_placeholder": "Ingredients, portion, effort, or anything you want to remember",
+  "claim_revision_history": "Edit history",
+  "claim_revision_count": "Saved versions: {count}",
+  "claim_revision_version": "Version {revision}",
+  "claim_revision_current": "Current",
+  "claim_revision_saved": "Saved {date}",
+  "claim_revision_changed": "Changed: {fields}",
+  "claim_revision_first_retained": "First retained version",
+  "claim_revision_retained_hint": "Earlier saved values remain available after an edit.",
+  "claim_revision_stale": "This record changed after you opened it. Close the editor, review the latest version, then edit again.",
+  "claim_field_source": "Source",
+  "claim_field_source_reference": "Source reference",
+  "claim_field_time_zone": "Time zone",
+  "claim_field_local_date": "Local date"
 }

@@ -518,6 +518,7 @@
           medicines: data.medicines,
           energyEntries: data.energyEntries,
           energySources: data.energySources,
+          claimRevisions: data.claimRevisions,
         },
         data.currentPatient.name,
       );
@@ -1724,6 +1725,7 @@
         medicines={data.medicines}
         energyEntries={data.energyEntries}
         energySources={data.energySources}
+        claimRevisions={data.claimRevisions}
         onClose={() => (showDeleteModal = false)}
       />
     {/if}
@@ -2867,7 +2869,11 @@
         {/each}
 
         <div class="mt-6" hidden={activeTab !== 'medicine'}>
-          <MedicinePanel patientId={data.currentPatient.id} medicines={data.medicines} />
+          <MedicinePanel
+            patientId={data.currentPatient.id}
+            medicines={data.medicines}
+            revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
+          />
         </div>
 
         <div class="mt-6" hidden={activeTab !== 'calories'}>
@@ -2875,6 +2881,7 @@
             patientId={data.currentPatient.id}
             entries={data.energyEntries}
             sources={data.energySources}
+            revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'energy')}
           />
         </div>
       {/if}

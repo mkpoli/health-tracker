@@ -1,5 +1,13 @@
 import { db } from '$lib/server/db';
-import { energyClaim, energySource, medicineClaim, patient, report, record } from '$lib/server/db/schema';
+import {
+  claimRevision,
+  energyClaim,
+  energySource,
+  medicineClaim,
+  patient,
+  report,
+  record,
+} from '$lib/server/db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
@@ -38,6 +46,15 @@ import {
   isEnergyStatus,
   type EnergyClaimRecord,
 } from '$lib/energy';
+import {
+  claimRevisionValues,
+  parseExpectedClaimRevision,
+  StaleClaimRevisionError,
+  toEnergyClaimRevision,
+  toMedicineClaimRevision,
+} from '$lib/server/claim-revisions';
+
+const manualRevisionSource = { kind: 'manual', provider: 'local' } as const;
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -61,6 +78,22 @@ function storedReportSourceKey(value: unknown, patientId: string) {
 
   return match?.[1] === patientId ? key : null;
 }
+
+function normalizeMedicineClaim(value: typeof medicineClaim.$inferSelect): MedicineClaimRecord {
+  return {
+    ...value,
+    status: isMedicineStatus(value.status) ? value.status : 'active',
+  };
+}
+
+function normalizeEnergyClaim(value: typeof energyClaim.$inferSelect): EnergyClaimRecord {
+  return {
+    ...value,
+    direction: isEnergyDirection(value.direction) ? value.direction : 'intake',
+    status: isEnergyStatus(value.status) ? value.status : 'draft',
+  };
+}
+
 function normalizeMetricMatchKey(value: unknown) {
   if (typeof value !== 'string') return '';
 
@@ -83,7 +116,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       reports: [],
       medicines: [],
       energyEntries: [],
-      energySources: []
+      energySources: [],
+      claimRevisions: [],
     };
   }
 
@@ -102,12 +136,20 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
   let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
   let energySourcesList: typeof energySource.$inferSelect[] = [];
+  let claimRevisionsList: typeof claimRevision.$inferSelect[] = [];
 
   if (patients.length > 0) {
     const targetId = selectedPatientId || patients[0].id;
     currentPatient = patients.find(p => p.id === targetId) || patients[0];
 
-    [recordsList, reportsList, medicinesList, energyEntriesList, energySourcesList] = await Promise.all([
+    [
+      recordsList,
+      reportsList,
+      medicinesList,
+      energyEntriesList,
+      energySourcesList,
+      claimRevisionsList,
+    ] = await Promise.all([
       db
         .select()
         .from(record)
@@ -133,8 +175,22 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(energySource)
         .where(eq(energySource.patientId, currentPatient.id))
         .orderBy(desc(energySource.createdAt)),
+      db
+        .select()
+        .from(claimRevision)
+        .where(eq(claimRevision.patientId, currentPatient.id))
+        .orderBy(desc(claimRevision.changedAt)),
     ]);
   }
+
+  const claimRevisions = claimRevisionsList.flatMap((revision) => {
+    const normalized =
+      revision.claimKind === 'medicine'
+        ? toMedicineClaimRevision(revision)
+        : toEnergyClaimRevision(revision);
+
+    return normalized ? [normalized] : [];
+  });
 
   return {
     user: locals.user,
@@ -143,16 +199,10 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     currentPatient,
     records: recordsList,
     reports: reportsList,
-    medicines: medicinesList.map((medicine) => ({
-      ...medicine,
-      status: isMedicineStatus(medicine.status) ? medicine.status : 'active',
-    } satisfies MedicineClaimRecord)),
-    energyEntries: energyEntriesList.map((entry) => ({
-      ...entry,
-      direction: isEnergyDirection(entry.direction) ? entry.direction : 'intake',
-      status: isEnergyStatus(entry.status) ? entry.status : 'draft',
-    } satisfies EnergyClaimRecord)),
-    energySources: energySourcesList.map(toEnergySourceRecord)
+    medicines: medicinesList.map(normalizeMedicineClaim),
+    energyEntries: energyEntriesList.map(normalizeEnergyClaim),
+    energySources: energySourcesList.map(toEnergySourceRecord),
+    claimRevisions,
   };
 };
 
@@ -190,17 +240,26 @@ export const actions: Actions = {
 
     try {
       const input = parseMedicineInput(data);
-      const inserted = await db
-        .insert(medicineClaim)
-        .values({
-          patientId: ownedPatient.id,
-          ...input,
-          originKind: 'manual',
-          originProvider: 'local',
-        })
-        .returning();
+      const medicine = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(medicineClaim)
+          .values({
+            patientId: ownedPatient.id,
+            ...input,
+            originKind: 'manual',
+            originProvider: 'local',
+          })
+          .returning();
+        const snapshot = normalizeMedicineClaim(inserted[0]);
 
-      return { success: true, medicine: inserted[0] };
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('medicine', snapshot, manualRevisionSource));
+
+        return snapshot;
+      });
+
+      return { success: true, medicine };
     } catch (error) {
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
@@ -214,28 +273,60 @@ export const actions: Actions = {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
 
     if (!id) return fail(400, { code: 'medicine_missing_id' });
+    if (expectedRevision === null) return fail(400, { code: 'medicine_invalid_revision' });
 
     const current = await getOwnedMedicineClaim(userId, id);
     if (!current) return fail(404, { code: 'medicine_not_found' });
+    if (current.revision !== expectedRevision) {
+      return fail(409, { code: 'medicine_stale_revision' });
+    }
 
     try {
       const input = parseMedicineInput(data);
-      const updated = await db
-        .update(medicineClaim)
-        .set({
-          ...input,
-          revision: current.revision + 1,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(medicineClaim.id, current.id))
-        .returning();
+      const medicine = await db.transaction(async (tx) => {
+        const currentSnapshot = normalizeMedicineClaim(current);
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('medicine', currentSnapshot, manualRevisionSource))
+          .onConflictDoNothing();
 
-      return { success: true, medicine: updated[0] };
+        const updated = await tx
+          .update(medicineClaim)
+          .set({
+            ...input,
+            revision: expectedRevision + 1,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(
+            and(
+              eq(medicineClaim.id, current.id),
+              eq(medicineClaim.patientId, current.patientId),
+              eq(medicineClaim.revision, expectedRevision),
+            ),
+          )
+          .returning();
+
+        if (!updated[0]) throw new StaleClaimRevisionError();
+
+        const snapshot = normalizeMedicineClaim(updated[0]);
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('medicine', snapshot, manualRevisionSource));
+
+        return snapshot;
+      });
+
+      return { success: true, medicine };
     } catch (error) {
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_stale_revision' });
       }
 
       throw error;
@@ -252,7 +343,20 @@ export const actions: Actions = {
     const current = await getOwnedMedicineClaim(userId, id);
     if (!current) return fail(404, { code: 'medicine_not_found' });
 
-    await db.delete(medicineClaim).where(eq(medicineClaim.id, current.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(claimRevision)
+        .where(
+          and(
+            eq(claimRevision.patientId, current.patientId),
+            eq(claimRevision.claimKind, 'medicine'),
+            eq(claimRevision.claimId, current.id),
+          ),
+        );
+      await tx
+        .delete(medicineClaim)
+        .where(and(eq(medicineClaim.id, current.id), eq(medicineClaim.patientId, current.patientId)));
+    });
     return { success: true };
   },
 
@@ -284,22 +388,32 @@ export const actions: Actions = {
         });
       }
 
-      await db.insert(energyClaim).values({
-        id: entryId,
-        patientId: ownedPatient.id,
-        ...input,
-        originKind: 'manual',
-        originProvider: 'local',
+      const entry = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(energyClaim)
+          .values({
+            id: entryId,
+            patientId: ownedPatient.id,
+            ...input,
+            originKind: 'manual',
+            originProvider: 'local',
+          })
+          .returning();
+        const snapshot = normalizeEnergyClaim(inserted[0]);
+
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('energy', snapshot, manualRevisionSource));
+
+        if (storedPhoto) await tx.insert(energySource).values(storedPhoto);
+        return snapshot;
       });
 
-      if (storedPhoto) await db.insert(energySource).values(storedPhoto);
-      return { success: true };
+      return { success: true, entry };
     } catch (error) {
-      const cleanup: PromiseLike<unknown>[] = [db.delete(energyClaim).where(eq(energyClaim.id, entryId))];
       if (storedPhoto && platform?.env.REPORT_SOURCES) {
-        cleanup.push(platform.env.REPORT_SOURCES.delete(storedPhoto.storageKey));
+        await platform.env.REPORT_SOURCES.delete(storedPhoto.storageKey);
       }
-      await Promise.allSettled(cleanup);
 
       if (error instanceof InvalidEnergyInputError || error instanceof EnergyPhotoError) {
         return fail(error instanceof EnergyPhotoError && error.code === 'source_storage_unavailable' ? 503 : 400, {
@@ -315,11 +429,16 @@ export const actions: Actions = {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
 
     if (!id) return fail(400, { code: 'energy_missing_id' });
+    if (expectedRevision === null) return fail(400, { code: 'energy_invalid_revision' });
 
     const current = await getOwnedEnergyClaim(userId, id);
     if (!current) return fail(404, { code: 'energy_not_found' });
+    if (current.revision !== expectedRevision) {
+      return fail(409, { code: 'energy_stale_revision' });
+    }
 
     try {
       const input = parseEnergyInput(data);
@@ -330,19 +449,47 @@ export const actions: Actions = {
         .limit(1);
       validateEnergyEntry(input, existingSource.length > 0);
 
-      await db
-        .update(energyClaim)
-        .set({
-          ...input,
-          revision: current.revision + 1,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(energyClaim.id, current.id));
+      const entry = await db.transaction(async (tx) => {
+        const currentSnapshot = normalizeEnergyClaim(current);
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('energy', currentSnapshot, manualRevisionSource))
+          .onConflictDoNothing();
 
-      return { success: true };
+        const updated = await tx
+          .update(energyClaim)
+          .set({
+            ...input,
+            revision: expectedRevision + 1,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(
+            and(
+              eq(energyClaim.id, current.id),
+              eq(energyClaim.patientId, current.patientId),
+              eq(energyClaim.revision, expectedRevision),
+            ),
+          )
+          .returning();
+
+        if (!updated[0]) throw new StaleClaimRevisionError();
+
+        const snapshot = normalizeEnergyClaim(updated[0]);
+        await tx
+          .insert(claimRevision)
+          .values(claimRevisionValues('energy', snapshot, manualRevisionSource));
+
+        return snapshot;
+      });
+
+      return { success: true, entry };
     } catch (error) {
       if (error instanceof InvalidEnergyInputError) {
         return fail(400, { code: `energy_${error.code}` });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'energy_stale_revision' });
       }
 
       throw error;
@@ -372,7 +519,20 @@ export const actions: Actions = {
       await Promise.all(sources.map(({ storageKey }) => platform.env.REPORT_SOURCES.delete(storageKey)));
     }
 
-    await db.delete(energyClaim).where(eq(energyClaim.id, current.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(claimRevision)
+        .where(
+          and(
+            eq(claimRevision.patientId, current.patientId),
+            eq(claimRevision.claimKind, 'energy'),
+            eq(claimRevision.claimId, current.id),
+          ),
+        );
+      await tx
+        .delete(energyClaim)
+        .where(and(eq(energyClaim.id, current.id), eq(energyClaim.patientId, current.patientId)));
+    });
     return { success: true };
   },
 

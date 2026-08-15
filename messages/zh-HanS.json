@@ -834,5 +834,18 @@
   "calories_source_photo": "餐食原始照片",
   "calories_source_photo_hint": "支持不超过50 MB的JPEG、PNG、WebP、GIF、AVIF、HEIC或HEIF文件。原始文件会保留以供日后复核。",
   "calories_existing_photo_retained": "修改记录详情时，已附加的原始照片会继续保留。",
-  "calories_notes_placeholder": "食材、份量、运动强度或任何想记住的内容"
+  "calories_notes_placeholder": "食材、份量、运动强度或任何想记住的内容",
+  "claim_revision_history": "编辑历史",
+  "claim_revision_count": "已保存版本：{count}",
+  "claim_revision_version": "版本 {revision}",
+  "claim_revision_current": "当前",
+  "claim_revision_saved": "保存于{date}",
+  "claim_revision_changed": "已更改：{fields}",
+  "claim_revision_first_retained": "最早保留的版本",
+  "claim_revision_retained_hint": "编辑前保存的值会保留在历史中。",
+  "claim_revision_stale": "此记录在你打开编辑器后发生了更改。请关闭编辑器，查看最新版本后再编辑。",
+  "claim_field_source": "来源",
+  "claim_field_source_reference": "来源标识",
+  "claim_field_time_zone": "时区",
+  "claim_field_local_date": "当地日期"
 }
