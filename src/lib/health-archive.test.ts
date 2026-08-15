@@ -11,7 +11,7 @@ import {
 function baseExport(overrides: Record<string, unknown> = {}) {
   return {
     format: 'health-tracker-export',
-    version: 5,
+    version: 6,
     exportedAt: '2026-08-15T00:00:00.000Z',
     patient: { id: 'patient-1', name: 'Example' },
     reports: [],
@@ -19,6 +19,8 @@ function baseExport(overrides: Record<string, unknown> = {}) {
     medicines: [],
     energyEntries: [],
     energySources: [],
+    exerciseDefinitions: [],
+    workouts: [],
     claimRevisions: [],
     mediaFiles: [],
     ...overrides,
@@ -40,6 +42,8 @@ describe('health archive', () => {
       medicines: [],
       energyEntries: [],
       energySources: [],
+      exerciseDefinitions: [],
+      workouts: [],
       claimRevisions: [],
       mediaFiles: [],
     });

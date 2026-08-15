@@ -3,6 +3,7 @@ import type {
   ClaimRevisionSnapshot,
   EnergyClaimRevisionRecord,
   MedicineClaimRevisionRecord,
+  WorkoutClaimRevisionRecord,
 } from '$lib/claim-revision';
 import {
   isEnergyDirection,
@@ -10,6 +11,13 @@ import {
   type EnergyClaimRecord,
 } from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
+import {
+  isWorkoutKind,
+  isWorkoutSetStatus,
+  isWorkoutSetType,
+  isWorkoutStatus,
+  type WorkoutRecord,
+} from '$lib/workout';
 
 export interface ClaimRevisionSource {
   kind: string;
@@ -94,6 +102,57 @@ export function toEnergyClaimRevision(
       status: isEnergyStatus(snapshot.status) ? snapshot.status : 'draft',
     },
   };
+}
+
+export function toWorkoutClaimRevision(
+  row: StoredClaimRevision,
+): WorkoutClaimRevisionRecord | null {
+  if (row.claimKind !== 'workout' || !isWorkoutSnapshot(row.snapshot)) return null;
+  if (row.snapshot.id !== row.claimId || row.snapshot.patientId !== row.patientId) return null;
+
+  return {
+    ...row,
+    claimKind: 'workout',
+    snapshot: row.snapshot,
+  };
+}
+
+function isWorkoutSnapshot(value: unknown): value is WorkoutRecord {
+  if (!isObject(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.patientId !== 'string' ||
+    typeof value.kind !== 'string' ||
+    !isWorkoutKind(value.kind) ||
+    typeof value.status !== 'string' ||
+    !isWorkoutStatus(value.kind, value.status) ||
+    !Array.isArray(value.exercises)
+  ) {
+    return false;
+  }
+
+  return value.exercises.every((exercise) => {
+    if (
+      !isObject(exercise) ||
+      typeof exercise.id !== 'string' ||
+      exercise.workoutId !== value.id ||
+      typeof exercise.name !== 'string' ||
+      !Array.isArray(exercise.sets)
+    ) {
+      return false;
+    }
+
+    return exercise.sets.every(
+      (set) =>
+        isObject(set) &&
+        typeof set.id === 'string' &&
+        set.workoutExerciseId === exercise.id &&
+        typeof set.setType === 'string' &&
+        isWorkoutSetType(set.setType) &&
+        typeof set.status === 'string' &&
+        isWorkoutSetStatus(set.status),
+    );
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

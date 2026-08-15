@@ -10,6 +10,8 @@ export interface PatientExportInput {
   medicines: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
+  exerciseDefinitions: unknown[];
+  workouts: unknown[];
   claimRevisions: unknown[];
 }
 
@@ -115,9 +117,21 @@ export function buildPatientExport({
   medicines,
   energyEntries,
   energySources,
+  exerciseDefinitions,
+  workouts,
   claimRevisions,
 }: PatientExportInput) {
-  const input = { patient, reports, records, medicines, energyEntries, energySources, claimRevisions };
+  const input = {
+    patient,
+    reports,
+    records,
+    medicines,
+    energyEntries,
+    energySources,
+    exerciseDefinitions,
+    workouts,
+    claimRevisions,
+  };
 
   return {
     format: 'health-tracker-export',
@@ -129,6 +143,8 @@ export function buildPatientExport({
     medicines,
     energyEntries,
     energySources,
+    exerciseDefinitions,
+    workouts,
     claimRevisions,
     mediaFiles: listPatientArchiveMedia(input).map(({ sourceUrl: _sourceUrl, ...media }) => media),
   };

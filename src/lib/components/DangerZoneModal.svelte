@@ -11,6 +11,8 @@
     medicines = [],
     energyEntries = [],
     energySources = [],
+    exerciseDefinitions = [],
+    workouts = [],
     claimRevisions = [],
     onClose,
   }: {
@@ -20,6 +22,8 @@
     medicines?: unknown[];
     energyEntries?: unknown[];
     energySources?: unknown[];
+    exerciseDefinitions?: unknown[];
+    workouts?: unknown[];
     claimRevisions?: unknown[];
     onClose: () => void;
   } = $props();
@@ -27,7 +31,15 @@
   // Mounted behind {#if showDeleteModal}, so this reads the prop once on
   // purpose: the export a person did in one opening does not carry to the next.
   const hasExportableData = untrack(
-    () => records.length + reports.length + medicines.length + energyEntries.length + energySources.length > 0,
+    () =>
+      records.length +
+        reports.length +
+        medicines.length +
+        energyEntries.length +
+        energySources.length +
+        exerciseDefinitions.length +
+        workouts.length >
+      0,
   );
   let hasExported = $state(!hasExportableData);
   let confirmName = $state('');
@@ -43,7 +55,17 @@
 
     try {
       await downloadPatientArchive(
-        { patient, reports, records, medicines, energyEntries, energySources, claimRevisions },
+        {
+          patient,
+          reports,
+          records,
+          medicines,
+          energyEntries,
+          energySources,
+          exerciseDefinitions,
+          workouts,
+          claimRevisions,
+        },
         patient?.name,
       );
       hasExported = true;

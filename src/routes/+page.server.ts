@@ -3,10 +3,14 @@ import {
   claimRevision,
   energyClaim,
   energySource,
+  exerciseDefinition,
   medicineClaim,
   patient,
   report,
   record,
+  workoutClaim,
+  workoutExercise,
+  workoutSet,
 } from '$lib/server/db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
@@ -28,6 +32,7 @@ import {
   getOwnedPatient,
   getOwnedRecord,
   getOwnedReport,
+  getOwnedWorkoutClaim,
   requireUserId,
 } from '$lib/server/ownership';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
@@ -45,6 +50,7 @@ import {
   StaleClaimRevisionError,
   toEnergyClaimRevision,
   toMedicineClaimRevision,
+  toWorkoutClaimRevision,
 } from '$lib/server/claim-revisions';
 import {
   createEnergyClaim,
@@ -54,6 +60,18 @@ import {
   updateEnergyClaim,
   updateMedicineClaim,
 } from '$lib/server/claim-mutations';
+import {
+  InvalidWorkoutInputError,
+  buildWorkoutRecords,
+  normalizeExerciseDefinition,
+  parseWorkoutInput,
+} from '$lib/server/workouts';
+import {
+  createWorkoutClaim,
+  getWorkoutRecord,
+  InvalidWorkoutReferenceError,
+  updateWorkoutClaim,
+} from '$lib/server/workout-mutations';
 import { CURRENT_HEALTH_ARCHIVE_VERSION } from '$lib/archive-format';
 import {
   ArchiveImportError,
@@ -114,6 +132,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       medicines: [],
       energyEntries: [],
       energySources: [],
+      exerciseDefinitions: [],
+      workouts: [],
       claimRevisions: [],
     };
   }
@@ -133,6 +153,10 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
   let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
   let energySourcesList: typeof energySource.$inferSelect[] = [];
+  let exerciseDefinitionsList: typeof exerciseDefinition.$inferSelect[] = [];
+  let workoutClaimsList: typeof workoutClaim.$inferSelect[] = [];
+  let workoutExercisesList: typeof workoutExercise.$inferSelect[] = [];
+  let workoutSetsList: typeof workoutSet.$inferSelect[] = [];
   let claimRevisionsList: typeof claimRevision.$inferSelect[] = [];
 
   if (patients.length > 0) {
@@ -145,6 +169,10 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       medicinesList,
       energyEntriesList,
       energySourcesList,
+      exerciseDefinitionsList,
+      workoutClaimsList,
+      workoutExercisesList,
+      workoutSetsList,
       claimRevisionsList,
     ] = await Promise.all([
       db
@@ -174,6 +202,26 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .orderBy(desc(energySource.createdAt)),
       db
         .select()
+        .from(exerciseDefinition)
+        .where(eq(exerciseDefinition.patientId, currentPatient.id))
+        .orderBy(exerciseDefinition.name),
+      db
+        .select()
+        .from(workoutClaim)
+        .where(eq(workoutClaim.patientId, currentPatient.id))
+        .orderBy(desc(workoutClaim.updatedAt)),
+      db
+        .select()
+        .from(workoutExercise)
+        .where(eq(workoutExercise.patientId, currentPatient.id))
+        .orderBy(workoutExercise.orderIndex),
+      db
+        .select()
+        .from(workoutSet)
+        .where(eq(workoutSet.patientId, currentPatient.id))
+        .orderBy(workoutSet.orderIndex),
+      db
+        .select()
         .from(claimRevision)
         .where(eq(claimRevision.patientId, currentPatient.id))
         .orderBy(desc(claimRevision.changedAt)),
@@ -181,10 +229,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   }
 
   const claimRevisions = claimRevisionsList.flatMap((revision) => {
-    const normalized =
-      revision.claimKind === 'medicine'
-        ? toMedicineClaimRevision(revision)
-        : toEnergyClaimRevision(revision);
+    const normalized = revision.claimKind === 'medicine'
+      ? toMedicineClaimRevision(revision)
+      : revision.claimKind === 'energy'
+        ? toEnergyClaimRevision(revision)
+        : toWorkoutClaimRevision(revision);
 
     return normalized ? [normalized] : [];
   });
@@ -199,6 +248,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     medicines: medicinesList.map(normalizeMedicineClaim),
     energyEntries: energyEntriesList.map(normalizeEnergyClaim),
     energySources: energySourcesList.map(toEnergySourceRecord),
+    exerciseDefinitions: exerciseDefinitionsList.map(normalizeExerciseDefinition),
+    workouts: buildWorkoutRecords(workoutClaimsList, workoutExercisesList, workoutSetsList),
     claimRevisions,
   };
 };
@@ -451,6 +502,100 @@ export const actions: Actions = {
       await tx
         .delete(energyClaim)
         .where(and(eq(energyClaim.id, current.id), eq(energyClaim.patientId, current.patientId)));
+    });
+    return { success: true };
+  },
+
+  createWorkout: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+
+    if (!patientId) return fail(400, { code: 'workout_missing_patient' });
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'workout_patient_not_found' });
+
+    try {
+      const workout = await createWorkoutClaim({
+        patientId: ownedPatient.id,
+        input: parseWorkoutInput(data),
+        origin: manualClaimSource,
+      });
+      return { success: true, workout };
+    } catch (error) {
+      if (error instanceof InvalidWorkoutInputError) {
+        return fail(400, { code: `workout_${error.code}` });
+      }
+      if (error instanceof InvalidWorkoutReferenceError) {
+        return fail(400, { code: `workout_invalid_${error.code}` });
+      }
+      throw error;
+    }
+  },
+
+  updateWorkout: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+
+    if (!id) return fail(400, { code: 'workout_missing_id' });
+    if (expectedRevision === null) return fail(400, { code: 'workout_invalid_revision' });
+
+    const root = await getOwnedWorkoutClaim(userId, id);
+    if (!root) return fail(404, { code: 'workout_not_found' });
+    if (root.revision !== expectedRevision) {
+      return fail(409, { code: 'workout_stale_revision' });
+    }
+    const current = await getWorkoutRecord(root.patientId, root.id);
+    if (!current) return fail(404, { code: 'workout_not_found' });
+
+    try {
+      const workout = await updateWorkoutClaim({
+        current,
+        input: parseWorkoutInput(data),
+        expectedRevision,
+        source: manualClaimSource,
+      });
+      return { success: true, workout };
+    } catch (error) {
+      if (error instanceof InvalidWorkoutInputError) {
+        return fail(400, { code: `workout_${error.code}` });
+      }
+      if (error instanceof InvalidWorkoutReferenceError) {
+        return fail(400, { code: `workout_invalid_${error.code}` });
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'workout_stale_revision' });
+      }
+      throw error;
+    }
+  },
+
+  deleteWorkout: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'workout_missing_id' });
+    const current = await getOwnedWorkoutClaim(userId, id);
+    if (!current) return fail(404, { code: 'workout_not_found' });
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(claimRevision)
+        .where(
+          and(
+            eq(claimRevision.patientId, current.patientId),
+            eq(claimRevision.claimKind, 'workout'),
+            eq(claimRevision.claimId, current.id),
+          ),
+        );
+      await tx
+        .delete(workoutClaim)
+        .where(
+          and(eq(workoutClaim.id, current.id), eq(workoutClaim.patientId, current.patientId)),
+        );
     });
     return { success: true };
   },

@@ -15,6 +15,7 @@ The archive contains:
 - reports and recorded values;
 - current medicine entries and their saved revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
+- exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
 - retained report sources, including scans and PDFs.
 
 Account credentials, connected-assistant grants, and connector credentials live outside a profile archive.
@@ -32,7 +33,7 @@ The export stops if a retained file cannot be read. This prevents a successful-l
 1. Sign in and select the destination profile.
 2. Choose **Import Data**.
 3. Select a Health Tracker ZIP or JSON file.
-4. Review the counts for reports, values, medicines, calories, saved versions, and retained files.
+4. Review the counts for reports, values, medicines, calories, workouts, saved versions, and retained files.
 5. Select **Replace this profile's details** when the archived name, birthday, assigned sex at birth, and profile settings should replace the destination profile values.
 6. Choose **Restore**.
 
@@ -43,7 +44,7 @@ Profile replacement stays off by default. The structured import runs in bounded 
 - A restore back into its source profile keeps the original entity IDs.
 - A restore into another profile creates stable IDs from the destination profile, source profile, entity type, and source ID.
 - Repeating the same restore reuses those IDs and fills missing records.
-- Provider and external IDs identify calorie or exercise entries that already arrived through a connector.
+- Provider and external IDs identify calorie and workout records that already arrived through a connector.
 - Existing current records retain their local values when identities meet. Missing historical revisions are added.
 - Existing retained files remain in place. A missing storage object can be repaired from the ZIP.
 - A current-format ZIP requires byte counts and SHA-256 checksums for every retained file.
@@ -51,6 +52,12 @@ Profile replacement stays off by default. The structured import runs in bounded 
 Each retained file may be up to 50 MB. JSON restoration leaves retained-file entries unresolved because JSON carries the manifest without file bytes. The review and completion screens report missing files. Native archive rollback currently uses the normal edit and delete controls for each imported record.
 
 Messages used to prepare Medicine or Calories drafts are copied into the claim's Notes field before review. A saved message is included in claim revisions and native archives. The user can edit or remove it in the review form.
+
+## Native workout records
+
+The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
+
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 6 carries exercise definitions before workouts during restoration, then restores workout revisions after the current records exist.
 
 ## Apple Health import
 
