@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { patient, report, record } from '$lib/server/db/schema';
+import { medicineClaim, patient, report, record } from '$lib/server/db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
@@ -13,7 +13,16 @@ import {
 } from '$lib/server/measurements';
 import { isMeasurementKind } from '$lib/report-kind';
 import { deleteImportedSessions, importMeasurementSessions } from '$lib/server/measurement-import';
-import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
+import {
+  getOwnedLabReport,
+  getOwnedMedicineClaim,
+  getOwnedPatient,
+  getOwnedRecord,
+  getOwnedReport,
+  requireUserId,
+} from '$lib/server/ownership';
+import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
+import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import { normalizeTimeZone } from '$lib/time-zone';
 import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
 
@@ -51,7 +60,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       patients: [],
       currentPatient: null,
       records: [],
-      reports: []
+      reports: [],
+      medicines: []
     };
   }
 
@@ -67,6 +77,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let currentPatient = null;
   let recordsList: typeof record.$inferSelect[] = [];
   let reportsList: typeof report.$inferSelect[] = [];
+  let medicinesList: typeof medicineClaim.$inferSelect[] = [];
 
   if (patients.length > 0) {
     const targetId = selectedPatientId || patients[0].id;
@@ -83,6 +94,12 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       .from(report)
       .where(eq(report.patientId, currentPatient.id))
       .orderBy(desc(report.testDate));
+
+    medicinesList = await db
+      .select()
+      .from(medicineClaim)
+      .where(eq(medicineClaim.patientId, currentPatient.id))
+      .orderBy(desc(medicineClaim.updatedAt));
   }
 
   return {
@@ -91,7 +108,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     patients,
     currentPatient,
     records: recordsList,
-    reports: reportsList
+    reports: reportsList,
+    medicines: medicinesList.map((medicine) => ({
+      ...medicine,
+      status: isMedicineStatus(medicine.status) ? medicine.status : 'active',
+    } satisfies MedicineClaimRecord))
   };
 };
 
@@ -115,6 +136,84 @@ export const actions: Actions = {
     }).returning();
 
     return { success: true, patient: newPatient[0] };
+  },
+
+  createMedicine: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+
+    if (!patientId) return fail(400, { code: 'medicine_missing_patient' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'medicine_patient_not_found' });
+
+    try {
+      const input = parseMedicineInput(data);
+      const inserted = await db
+        .insert(medicineClaim)
+        .values({
+          patientId: ownedPatient.id,
+          ...input,
+          originKind: 'manual',
+          originProvider: 'local',
+        })
+        .returning();
+
+      return { success: true, medicine: inserted[0] };
+    } catch (error) {
+      if (error instanceof InvalidMedicineInputError) {
+        return fail(400, { code: `medicine_${error.code}` });
+      }
+
+      throw error;
+    }
+  },
+
+  updateMedicine: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'medicine_missing_id' });
+
+    const current = await getOwnedMedicineClaim(userId, id);
+    if (!current) return fail(404, { code: 'medicine_not_found' });
+
+    try {
+      const input = parseMedicineInput(data);
+      const updated = await db
+        .update(medicineClaim)
+        .set({
+          ...input,
+          revision: current.revision + 1,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(medicineClaim.id, current.id))
+        .returning();
+
+      return { success: true, medicine: updated[0] };
+    } catch (error) {
+      if (error instanceof InvalidMedicineInputError) {
+        return fail(400, { code: `medicine_${error.code}` });
+      }
+
+      throw error;
+    }
+  },
+
+  deleteMedicine: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'medicine_missing_id' });
+
+    const current = await getOwnedMedicineClaim(userId, id);
+    if (!current) return fail(404, { code: 'medicine_not_found' });
+
+    await db.delete(medicineClaim).where(eq(medicineClaim.id, current.id));
+    return { success: true };
   },
 
   addManualRecord: async ({ request, locals }) => {
@@ -311,6 +410,7 @@ export const actions: Actions = {
 
     if (!current) return fail(404, { error: 'Patient not found' });
 
+    await db.delete(medicineClaim).where(eq(medicineClaim.patientId, id));
     await db.delete(record).where(eq(record.patientId, id));
     await db.delete(report).where(eq(report.patientId, id));
     await db.delete(patient).where(eq(patient.id, id));

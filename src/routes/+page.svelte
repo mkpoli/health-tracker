@@ -47,6 +47,7 @@
   import AuthStatus from '$lib/components/AuthStatus.svelte';
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
+  import MedicinePanel from '$lib/components/MedicinePanel.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
   import TimeZoneField from '$lib/components/TimeZoneField.svelte';
 
@@ -79,7 +80,7 @@
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
-  type DashboardTab = 'lab' | 'body' | 'vitals';
+  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine';
 
   let activeTab = $state<DashboardTab>('lab');
 
@@ -93,6 +94,7 @@
     { id: 'lab', label: () => m.tab_lab_results(), short: () => m.tab_lab_results_short(), hint: () => m.tab_lab_results_hint() },
     { id: 'body', label: () => m.tab_body_measurements(), short: () => m.tab_body_measurements_short(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
     { id: 'vitals', label: () => m.tab_vitals(), short: () => m.tab_vitals_short(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
+    { id: 'medicine', label: () => m.tab_medicine(), short: () => m.tab_medicine_short(), hint: () => m.tab_medicine_hint() },
   ];
 
   // Spelled out rather than composed, so Tailwind keeps the class names.
@@ -100,6 +102,7 @@
     lab: { bar: 'bg-teal-500', active: 'text-teal-700' },
     body: { bar: 'bg-violet-500', active: 'text-violet-700' },
     vitals: { bar: 'bg-rose-500', active: 'text-rose-700' },
+    medicine: { bar: 'bg-blue-500', active: 'text-blue-700' },
   };
 
   const activeTabMeta = $derived(dashboardTabs.find((tab) => tab.id === activeTab) ?? dashboardTabs[0]);
@@ -503,7 +506,12 @@
     if (!data.currentPatient) return;
 
     downloadPatientExport(
-      { patient: data.currentPatient, reports: data.reports, records: data.records },
+      {
+        patient: data.currentPatient,
+        reports: data.reports,
+        records: data.records,
+        medicines: data.medicines,
+      },
       data.currentPatient.name,
     );
   }
@@ -1697,7 +1705,13 @@
     {/if}
 
     {#if showDeleteModal && data.currentPatient}
-      <DangerZoneModal patient={data.currentPatient} reports={data.reports} records={data.records} onClose={() => (showDeleteModal = false)} />
+      <DangerZoneModal
+        patient={data.currentPatient}
+        reports={data.reports}
+        records={data.records}
+        medicines={data.medicines}
+        onClose={() => (showDeleteModal = false)}
+      />
     {/if}
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -2836,6 +2850,10 @@
             </div>
           {/if}
         {/each}
+
+        <div class="mt-6" hidden={activeTab !== 'medicine'}>
+          <MedicinePanel patientId={data.currentPatient.id} medicines={data.medicines} />
+        </div>
       {/if}
     </main>
 
@@ -2866,9 +2884,13 @@
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6a2.25 2.25 0 100-4.5A2.25 2.25 0 0012 6zM8.25 9h7.5M9 9v4.5L7.5 22.5M15 9v4.5l1.5 9M9 13.5h6" />
                   </svg>
-                {:else}
+                {:else if tab.id === 'vitals'}
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h3l2.25-6 3.75 12 2.25-6h5.25" />
+                  </svg>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6.75l6.75 6.75m-9.9 3.15l9.3-9.3a3.182 3.182 0 00-4.5-4.5l-9.3 9.3a3.182 3.182 0 004.5 4.5zm0 0l-1.2 1.2a3.182 3.182 0 004.5 4.5l1.2-1.2" />
                   </svg>
                 {/if}
               </span>
