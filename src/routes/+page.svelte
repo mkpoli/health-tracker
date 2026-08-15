@@ -49,6 +49,7 @@
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
   import MedicinePanel from '$lib/components/MedicinePanel.svelte';
   import CaloriePanel from '$lib/components/CaloriePanel.svelte';
+  import WorkoutPanel from '$lib/components/WorkoutPanel.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
   import TimeZoneField from '$lib/components/TimeZoneField.svelte';
 
@@ -529,6 +530,8 @@
           medicines: data.medicines,
           energyEntries: data.energyEntries,
           energySources: data.energySources,
+          exerciseDefinitions: data.exerciseDefinitions,
+          workouts: data.workouts,
           claimRevisions: data.claimRevisions,
         },
         data.currentPatient.name,
@@ -1737,6 +1740,8 @@
         medicines={data.medicines}
         energyEntries={data.energyEntries}
         energySources={data.energySources}
+        exerciseDefinitions={data.exerciseDefinitions}
+        workouts={data.workouts}
         claimRevisions={data.claimRevisions}
         onClose={() => (showDeleteModal = false)}
       />
@@ -2889,12 +2894,21 @@
         </div>
 
         <div class="mt-6" hidden={activeTab !== 'calories'}>
-          <CaloriePanel
-            patientId={data.currentPatient.id}
-            entries={data.energyEntries}
-            sources={data.energySources}
-            revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'energy')}
-          />
+          <div class="space-y-6">
+            <WorkoutPanel
+              patientId={data.currentPatient.id}
+              {patientTimeZone}
+              workouts={data.workouts}
+              exerciseDefinitions={data.exerciseDefinitions}
+              revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'workout')}
+            />
+            <CaloriePanel
+              patientId={data.currentPatient.id}
+              entries={data.energyEntries}
+              sources={data.energySources}
+              revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'energy')}
+            />
+          </div>
         </div>
       {/if}
     </main>

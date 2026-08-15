@@ -175,7 +175,7 @@ Connector credentials stay outside profile archives. Archive manifests retain pr
 | Available | Health Tracker archive | ZIP or JSON restore with checksums and stable merge IDs | Versioned ZIP with all retained files; JSON manifest | Round-trip tests cover every supported entity and file. |
 | Available | MCP | OAuth-authorized claim and measurement writes | Scoped read tools with revision history | Grants are profile-scoped, revocable, and read-only by default. |
 | Available, partial | Apple Health export | Browser-streamed `export.xml` mapping for selected measurements | Native archive and downstream formats | Expand through typed mappings while listing every unhandled Apple type. |
-| Next | Native exercise records | Manual and reviewed text entry | Native archive, CSV | Land the workout schema before provider-specific import code. |
+| Available | Native exercise records | Manual session and reusable-plan entry | Native archive | Keep provider mappings outside the canonical workout, exercise, and set records. |
 | Next | Hevy CSV | Import exported workouts and measurements with a review summary | Native workout CSV and archive | Support repeated imports, source identity, warnings, and batch rollback. |
 | After CSV | Hevy API | API-key connector with workout-event cursors | User-authorized writes only after read sync is stable | Treat the experimental API as an optional transport and preserve raw responses. |
 | Later | HealthKit bridge | Permissioned iOS reads and anchored queries | Permissioned writes for supported data types | Provide per-type consent, source visibility, and retry-safe background sync. |
@@ -195,8 +195,8 @@ Each importer should show detected format, profile destination, date range, coun
 
 ## Delivery sequence
 
-1. Native workout, exercise, set, and workout-plan records with revisions and archive support.
-2. Hevy workout CSV import with review, repeated-import identity, and rollback.
+1. Native workout, exercise, set, and workout-plan records with revisions and archive support — available.
+2. Hevy workout CSV import with review, repeated-import identity, and rollback — next.
 3. Medication schedules and dose occurrences with correction history.
 4. Medication inventory transactions and refill projections.
 5. Wider Apple Health XML coverage for workouts, nutrition, sleep, and source metadata.

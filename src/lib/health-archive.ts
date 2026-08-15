@@ -23,6 +23,8 @@ export interface HealthTrackerExport {
   medicines: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
+  exerciseDefinitions: unknown[];
+  workouts: unknown[];
   claimRevisions: unknown[];
   mediaFiles: HealthArchiveMediaFile[];
 }
@@ -162,6 +164,8 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     medicines: arrayOrEmpty(data.medicines),
     energyEntries: arrayOrEmpty(data.energyEntries),
     energySources: arrayOrEmpty(data.energySources),
+    exerciseDefinitions: arrayOrEmpty(data.exerciseDefinitions),
+    workouts: arrayOrEmpty(data.workouts),
     claimRevisions: arrayOrEmpty(data.claimRevisions),
     mediaFiles,
   };

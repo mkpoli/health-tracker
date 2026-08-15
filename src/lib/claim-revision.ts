@@ -1,10 +1,11 @@
 import type { EnergyClaimRecord } from '$lib/energy';
 import type { MedicineClaimRecord } from '$lib/medicine';
+import type { WorkoutRecord } from '$lib/workout';
 
-export const claimKinds = ['medicine', 'energy'] as const;
+export const claimKinds = ['medicine', 'energy', 'workout'] as const;
 
 export type ClaimKind = (typeof claimKinds)[number];
-export type ClaimRevisionSnapshot = MedicineClaimRecord | EnergyClaimRecord;
+export type ClaimRevisionSnapshot = MedicineClaimRecord | EnergyClaimRecord | WorkoutRecord;
 
 interface ClaimRevisionBase {
   id: string;
@@ -26,7 +27,15 @@ export type EnergyClaimRevisionRecord = ClaimRevisionBase & {
   snapshot: EnergyClaimRecord;
 };
 
-export type ClaimRevisionRecord = MedicineClaimRevisionRecord | EnergyClaimRevisionRecord;
+export type WorkoutClaimRevisionRecord = ClaimRevisionBase & {
+  claimKind: 'workout';
+  snapshot: WorkoutRecord;
+};
+
+export type ClaimRevisionRecord =
+  | MedicineClaimRevisionRecord
+  | EnergyClaimRevisionRecord
+  | WorkoutClaimRevisionRecord;
 
 const revisionMetadataFields = new Set([
   'id',

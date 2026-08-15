@@ -78,6 +78,8 @@
           healthArchive.data.records.length +
           healthArchive.data.medicines.length +
           healthArchive.data.energyEntries.length +
+          healthArchive.data.exerciseDefinitions.length +
+          healthArchive.data.workouts.length +
           healthArchive.data.claimRevisions.length
       : 0,
   );
@@ -227,7 +229,15 @@
   }
 
   type ArchiveBatch = {
-    kind: 'profile' | 'reports' | 'records' | 'medicines' | 'energy' | 'revisions';
+    kind:
+      | 'profile'
+      | 'reports'
+      | 'records'
+      | 'medicines'
+      | 'energy'
+      | 'exerciseDefinitions'
+      | 'workouts'
+      | 'revisions';
     items: unknown[];
   };
 
@@ -244,6 +254,20 @@
     add('records', healthArchive.data.records, 200);
     add('medicines', healthArchive.data.medicines, 100);
     add('energy', healthArchive.data.energyEntries, 100);
+    add('exerciseDefinitions', healthArchive.data.exerciseDefinitions, 20);
+    add(
+      'workouts',
+      [...healthArchive.data.workouts].sort((left, right) => {
+        const leftKind = left && typeof left === 'object' && !Array.isArray(left) && 'kind' in left
+          ? String(left.kind)
+          : '';
+        const rightKind = right && typeof right === 'object' && !Array.isArray(right) && 'kind' in right
+          ? String(right.kind)
+          : '';
+        return Number(rightKind === 'plan') - Number(leftKind === 'plan');
+      }),
+      5,
+    );
     add('revisions', healthArchive.data.claimRevisions, 200);
     return batches;
   }
@@ -530,6 +554,10 @@
             <div class="rounded-xl border border-orange-200 bg-orange-50/60 p-3">
               <p class="text-xs font-medium text-orange-700">{m.tab_calories()}</p>
               <p class="mt-1 text-2xl font-semibold text-orange-950">{healthArchive.data.energyEntries.length}</p>
+            </div>
+            <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+              <p class="text-xs font-medium text-violet-700">{m.workouts_title()}</p>
+              <p class="mt-1 text-2xl font-semibold text-violet-950">{healthArchive.data.workouts.length}</p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-3">
               <p class="text-xs font-medium text-slate-500">{m.import_archive_versions()}</p>

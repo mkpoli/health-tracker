@@ -1,4 +1,4 @@
-export const CURRENT_HEALTH_ARCHIVE_VERSION = 5;
+export const CURRENT_HEALTH_ARCHIVE_VERSION = 6;
 
 export type ArchiveMediaKind = 'energy-photo' | 'report-source';
 
