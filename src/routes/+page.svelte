@@ -2413,18 +2413,14 @@
                             <form method="POST" action="?/updateReport" use:enhance class="space-y-4">
                               <input type="hidden" name="id" value={group.report.id} />
                               <div class="flex items-start justify-between gap-4">
-                                <div class="min-w-0 flex-1 space-y-3">
+                                <div class="min-w-0 flex-1 space-y-2">
                                   <label class="block">
                                     <span class="sr-only">{m.report_title()}</span>
                                     <input
                                       type="text"
                                       name="title"
                                       value={group.title}
-                                      placeholder={`${group.facilityName || m.report_fallback()} ${formatDate(
-                                        group.report.testDate,
-                                        { dateStyle: 'medium' },
-                                        getReportTimeZone(group.report),
-                                      )}`}
+                                      placeholder={group.facilityName || m.report_fallback()}
                                       class="w-full border-0 bg-transparent px-0 py-0 text-lg font-semibold tracking-tight text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
                                     />
                                   </label>
@@ -2432,7 +2428,7 @@
                                     <span class="sr-only">{m.report_notes()}</span>
                                     <textarea
                                       name="notes"
-                                      rows="2"
+                                      rows="1"
                                       placeholder={m.report_notes_placeholder()}
                                       class="w-full resize-none border-0 bg-transparent px-0 py-0 text-sm text-slate-500 outline-none placeholder:text-slate-400 focus:ring-0"
                                       >{group.notes}</textarea
@@ -2468,42 +2464,61 @@
                                 </div>
                               </div>
 
-                              <div
-                                class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3"
-                              >
-                                <div class="flex flex-wrap items-center gap-3">
+                              <div class="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,0.85fr)_minmax(17rem,1.25fr)_minmax(12rem,1fr)_auto] xl:items-start">
+                                <label class="block min-w-0">
+                                  <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                    {m.date_time()}
+                                  </span>
                                   <input
                                     type="datetime-local"
                                     name="testDate"
                                     value={normalizeDateTimeLocal(group.report.testDate, getReportTimeZone(group.report))}
-                                    class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                                    class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                                   />
-                                  <div class="min-w-56">
-                                    <TimeZoneField
-                                      id={`report-time-zone-${group.report.id}`}
-                                      value={getReportTimeZone(group.report)}
-                                      dateTime={normalizeDateTimeLocal(group.report.testDate, getReportTimeZone(group.report))}
-                                      showLabel={false}
-                                    />
-                                  </div>
+                                </label>
+                                <div class="min-w-0">
+                                  <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                    {m.time_zone()}
+                                  </span>
+                                  <TimeZoneField
+                                    id={`report-time-zone-${group.report.id}`}
+                                    value={getReportTimeZone(group.report)}
+                                    dateTime={normalizeDateTimeLocal(group.report.testDate, getReportTimeZone(group.report))}
+                                    showLabel={false}
+                                  />
+                                </div>
+                                <label class="block min-w-0">
+                                  <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                    {m.facility()}
+                                  </span>
                                   <input
                                     type="text"
                                     name="facilityName"
                                     value={group.facilityName}
                                     placeholder={m.facility()}
-                                    class="min-w-40 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                                    class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                                   />
+                                </label>
+                                <div class="flex items-center gap-2 sm:col-span-2 xl:col-span-1 xl:pt-6">
+                                  <button
+                                    type="submit"
+                                    class="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                  >
+                                    {m.save()}
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    form={`delete-report-${group.report.id}`}
+                                    class="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                                  >
+                                    {m.remove_report()}
+                                  </button>
                                 </div>
-                                <button
-                                  type="submit"
-                                  class="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
-                                >
-                                  {m.save()}
-                                </button>
                               </div>
                             </form>
 
                             <form
+                              id={`delete-report-${group.report.id}`}
                               method="POST"
                               action="?/deleteReport"
                               use:enhance={(e) => {
@@ -2517,15 +2532,9 @@
                                   e.cancel();
                                 }
                               }}
-                              class="mt-3 flex justify-end"
+                              class="hidden"
                             >
                               <input type="hidden" name="id" value={group.report.id} />
-                              <button
-                                type="submit"
-                                class="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
-                              >
-                                {m.remove_report()}
-                              </button>
                             </form>
 
                             <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
