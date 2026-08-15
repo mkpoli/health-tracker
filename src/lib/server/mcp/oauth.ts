@@ -16,7 +16,9 @@ export const READ_SCOPE = 'health:read';
  * holder will later read back as their own history.
  */
 export const WRITE_SCOPE = 'health:write';
-export const MCP_SCOPES = [READ_SCOPE, WRITE_SCOPE] as const;
+/** Medicine and energy edits require their own consent. */
+export const CLAIM_WRITE_SCOPE = 'health:claims:write';
+export const MCP_SCOPES = [READ_SCOPE, WRITE_SCOPE, CLAIM_WRITE_SCOPE] as const;
 // Short, because the only thing that ends a token early is its own expiry —
 // revocation is immediate in practice because the grant is re-read on every
 // call, but a token that has left the machine should not stay useful for long.
@@ -292,9 +294,8 @@ export async function setRefreshToken(grantId: string, token: string | null) {
 /**
  * Rotating, with the swap done as one conditional update so two concurrent
  * refreshes cannot both succeed. The spent hash is kept for one generation:
- * presenting it again means a copy of the token is in circulation, and the
- * whole grant is revoked rather than left running for whoever holds the newer
- * one.
+ * presenting it again means a copy of the token is in circulation. Reuse
+ * revokes the whole grant, including the newer token.
  */
 export async function rotateRefreshToken(token: string) {
   const hash = await hashToken(token);

@@ -70,6 +70,16 @@
                   : m.connections_demographics_off()}
               </p>
               <p class="mt-1 text-xs text-slate-500">
+                {connection.canWriteMeasurements
+                  ? m.connections_measurement_write_on()
+                  : m.connections_measurement_write_off()}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                {connection.canWriteClaims
+                  ? m.connections_claim_write_on()
+                  : m.connections_claim_write_off()}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
                 {m.connections_granted({ date: formatDate(connection.createdAt) ?? '—' })}
                 ·
                 {connection.lastUsedAt

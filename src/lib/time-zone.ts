@@ -193,12 +193,19 @@ export function utcOffsetLabel(value: string | Date, timeZone: string) {
   const instant = value instanceof Date ? value.getTime() : new Date(value).getTime();
   if (Number.isNaN(instant) || !isValidTimeZone(timeZone)) return 'UTC';
 
-  const totalMinutes = Math.round(offsetMilliseconds(instant, timeZone) / 60_000);
+  const totalMinutes = utcOffsetMinutesAt(value, timeZone) ?? 0;
   const sign = totalMinutes < 0 ? '-' : '+';
   const absolute = Math.abs(totalMinutes);
   const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
   const minutes = String(absolute % 60).padStart(2, '0');
   return `UTC${sign}${hours}:${minutes}`;
+}
+
+export function utcOffsetMinutesAt(value: string | Date, timeZone: string) {
+  const instant = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  if (Number.isNaN(instant) || !isValidTimeZone(timeZone)) return null;
+
+  return Math.round(offsetMilliseconds(instant, timeZone) / 60_000);
 }
 
 export function timeZoneLabel(
