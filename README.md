@@ -53,6 +53,8 @@ the MCP grant. Energy tools report how many source files are retained.
 
 Backup, restore, Apple Health import, MCP client flow, and connector identity are documented in [Data portability](docs/data-portability.md).
 
+Market comparisons, canonical record layers, connector priorities, and staged delivery are documented in [Product landscape](docs/product-landscape.md).
+
 ## Text capture
 
 Medicine and Calories each include a short text-capture field. The server sends
