@@ -1033,6 +1033,7 @@
   "workouts_hevy_issue_invalid_end_time": "The workout end time precedes the start or exceeds 30 days.",
   "workouts_hevy_issue_invalid_number": "A numeric value is invalid or outside its accepted range.",
   "workouts_hevy_issue_invalid_time": "A date or time value is invalid.",
+  "workouts_hevy_issue_inconsistent_workout": "Rows for this workout disagree on a shared value.",
   "workouts_hevy_issue_missing_header": "A required column is missing.",
   "workouts_hevy_issue_missing_set_type": "The empty set type will be stored as Normal.",
   "workouts_hevy_issue_missing_value": "A required value is missing.",

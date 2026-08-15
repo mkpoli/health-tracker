@@ -1033,6 +1033,7 @@
   "workouts_hevy_issue_invalid_end_time": "終了時刻が開始前、または期間が30日超です。",
   "workouts_hevy_issue_invalid_number": "数値が無効、または許容範囲外です。",
   "workouts_hevy_issue_invalid_time": "日付または時刻が無効です。",
+  "workouts_hevy_issue_inconsistent_workout": "同じワークアウトの行で共通項目の値が一致しません。",
   "workouts_hevy_issue_missing_header": "必須列がありません。",
   "workouts_hevy_issue_missing_set_type": "空のセット種別は「通常」として保存します。",
   "workouts_hevy_issue_missing_value": "必須値がありません。",

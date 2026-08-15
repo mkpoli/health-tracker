@@ -1033,6 +1033,7 @@
   "workouts_hevy_issue_invalid_end_time": "训练结束时间早于开始时间，或持续时间超过 30 天。",
   "workouts_hevy_issue_invalid_number": "数值无效或超出允许范围。",
   "workouts_hevy_issue_invalid_time": "日期或时间无效。",
+  "workouts_hevy_issue_inconsistent_workout": "同一训练的各行中，共用字段的值不一致。",
   "workouts_hevy_issue_missing_header": "缺少必需列。",
   "workouts_hevy_issue_missing_set_type": "空的组类型会保存为“普通”。",
   "workouts_hevy_issue_missing_value": "缺少必需值。",

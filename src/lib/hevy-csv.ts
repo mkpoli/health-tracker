@@ -51,6 +51,7 @@ export type HevyCsvIssueCode =
   | 'invalid_number'
   | 'invalid_time'
   | 'invalid_timezone'
+  | 'inconsistent_workout'
   | 'missing_header'
   | 'missing_set_type'
   | 'missing_value'
@@ -542,8 +543,11 @@ function groupRows(rows: ParsedSourceRow[], timeZone: string, issues: HevyCsvIss
       grouped.set(key, { first: row, rows: [row] });
       continue;
     }
-    if (current.first.endLocal !== row.endLocal || current.first.description !== row.description) {
-      issue(issues, 'error', 'invalid_time', row.row, 'start_time');
+    if (current.first.endLocal !== row.endLocal) {
+      issue(issues, 'error', 'invalid_time', row.row, 'end_time');
+    }
+    if (current.first.description !== row.description) {
+      issue(issues, 'error', 'inconsistent_workout', row.row, 'description');
     }
     current.rows.push(row);
   }

@@ -306,6 +306,7 @@
     if (issue.code === 'invalid_end_time') return m.workouts_hevy_issue_invalid_end_time();
     if (issue.code === 'invalid_number') return m.workouts_hevy_issue_invalid_number();
     if (issue.code === 'invalid_time') return m.workouts_hevy_issue_invalid_time();
+    if (issue.code === 'inconsistent_workout') return m.workouts_hevy_issue_inconsistent_workout();
     if (issue.code === 'missing_header') return m.workouts_hevy_issue_missing_header();
     if (issue.code === 'missing_set_type') return m.workouts_hevy_issue_missing_set_type();
     if (issue.code === 'missing_value') return m.workouts_hevy_issue_missing_value();
