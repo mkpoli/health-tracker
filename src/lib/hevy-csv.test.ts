@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HevyCsvError,
   MAX_HEVY_CSV_BYTES,
+  MAX_HEVY_CSV_ROWS,
   parseHevyCsv,
   readHevyCsvFile,
 } from './hevy-csv';
@@ -147,6 +148,62 @@ describe('parseHevyCsv', () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ code: 'duplicate_set_index', row: 3 }),
     );
+  });
+
+  it('points to each shared workout field that disagrees', () => {
+    const csv = [
+      header,
+      'Session,"25 Aug 2025, 09:38","25 Aug 2025, 10:18",First,Squat,,,0,normal,80,5,,,8',
+      'Session,"25 Aug 2025, 09:38","25 Aug 2025, 10:19",Second,Squat,,,1,normal,80,5,,,8',
+    ].join('\n');
+    const result = parseHevyCsv(csv, 'UTC');
+
+    expect(result.canImport).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'invalid_time', row: 3, column: 'end_time' }),
+        expect.objectContaining({ code: 'inconsistent_workout', row: 3, column: 'description' }),
+      ]),
+    );
+  });
+
+  it('blocks a workout whose end precedes its start', () => {
+    const csv = [
+      header,
+      'Session,"25 Aug 2025, 10:18","25 Aug 2025, 09:38",,Squat,,,0,normal,80,5,,,8',
+    ].join('\n');
+    const result = parseHevyCsv(csv, 'UTC');
+
+    expect(result.canImport).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'invalid_end_time', column: 'end_time' }),
+    );
+  });
+
+  it('blocks a workout over the exercise limit', () => {
+    const rows = Array.from(
+      { length: 101 },
+      (_, index) =>
+        `Session,"25 Aug 2025, 09:38","25 Aug 2025, 10:18",,Exercise ${index},,,0,normal,80,5,,,8`,
+    );
+    const result = parseHevyCsv([header, ...rows].join('\n'), 'UTC');
+
+    expect(result.canImport).toBe(false);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'workout_too_large' }));
+  });
+
+  it('rejects input over the row limit', () => {
+    const rows = Array.from(
+      { length: MAX_HEVY_CSV_ROWS + 1 },
+      (_, index) => `Session ${index},"25 Aug 2025, 09:38",Squat,0`,
+    );
+
+    expect(() =>
+      parseHevyCsv(
+        ['title,start_time,exercise_title,set_index', ...rows].join('\n'),
+        'UTC',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'too_many_rows' }));
   });
 
   it('uses the earlier instant for a repeated daylight-saving time', () => {

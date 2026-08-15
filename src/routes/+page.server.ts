@@ -37,7 +37,7 @@ import {
   requireUserId,
 } from '$lib/server/ownership';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
-import { normalizeTimeZone } from '$lib/time-zone';
+import { isValidTimeZone, normalizeTimeZone } from '$lib/time-zone';
 import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
 import { InvalidEnergyInputError, parseEnergyInput, validateEnergyEntry } from '$lib/server/energy';
 import {
@@ -620,12 +620,13 @@ export const actions: Actions = {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const patientId = data.get('patientId')?.toString();
-    const timeZone = data.get('timeZone')?.toString();
+    const submittedTimeZone = data.get('timeZone')?.toString();
     const fileValue = data.get('file');
 
-    if (!patientId || !timeZone || !(fileValue instanceof File)) {
+    if (!patientId || !isValidTimeZone(submittedTimeZone) || !(fileValue instanceof File)) {
       return fail(400, { code: 'hevy_invalid_file' });
     }
+    const timeZone = normalizeTimeZone(submittedTimeZone);
     const ownedPatient = await getOwnedPatient(userId, patientId);
     if (!ownedPatient) return fail(404, { code: 'hevy_patient_not_found' });
 

@@ -271,6 +271,17 @@ describe('importHevyCsvFile', () => {
       JOIN workout_set ON workout_set.workout_claim_id = workout_claim.id
     `);
     expect(updated.rows[0]).toMatchObject({ revision: 2, repetitions: 6 });
+    const setIntegrity = await client.execute(`
+      SELECT
+        count(*) AS total,
+        sum(CASE WHEN workout_exercise.id IS NULL THEN 1 ELSE 0 END) AS orphans
+      FROM workout_set
+      LEFT JOIN workout_exercise
+        ON workout_exercise.id = workout_set.workout_exercise_id
+        AND workout_exercise.workout_claim_id = workout_set.workout_claim_id
+        AND workout_exercise.patient_id = workout_set.patient_id
+    `);
+    expect(setIntegrity.rows[0]).toMatchObject({ total: 1, orphans: 0 });
     const workoutId = String(updated.rows[0]?.id);
     const revisions = await client.execute({
       sql: 'SELECT count(*) AS count FROM claim_revision WHERE claim_id = ?',
@@ -306,5 +317,69 @@ describe('importHevyCsvFile', () => {
       repetitions: 6,
     });
     expect(put).toHaveBeenCalledTimes(4);
+  });
+
+  it('preserves a completed import when a concurrent source upload fails', async () => {
+    const contents = csv(8, 'concurrent').replace(
+      'Session,"25 Aug 2025, 09:38","25 Aug 2025, 10:18"',
+      'Concurrent,"26 Aug 2025, 09:38","26 Aug 2025, 10:18"',
+    );
+    let putCalls = 0;
+    let markSecondStarted: () => void = () => undefined;
+    let releaseSecond: () => void = () => undefined;
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const secondRelease = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const bucket = {
+      head: vi.fn(async () => null),
+      put: vi.fn(async () => {
+        putCalls += 1;
+        if (putCalls === 1) {
+          await secondStarted;
+          return { httpEtag: 'etag-completed' };
+        }
+        markSecondStarted();
+        await secondRelease;
+        throw new Error('source upload failed');
+      }),
+    } as unknown as R2Bucket;
+
+    const imports = [
+      importModule.importHevyCsvFile({
+        patientId: 'patient-1',
+        file: new File([contents], 'concurrent-a.csv', { type: 'text/csv' }),
+        timeZone: 'Asia/Tokyo',
+        bucket,
+      }),
+      importModule.importHevyCsvFile({
+        patientId: 'patient-1',
+        file: new File([contents], 'concurrent-b.csv', { type: 'text/csv' }),
+        timeZone: 'Asia/Tokyo',
+        bucket,
+      }),
+    ];
+    const settled = Promise.allSettled(imports);
+
+    await secondStarted;
+    await Promise.race(imports);
+    releaseSecond();
+
+    const results = await settled;
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const sourceState = await client.execute(`
+      SELECT status, error_code
+      FROM data_import
+      WHERE file_name IN ('concurrent-a.csv', 'concurrent-b.csv')
+    `);
+    expect(sourceState.rows).toHaveLength(1);
+    expect(sourceState.rows[0]).toMatchObject({ status: 'completed', error_code: null });
+    const workoutState = await client.execute(
+      "SELECT count(*) AS count FROM workout_claim WHERE title = 'Concurrent'",
+    );
+    expect(workoutState.rows[0]).toMatchObject({ count: 1 });
   });
 });
