@@ -23,6 +23,7 @@ export interface HealthTrackerExport {
   medicines: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
+  dataImports: unknown[];
   exerciseDefinitions: unknown[];
   workouts: unknown[];
   claimRevisions: unknown[];
@@ -74,7 +75,11 @@ function parseMediaFile(value: unknown): HealthArchiveMediaFile {
   if (!isSafeArchivePath(archivePath)) {
     throw new HealthArchiveError('unsafe_media_path', 'A media path in this archive is unsafe');
   }
-  if (sourceKind !== 'energy-photo' && sourceKind !== 'report-source') {
+  if (
+    sourceKind !== 'energy-photo' &&
+    sourceKind !== 'import-file' &&
+    sourceKind !== 'report-source'
+  ) {
     throw new HealthArchiveError('invalid_format', 'A media source type is invalid');
   }
   if (!sourceId || sourceId.length > 512) {
@@ -164,6 +169,7 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     medicines: arrayOrEmpty(data.medicines),
     energyEntries: arrayOrEmpty(data.energyEntries),
     energySources: arrayOrEmpty(data.energySources),
+    dataImports: arrayOrEmpty(data.dataImports),
     exerciseDefinitions: arrayOrEmpty(data.exerciseDefinitions),
     workouts: arrayOrEmpty(data.workouts),
     claimRevisions: arrayOrEmpty(data.claimRevisions),

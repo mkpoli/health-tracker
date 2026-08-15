@@ -11,6 +11,7 @@ describe('buildPatientExport', () => {
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
+      dataImports: [{ id: 'import-1', provider: 'hevy' }],
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
@@ -18,11 +19,12 @@ describe('buildPatientExport', () => {
 
     expect(payload).toMatchObject({
       format: 'health-tracker-export',
-      version: 6,
+      version: 7,
       patient: { id: 'patient-1' },
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
+      dataImports: [{ id: 'import-1', provider: 'hevy' }],
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
@@ -55,6 +57,14 @@ describe('buildPatientExport', () => {
           mimeType: 'image/jpeg',
         },
       ],
+      dataImports: [
+        {
+          id: 'import-1',
+          sourceUrl: '/api/import-source?id=import-1',
+          fileName: 'hevy.csv',
+          mimeType: 'text/csv',
+        },
+      ],
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
@@ -68,6 +78,10 @@ describe('buildPatientExport', () => {
       expect.objectContaining({
         archivePath: 'media/reports/1-report-1-scan.pdf',
         sourceKind: 'report-source',
+      }),
+      expect.objectContaining({
+        archivePath: 'media/imports/1-import-1-hevy.csv',
+        sourceKind: 'import-file',
       }),
     ]);
   });
@@ -87,6 +101,7 @@ describe('buildPatientExport', () => {
           mimeType: 'image/jpeg',
         },
       ],
+      dataImports: [],
       exerciseDefinitions: [],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
@@ -102,7 +117,7 @@ describe('buildPatientExport', () => {
     expect(Array.from(files['media/calories/1-source-1-meal.jpg'])).toEqual([1, 2, 3]);
     expect(JSON.parse(strFromU8(files['health-data.json']))).toMatchObject({
       format: 'health-tracker-export',
-      version: 6,
+      version: 7,
       energyEntries: [{ id: 'energy-1' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
@@ -124,6 +139,7 @@ describe('buildPatientExport', () => {
       medicines: [],
       energyEntries: [],
       energySources: [{ id: 'source-1', sourceUrl: 'https://other.example/source' }],
+      dataImports: [],
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
@@ -155,6 +171,7 @@ describe('buildPatientExport', () => {
           mimeType: 'image/jpeg',
         },
       ],
+      dataImports: [],
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],

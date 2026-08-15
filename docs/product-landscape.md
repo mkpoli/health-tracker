@@ -176,8 +176,8 @@ Connector credentials stay outside profile archives. Archive manifests retain pr
 | Available | MCP | OAuth-authorized claim and measurement writes | Scoped read tools with revision history | Grants are profile-scoped, revocable, and read-only by default. |
 | Available, partial | Apple Health export | Browser-streamed `export.xml` mapping for selected measurements | Native archive and downstream formats | Expand through typed mappings while listing every unhandled Apple type. |
 | Available | Native exercise records | Manual session and reusable-plan entry | Native archive | Keep provider mappings outside the canonical workout, exercise, and set records. |
-| Next | Hevy CSV | Import exported workouts and measurements with a review summary | Native workout CSV and archive | Support repeated imports, source identity, warnings, and batch rollback. |
-| After CSV | Hevy API | API-key connector with workout-event cursors | User-authorized writes only after read sync is stable | Treat the experimental API as an optional transport and preserve raw responses. |
+| Available | Hevy workout CSV | Reviewed import into native workouts with retained source rows and source file | Versioned native archive | File checksums, time-zone interpretation, derived source identity, conflict protection, and one-file transactions support retries. |
+| Next connector | Hevy API | API-key connector with workout-event cursors | User-authorized writes after read sync is stable | Treat the experimental API as an optional transport and preserve raw responses. |
 | Later | HealthKit bridge | Permissioned iOS reads and anchored queries | Permissioned writes for supported data types | Provide per-type consent, source visibility, and retry-safe background sync. |
 | Later | Health Connect bridge | Android record reads with change tokens | Permissioned writes for supported data types | Respect platform retention and history-access rules; import into the native record. |
 | Later | Clinical records | SMART on FHIR, FHIR bundles, C-CDA, and document upload | FHIR bundle, C-CDA where mapped, PDF summaries | Keep original bundles and documents alongside normalized claims. |
@@ -196,16 +196,17 @@ Each importer should show detected format, profile destination, date range, coun
 ## Delivery sequence
 
 1. Native workout, exercise, set, and workout-plan records with revisions and archive support — available.
-2. Hevy workout CSV import with review, repeated-import identity, and rollback — next.
-3. Medication schedules and dose occurrences with correction history.
-4. Medication inventory transactions and refill projections.
-5. Wider Apple Health XML coverage for workouts, nutrition, sleep, and source metadata.
-6. Generic connector-run, cursor, payload, warning, and tombstone storage.
-7. Native HealthKit and Health Connect bridges.
-8. Provenance-aware meal-photo proposals with component-level review.
-9. FHIR and C-CDA clinical import followed by standards-based export.
-10. Local reminder scheduling, delivery receipts, and missed-reminder recovery.
-11. Evidence-linked summaries and advice with explicit safety review.
+2. Hevy workout CSV import with review, repeat identity, retained source files, and conflict protection — available.
+3. Medicine product catalog with ingredients, presentations, identifiers, jurisdictions, and sourced locale labels.
+4. Treatment courses, effective-dated regimens, scheduled dose occurrences, and administration records with correction history.
+5. Suspected adverse-effect records, adherence calculations, and medication reminders with delivery history.
+6. Medication inventory transactions and refill projections.
+7. Wider Apple Health XML coverage for workouts, nutrition, sleep, and source metadata.
+8. Generic connector-run, cursor, payload, warning, and tombstone storage.
+9. Native HealthKit and Health Connect bridges.
+10. Provenance-aware meal-photo proposals with component-level review.
+11. FHIR and C-CDA clinical import followed by standards-based export.
+12. Evidence-linked summaries and advice with explicit safety review.
 
 Every slice includes schema migration, ownership checks, input limits, archive round trips, import idempotency where relevant, user-visible correction, tests, production backup, deployment, and smoke verification.
 

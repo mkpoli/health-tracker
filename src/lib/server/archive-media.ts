@@ -1,12 +1,17 @@
 import { and, eq } from 'drizzle-orm';
-import { isSafeArchivePath, type ArchiveMediaKind } from '$lib/archive-format';
+import { isSafeArchivePath, sha256Hex, type ArchiveMediaKind } from '$lib/archive-format';
+import { attachmentContentDisposition } from '$lib/content-disposition';
 import { db } from '$lib/server/db';
-import { energyClaim, energySource, report } from '$lib/server/db/schema';
+import { dataImport, energyClaim, energySource, report } from '$lib/server/db/schema';
 import {
   storeEnergyPhoto,
   validateEnergyPhoto,
 } from '$lib/server/energy-source-storage';
-import { resolveArchiveEnergyClaimId, resolveArchiveEntityId } from '$lib/server/archive-import';
+import {
+  resolveArchiveDataImportId,
+  resolveArchiveEnergyClaimId,
+  resolveArchiveEntityId,
+} from '$lib/server/archive-import';
 import { MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
 export interface ArchiveMediaImportMetadata {
@@ -16,6 +21,10 @@ export interface ArchiveMediaImportMetadata {
   energyClaimId?: string;
   originProvider?: string;
   originExternalId?: string;
+  dataImportProvider?: string;
+  dataImportFormat?: string;
+  dataImportContentSha256?: string;
+  dataImportInterpretationKey?: string;
   fileName: string | null;
   mimeType: string | null;
 }
@@ -56,7 +65,11 @@ export function parseArchiveMediaMetadata(value: unknown): ArchiveMediaImportMet
   if (!isSafeArchivePath(archivePath) || !sourceId || sourceId.length > 512) {
     throw new ArchiveMediaError('invalid_metadata');
   }
-  if (sourceKind !== 'energy-photo' && sourceKind !== 'report-source') {
+  if (
+    sourceKind !== 'energy-photo' &&
+    sourceKind !== 'import-file' &&
+    sourceKind !== 'report-source'
+  ) {
     throw new ArchiveMediaError('invalid_metadata');
   }
 
@@ -64,6 +77,24 @@ export function parseArchiveMediaMetadata(value: unknown): ArchiveMediaImportMet
   const originProvider = optionalMetadataText(row.originProvider, 300);
   const originExternalId = optionalMetadataText(row.originExternalId, 1000);
   if (sourceKind === 'energy-photo' && !energyClaimId) {
+    throw new ArchiveMediaError('invalid_metadata');
+  }
+  const dataImportProvider = optionalMetadataText(row.dataImportProvider, 120);
+  const dataImportFormat = optionalMetadataText(row.dataImportFormat, 120);
+  const dataImportContentSha256 = optionalMetadataText(row.dataImportContentSha256, 64);
+  const dataImportInterpretationKey =
+    typeof row.dataImportInterpretationKey === 'string' &&
+    row.dataImportInterpretationKey.length <= 500
+      ? row.dataImportInterpretationKey
+      : null;
+  if (
+    sourceKind === 'import-file' &&
+    (!dataImportProvider ||
+      !dataImportFormat ||
+      !dataImportContentSha256 ||
+      !/^[a-f0-9]{64}$/i.test(dataImportContentSha256) ||
+      dataImportInterpretationKey === null)
+  ) {
     throw new ArchiveMediaError('invalid_metadata');
   }
 
@@ -74,6 +105,12 @@ export function parseArchiveMediaMetadata(value: unknown): ArchiveMediaImportMet
     ...(energyClaimId ? { energyClaimId } : {}),
     ...(originProvider ? { originProvider } : {}),
     ...(originExternalId ? { originExternalId } : {}),
+    ...(dataImportProvider ? { dataImportProvider } : {}),
+    ...(dataImportFormat ? { dataImportFormat } : {}),
+    ...(dataImportContentSha256
+      ? { dataImportContentSha256: dataImportContentSha256.toLowerCase() }
+      : {}),
+    ...(dataImportInterpretationKey !== null ? { dataImportInterpretationKey } : {}),
     fileName: optionalMetadataText(row.fileName, 300),
     mimeType: optionalMetadataText(row.mimeType, 200),
   };
@@ -150,6 +187,46 @@ export async function restoreArchiveMedia(input: {
       .where(and(eq(report.id, reportId), eq(report.patientId, input.patientId)));
 
     return { sourceKind: input.metadata.sourceKind, id: reportId };
+  }
+
+  if (input.metadata.sourceKind === 'import-file') {
+    const id = await resolveArchiveDataImportId({
+      patientId: input.patientId,
+      sourcePatientId: input.sourcePatientId,
+      sourceId: input.metadata.sourceId,
+      provider: input.metadata.dataImportProvider!,
+      format: input.metadata.dataImportFormat!,
+      contentSha256: input.metadata.dataImportContentSha256!,
+      interpretationKey: input.metadata.dataImportInterpretationKey!,
+    });
+    const rows = await db
+      .select()
+      .from(dataImport)
+      .where(and(eq(dataImport.id, id), eq(dataImport.patientId, input.patientId)))
+      .limit(1);
+    const target = rows[0];
+    if (!target) throw new ArchiveMediaError('invalid_metadata');
+    if (target.byteSize !== input.file.size) throw new ArchiveMediaError('invalid_file');
+    if (await input.bucket.head(target.storageKey)) {
+      return { sourceKind: input.metadata.sourceKind, id };
+    }
+
+    const bytes = new Uint8Array(await input.file.arrayBuffer());
+    if ((await sha256Hex(bytes)) !== target.contentSha256) {
+      throw new ArchiveMediaError('invalid_file');
+    }
+    const object = await input.bucket.put(target.storageKey, bytes, {
+      httpMetadata: {
+        contentType: target.mimeType,
+        contentDisposition: attachmentContentDisposition(target.fileName || 'import-source'),
+      },
+      customMetadata: { sha256: target.contentSha256 },
+    });
+    await db
+      .update(dataImport)
+      .set({ objectEtag: object.httpEtag || null })
+      .where(and(eq(dataImport.id, id), eq(dataImport.patientId, input.patientId)));
+    return { sourceKind: input.metadata.sourceKind, id };
   }
 
   const energyClaimId = await resolveArchiveEnergyClaimId({

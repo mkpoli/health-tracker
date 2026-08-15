@@ -1,5 +1,6 @@
 import { db } from '$lib/server/db';
 import {
+  dataImport,
   energyClaim,
   energySource,
   medicineClaim,
@@ -91,6 +92,16 @@ export async function getOwnedEnergySource(userId: string, sourceId: string) {
 
   const ownedClaim = await getOwnedEnergyClaim(userId, currentSource.energyClaimId);
   return ownedClaim?.patientId === currentSource.patientId ? currentSource : null;
+}
+
+export async function getOwnedDataImport(userId: string, importId: string) {
+  const rows = await db.select().from(dataImport).where(eq(dataImport.id, importId));
+  const currentImport = rows[0];
+
+  if (!currentImport) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentImport.patientId);
+  return ownedPatient ? currentImport : null;
 }
 
 export async function getOwnedWorkoutClaim(userId: string, workoutId: string) {

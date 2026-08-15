@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db';
 import {
   claimRevision,
+  dataImport,
   energyClaim,
   energySource,
   exerciseDefinition,
@@ -73,6 +74,12 @@ import {
   updateWorkoutClaim,
 } from '$lib/server/workout-mutations';
 import { CURRENT_HEALTH_ARCHIVE_VERSION } from '$lib/archive-format';
+import { normalizeDataImport } from '$lib/server/data-imports';
+import {
+  HevyImportError,
+  hevyCsvErrorCode,
+  importHevyCsvFile,
+} from '$lib/server/hevy-import';
 import {
   ArchiveImportError,
   importArchiveBatch as saveArchiveBatch,
@@ -132,6 +139,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       medicines: [],
       energyEntries: [],
       energySources: [],
+      dataImports: [],
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
@@ -153,6 +161,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
   let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
   let energySourcesList: typeof energySource.$inferSelect[] = [];
+  let dataImportsList: typeof dataImport.$inferSelect[] = [];
   let exerciseDefinitionsList: typeof exerciseDefinition.$inferSelect[] = [];
   let workoutClaimsList: typeof workoutClaim.$inferSelect[] = [];
   let workoutExercisesList: typeof workoutExercise.$inferSelect[] = [];
@@ -169,6 +178,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       medicinesList,
       energyEntriesList,
       energySourcesList,
+      dataImportsList,
       exerciseDefinitionsList,
       workoutClaimsList,
       workoutExercisesList,
@@ -200,6 +210,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(energySource)
         .where(eq(energySource.patientId, currentPatient.id))
         .orderBy(desc(energySource.createdAt)),
+      db
+        .select()
+        .from(dataImport)
+        .where(eq(dataImport.patientId, currentPatient.id))
+        .orderBy(desc(dataImport.createdAt)),
       db
         .select()
         .from(exerciseDefinition)
@@ -248,6 +263,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     medicines: medicinesList.map(normalizeMedicineClaim),
     energyEntries: energyEntriesList.map(normalizeEnergyClaim),
     energySources: energySourcesList.map(toEnergySourceRecord),
+    dataImports: dataImportsList.map(normalizeDataImport),
     exerciseDefinitions: exerciseDefinitionsList.map(normalizeExerciseDefinition),
     workouts: buildWorkoutRecords(workoutClaimsList, workoutExercisesList, workoutSetsList),
     claimRevisions,
@@ -600,6 +616,49 @@ export const actions: Actions = {
     return { success: true };
   },
 
+  importHevyCsv: async ({ request, locals, platform }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const timeZone = data.get('timeZone')?.toString();
+    const fileValue = data.get('file');
+
+    if (!patientId || !timeZone || !(fileValue instanceof File)) {
+      return fail(400, { code: 'hevy_invalid_file' });
+    }
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'hevy_patient_not_found' });
+
+    try {
+      const imported = await importHevyCsvFile({
+        patientId: ownedPatient.id,
+        file: fileValue,
+        timeZone,
+        bucket: platform?.env.REPORT_SOURCES,
+      });
+      return { success: true, hevyImport: imported };
+    } catch (error) {
+      const code = hevyCsvErrorCode(error);
+      if (!code) throw error;
+      const status = code === 'file_too_large'
+        ? 413
+        : code === 'source_storage_unavailable'
+          ? 503
+          : code === 'stale_workout'
+            ? 409
+            : code === 'import_failed' || code === 'source_store_failed'
+              ? 500
+              : 400;
+      const preview = error instanceof HevyImportError ? error.preview : null;
+      return fail(status, {
+        code: `hevy_${code}`,
+        ...(preview
+          ? { summary: preview.summary, issues: preview.issues.slice(0, 100) }
+          : {}),
+      });
+    }
+  },
+
   addManualRecord: async ({ request, locals }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
@@ -803,15 +862,20 @@ export const actions: Actions = {
 
     if (!current) return fail(404, { error: 'Patient not found' });
 
-    const [energySourceKeys, reportSources] = await Promise.all([
+    const [energySourceKeys, importSourceKeys, reportSources] = await Promise.all([
       db
         .select({ storageKey: energySource.storageKey })
         .from(energySource)
         .where(eq(energySource.patientId, id)),
+      db
+        .select({ storageKey: dataImport.storageKey })
+        .from(dataImport)
+        .where(eq(dataImport.patientId, id)),
       db.select({ rawData: report.rawData }).from(report).where(eq(report.patientId, id)),
     ]);
     const storageKeys = [
       ...energySourceKeys.map(({ storageKey }) => storageKey),
+      ...importSourceKeys.map(({ storageKey }) => storageKey),
       ...reportSources
         .map(({ rawData }) => storedReportSourceKey(rawData, id))
         .filter((key): key is string => Boolean(key)),

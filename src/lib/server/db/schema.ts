@@ -156,6 +156,47 @@ export const energySource = sqliteTable(
 	]
 );
 
+export const dataImport = sqliteTable(
+	'data_import',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		provider: text('provider').notNull(),
+		format: text('format').notNull(),
+		status: text('status').notNull().default('pending'),
+		fileName: text('file_name'),
+		mimeType: text('mime_type').notNull(),
+		byteSize: integer('byte_size').notNull(),
+		contentSha256: text('content_sha256').notNull(),
+		interpretationKey: text('interpretation_key').notNull().default(''),
+		storageKey: text('storage_key').notNull().unique(),
+		objectEtag: text('object_etag'),
+		timezone: text('timezone'),
+		summaryData: text('summary_data', { mode: 'json' }).$type<unknown>(),
+		errorCode: text('error_code'),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check('data_import_status_check', sql`${table.status} in ('pending', 'completed', 'failed')`),
+		uniqueIndex('data_import_source_idx').on(
+			table.patientId,
+			table.provider,
+			table.format,
+			table.contentSha256,
+			table.interpretationKey
+		),
+		index('data_import_patient_idx').on(table.patientId),
+		index('data_import_patient_created_idx').on(table.patientId, table.createdAt)
+	]
+);
+
 export const exerciseDefinition = sqliteTable(
 	'exercise_definition',
 	{
@@ -361,6 +402,7 @@ export const patientRelations = relations(patient, ({ many }) => ({
 	medicineClaims: many(medicineClaim),
 	energyClaims: many(energyClaim),
 	energySources: many(energySource),
+	dataImports: many(dataImport),
 	exerciseDefinitions: many(exerciseDefinition),
 	workoutClaims: many(workoutClaim),
 	workoutExercises: many(workoutExercise),
@@ -410,6 +452,13 @@ export const energySourceRelations = relations(energySource, ({ one }) => ({
 	energyClaim: one(energyClaim, {
 		fields: [energySource.energyClaimId],
 		references: [energyClaim.id]
+	})
+}));
+
+export const dataImportRelations = relations(dataImport, ({ one }) => ({
+	patient: one(patient, {
+		fields: [dataImport.patientId],
+		references: [patient.id]
 	})
 }));
 

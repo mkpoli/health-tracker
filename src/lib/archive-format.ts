@@ -1,6 +1,6 @@
-export const CURRENT_HEALTH_ARCHIVE_VERSION = 6;
+export const CURRENT_HEALTH_ARCHIVE_VERSION = 7;
 
-export type ArchiveMediaKind = 'energy-photo' | 'report-source';
+export type ArchiveMediaKind = 'energy-photo' | 'import-file' | 'report-source';
 
 export interface HealthArchiveMediaFile {
   archivePath: string;

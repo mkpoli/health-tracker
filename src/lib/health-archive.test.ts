@@ -19,6 +19,7 @@ function baseExport(overrides: Record<string, unknown> = {}) {
     medicines: [],
     energyEntries: [],
     energySources: [],
+    dataImports: [],
     exerciseDefinitions: [],
     workouts: [],
     claimRevisions: [],
@@ -42,6 +43,7 @@ describe('health archive', () => {
       medicines: [],
       energyEntries: [],
       energySources: [],
+      dataImports: [],
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
@@ -129,6 +131,30 @@ describe('health archive', () => {
     const read = await readHealthArchiveFile(file);
     expect(read.kind).toBe('json');
     expect(read.missingMediaPaths).toEqual([archivePath]);
+  });
+
+  it('accepts a retained import file in version 7', () => {
+    expect(
+      parseHealthTrackerExport(
+        baseExport({
+          version: 7,
+          dataImports: [{ id: 'import-1', provider: 'hevy' }],
+          mediaFiles: [
+            {
+              archivePath: 'media/imports/import-1-hevy.csv',
+              sourceKind: 'import-file',
+              sourceId: 'import-1',
+              fileName: 'hevy.csv',
+              mimeType: 'text/csv',
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      version: 7,
+      dataImports: [{ id: 'import-1', provider: 'hevy' }],
+      mediaFiles: [{ sourceKind: 'import-file', sourceId: 'import-1' }],
+    });
   });
 
   it('rejects media whose checksum differs from the manifest', async () => {
