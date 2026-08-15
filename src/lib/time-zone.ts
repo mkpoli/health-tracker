@@ -222,6 +222,24 @@ export function timeZoneLabel(
   return pieces.join(' · ');
 }
 
+export function timeZoneAbbreviation(
+  timeZone: string,
+  value: string | Date = new Date(),
+) {
+  const zone = normalizeTimeZone(timeZone);
+  const instant = value instanceof Date ? value : new Date(value);
+  const validInstant = Number.isNaN(instant.getTime()) ? new Date() : instant;
+
+  return (
+    new Intl.DateTimeFormat('ja', {
+      timeZone: zone,
+      timeZoneName: 'short',
+    })
+      .formatToParts(validInstant)
+      .find((part) => part.type === 'timeZoneName')?.value || utcOffsetLabel(validInstant, zone)
+  );
+}
+
 export function supportedTimeZones() {
   const zones =
     typeof Intl.supportedValuesOf === 'function'

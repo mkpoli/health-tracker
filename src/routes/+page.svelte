@@ -32,6 +32,7 @@
   import { bodyDomain, vitalDomain, type MeasurementDomain } from '$lib/metrics/measurement-domains';
   import {
     timeZoneFromMetadata,
+    timeZoneAbbreviation,
     timeZoneLabel,
     toDateTimeLocal,
   } from '$lib/time-zone';
@@ -456,6 +457,10 @@
     return timeZoneLabel(getReportTimeZone(report), report.testDate, currentLocale);
   }
 
+  function getReportTimeZoneAbbreviation(report: (typeof data.reports)[number]) {
+    return timeZoneAbbreviation(getReportTimeZone(report), report.testDate);
+  }
+
   function reportHasStoredTimeZone(report: (typeof data.reports)[number]) {
     const extraData = parseJsonLike(report.extraData);
     return typeof extraData?.timeZone === 'string';
@@ -489,12 +494,7 @@
 
     if (title) return title;
 
-    const facility = getReportFacility(report) || m.report_fallback();
-    return `${facility} ${formatDate(
-      report.testDate,
-      { dateStyle: 'medium' },
-      getReportTimeZone(report),
-    )}`;
+    return getReportFacility(report) || m.report_fallback();
   }
 
   // Download the full dataset for the current patient (profile + every report +
@@ -2768,14 +2768,14 @@
                                       getReportDateOptions(group.report),
                                       getReportTimeZone(group.report),
                                     )}
-                                    · {getReportTimeZoneLabel(group.report)}
+                                    {getReportTimeZoneAbbreviation(group.report)}
                                     · {getRecordCountLabel(group.records.length)}
                                   </p>
                                   {#if !reportHasStoredTimeZone(group.report)}
                                     <p class="mt-1 text-xs text-amber-700">{m.legacy_time_zone_hint()}</p>
                                   {/if}
                                 </div>
-                                {#if group.facilityName}
+                                {#if group.facilityName && group.facilityName !== group.title}
                                   <span
                                     class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
                                   >
