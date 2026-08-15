@@ -647,6 +647,14 @@ async function savePreparedWorkouts(options: {
     }
     for (const values of chunks(updateIds, SELECT_CHUNK)) {
       await tx
+        .delete(workoutSet)
+        .where(
+          and(
+            eq(workoutSet.patientId, options.patientId),
+            inArray(workoutSet.workoutClaimId, values),
+          ),
+        );
+      await tx
         .delete(workoutExercise)
         .where(
           and(
@@ -865,6 +873,9 @@ export async function importHevyCsvFile(options: {
     fileSha256,
     timeZone: options.timeZone,
   });
+  const expectedStorageStatuses = source.status === 'completed'
+    ? ['completed']
+    : ['pending', 'failed'];
   try {
     const existingObject = await options.bucket.head(source.storageKey);
     const object = existingObject || await options.bucket.put(source.storageKey, bytes, {
@@ -882,7 +893,13 @@ export async function importHevyCsvFile(options: {
         errorCode: null,
         updatedAt: new Date().toISOString(),
       })
-      .where(and(eq(dataImport.id, source.id), eq(dataImport.patientId, options.patientId)));
+      .where(
+        and(
+          eq(dataImport.id, source.id),
+          eq(dataImport.patientId, options.patientId),
+          inArray(dataImport.status, expectedStorageStatuses),
+        ),
+      );
   } catch {
     await db
       .update(dataImport)
@@ -891,7 +908,13 @@ export async function importHevyCsvFile(options: {
         errorCode: 'source_store_failed',
         updatedAt: new Date().toISOString(),
       })
-      .where(and(eq(dataImport.id, source.id), eq(dataImport.patientId, options.patientId)));
+      .where(
+        and(
+          eq(dataImport.id, source.id),
+          eq(dataImport.patientId, options.patientId),
+          inArray(dataImport.status, expectedStorageStatuses),
+        ),
+      );
     throw new HevyImportError('source_store_failed');
   }
 
@@ -933,7 +956,13 @@ export async function importHevyCsvFile(options: {
     await db
       .update(dataImport)
       .set({ status: 'failed', errorCode: code, updatedAt: new Date().toISOString() })
-      .where(and(eq(dataImport.id, source.id), eq(dataImport.patientId, options.patientId)));
+      .where(
+        and(
+          eq(dataImport.id, source.id),
+          eq(dataImport.patientId, options.patientId),
+          eq(dataImport.status, 'pending'),
+        ),
+      );
     if (error instanceof HevyImportError) throw error;
     throw new HevyImportError('import_failed');
   }
