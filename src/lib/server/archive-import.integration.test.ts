@@ -3,6 +3,7 @@ import { createClient, type Client } from '@libsql/client';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlink } from 'node:fs/promises';
+import { sha256Hex } from '$lib/archive-format';
 
 const databasePath = join(tmpdir(), `health-tracker-archive-import-${crypto.randomUUID()}.db`);
 const databaseUrl = `file:${databasePath}`;
@@ -210,6 +211,26 @@ beforeAll(async () => {
       object_etag TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE data_import (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      format TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed')),
+      file_name TEXT,
+      mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      content_sha256 TEXT NOT NULL,
+      interpretation_key TEXT NOT NULL DEFAULT '',
+      storage_key TEXT NOT NULL UNIQUE,
+      object_etag TEXT,
+      timezone TEXT,
+      summary_data TEXT,
+      error_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(patient_id, provider, format, content_sha256, interpretation_key)
+    );
     INSERT INTO patient (id, owner_user_id, name)
       VALUES ('destination-patient', 'owner-1', 'Destination');
     INSERT INTO energy_claim (
@@ -414,6 +435,8 @@ const workoutFirst = {
 
 describe('archive import storage', () => {
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
+    const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
+    const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));
     const batches = [
       {
         kind: 'profile' as const,
@@ -461,6 +484,27 @@ describe('archive import storage', () => {
       },
       { kind: 'medicines' as const, items: [medicineCurrent] },
       { kind: 'energy' as const, items: [energyCurrent] },
+      {
+        kind: 'dataImports' as const,
+        items: [
+          {
+            id: 'source-data-import',
+            provider: 'hevy',
+            format: 'hevy-csv-v1',
+            status: 'completed',
+            fileName: 'hevy.csv',
+            mimeType: 'text/csv',
+            byteSize: importFile.size,
+            contentSha256: importFileSha256,
+            interpretationKey: 'timezone:Asia/Tokyo',
+            timezone: 'Asia/Tokyo',
+            summaryData: { schema: 'hevy-csv-import-summary/v1' },
+            errorCode: null,
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        ],
+      },
       { kind: 'exerciseDefinitions' as const, items: [exerciseDefinitionCurrent] },
       { kind: 'workouts' as const, items: [workoutPlan, workoutCurrent] },
       {
@@ -535,6 +579,7 @@ describe('archive import storage', () => {
         (SELECT count(*) FROM record) AS records,
         (SELECT count(*) FROM medicine_claim) AS medicines,
         (SELECT count(*) FROM energy_claim) AS energy,
+        (SELECT count(*) FROM data_import) AS data_imports,
         (SELECT count(*) FROM exercise_definition) AS exercise_definitions,
         (SELECT count(*) FROM workout_claim) AS workouts,
         (SELECT count(*) FROM workout_exercise) AS workout_exercises,
@@ -546,6 +591,7 @@ describe('archive import storage', () => {
       records: 1,
       medicines: 1,
       energy: 1,
+      data_imports: 1,
       exercise_definitions: 1,
       workouts: 2,
       workout_exercises: 2,
@@ -729,10 +775,36 @@ describe('archive import storage', () => {
     };
     await archiveMediaModule.restoreArchiveMedia(energyMedia);
     await archiveMediaModule.restoreArchiveMedia(energyMedia);
+    const importMedia = {
+      patientId: 'destination-patient',
+      sourcePatientId: 'source-patient',
+      metadata: {
+        archivePath: 'media/imports/source-data-import-hevy.csv',
+        sourceKind: 'import-file' as const,
+        sourceId: 'source-data-import',
+        dataImportProvider: 'hevy',
+        dataImportFormat: 'hevy-csv-v1',
+        dataImportContentSha256: importFileSha256,
+        dataImportInterpretationKey: 'timezone:Asia/Tokyo',
+        fileName: 'hevy.csv',
+        mimeType: 'text/csv',
+      },
+      file: importFile,
+      bucket,
+    };
+    await expect(
+      archiveMediaModule.restoreArchiveMedia({
+        ...importMedia,
+        file: new File(['evil-source'], 'hevy.csv', { type: 'text/csv' }),
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_file' });
+    await archiveMediaModule.restoreArchiveMedia(importMedia);
+    await archiveMediaModule.restoreArchiveMedia(importMedia);
 
     const mediaState = await client.execute(`
       SELECT
         (SELECT count(*) FROM energy_source) AS energy_sources,
+        (SELECT object_etag FROM data_import LIMIT 1) AS import_etag,
         (SELECT raw_data FROM report LIMIT 1) AS report_source
     `);
     expect(mediaState.rows[0]?.energy_sources).toBe(1);
@@ -741,7 +813,8 @@ describe('archive import storage', () => {
       mimeType: 'application/pdf',
       fileName: 'scan.pdf',
     });
-    expect(put).toHaveBeenCalledTimes(2);
+    expect(mediaState.rows[0]?.import_etag).toBeTruthy();
+    expect(put).toHaveBeenCalledTimes(3);
     expect(
       put.mock.calls.every(([key]) => String(key).includes('destination-patient')),
     ).toBe(true);

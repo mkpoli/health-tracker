@@ -530,6 +530,7 @@
           medicines: data.medicines,
           energyEntries: data.energyEntries,
           energySources: data.energySources,
+          dataImports: data.dataImports,
           exerciseDefinitions: data.exerciseDefinitions,
           workouts: data.workouts,
           claimRevisions: data.claimRevisions,
@@ -1740,6 +1741,7 @@
         medicines={data.medicines}
         energyEntries={data.energyEntries}
         energySources={data.energySources}
+        dataImports={data.dataImports}
         exerciseDefinitions={data.exerciseDefinitions}
         workouts={data.workouts}
         claimRevisions={data.claimRevisions}
@@ -2900,6 +2902,7 @@
               {patientTimeZone}
               workouts={data.workouts}
               exerciseDefinitions={data.exerciseDefinitions}
+              dataImports={data.dataImports}
               revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'workout')}
             />
             <CaloriePanel

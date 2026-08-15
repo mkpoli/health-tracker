@@ -78,6 +78,7 @@
           healthArchive.data.records.length +
           healthArchive.data.medicines.length +
           healthArchive.data.energyEntries.length +
+          healthArchive.data.dataImports.length +
           healthArchive.data.exerciseDefinitions.length +
           healthArchive.data.workouts.length +
           healthArchive.data.claimRevisions.length
@@ -117,6 +118,39 @@
       }
     }
 
+    return byId;
+  });
+
+  const archiveDataImports = $derived.by(() => {
+    const byId = new Map<
+      string,
+      {
+        dataImportProvider: string;
+        dataImportFormat: string;
+        dataImportContentSha256: string;
+        dataImportInterpretationKey: string;
+      }
+    >();
+    if (!healthArchive) return byId;
+
+    for (const value of healthArchive.data.dataImports) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const source = value as Record<string, unknown>;
+      if (
+        typeof source.id === 'string' &&
+        typeof source.provider === 'string' &&
+        typeof source.format === 'string' &&
+        typeof source.contentSha256 === 'string' &&
+        typeof source.interpretationKey === 'string'
+      ) {
+        byId.set(source.id, {
+          dataImportProvider: source.provider,
+          dataImportFormat: source.format,
+          dataImportContentSha256: source.contentSha256,
+          dataImportInterpretationKey: source.interpretationKey,
+        });
+      }
+    }
     return byId;
   });
 
@@ -235,6 +269,7 @@
       | 'records'
       | 'medicines'
       | 'energy'
+      | 'dataImports'
       | 'exerciseDefinitions'
       | 'workouts'
       | 'revisions';
@@ -254,6 +289,7 @@
     add('records', healthArchive.data.records, 200);
     add('medicines', healthArchive.data.medicines, 100);
     add('energy', healthArchive.data.energyEntries, 100);
+    add('dataImports', healthArchive.data.dataImports, 100);
     add('exerciseDefinitions', healthArchive.data.exerciseDefinitions, 20);
     add(
       'workouts',
@@ -276,6 +312,10 @@
     energyClaimId?: string;
     originProvider?: string;
     originExternalId?: string;
+    dataImportProvider?: string;
+    dataImportFormat?: string;
+    dataImportContentSha256?: string;
+    dataImportInterpretationKey?: string;
   };
 
   function mediaWithSourceLinks() {
@@ -284,6 +324,10 @@
     return healthArchive.data.mediaFiles.flatMap((media) => {
       if (!healthArchive?.availableMediaPaths.has(media.archivePath)) return [];
       if (media.sourceKind === 'report-source') return [media];
+      if (media.sourceKind === 'import-file') {
+        const source = archiveDataImports.get(media.sourceId);
+        return source ? [{ ...media, ...source }] : [];
+      }
 
       const source = archiveEnergySources.get(media.sourceId);
       return source ? [{ ...media, energyClaimId: source.energyClaimId }] : [];
@@ -340,9 +384,11 @@
       healthArchive.missingMediaPaths.length +
       healthArchive.data.mediaFiles.filter(
         (media) =>
-          media.sourceKind === 'energy-photo' &&
+          (media.sourceKind === 'energy-photo' || media.sourceKind === 'import-file') &&
           healthArchive?.availableMediaPaths.has(media.archivePath) &&
-          !archiveEnergySources.has(media.sourceId),
+          (media.sourceKind === 'energy-photo'
+            ? !archiveEnergySources.has(media.sourceId)
+            : !archiveDataImports.has(media.sourceId)),
       ).length;
     const totalSteps = Math.max(1, batches.length + linkedMedia.length);
     let completedSteps = 0;
@@ -558,6 +604,10 @@
             <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
               <p class="text-xs font-medium text-violet-700">{m.workouts_title()}</p>
               <p class="mt-1 text-2xl font-semibold text-violet-950">{healthArchive.data.workouts.length}</p>
+            </div>
+            <div class="rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+              <p class="text-xs font-medium text-sky-700">{m.import_archive_imports()}</p>
+              <p class="mt-1 text-2xl font-semibold text-sky-950">{healthArchive.data.dataImports.length}</p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-3">
               <p class="text-xs font-medium text-slate-500">{m.import_archive_versions()}</p>

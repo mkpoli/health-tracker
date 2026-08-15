@@ -5,9 +5,20 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { changedClaimFields, type WorkoutClaimRevisionRecord } from '$lib/claim-revision';
+  import type { DataImportRecord } from '$lib/data-import';
+  import {
+    HevyCsvError,
+    MAX_HEVY_CSV_BYTES,
+    parseHevyCsv,
+    readHevyCsvFile,
+    type HevyCsvIssue,
+    type HevyCsvParseResult,
+  } from '$lib/hevy-csv';
   import {
     normalizeTimeZone,
     resolveZonedDateTime,
+    supportedTimeZones,
+    timeZoneLabel,
     toDateTimeLocal,
     utcOffsetMinutesAt,
   } from '$lib/time-zone';
@@ -29,12 +40,14 @@
     patientTimeZone,
     workouts = [],
     exerciseDefinitions = [],
+    dataImports = [],
     revisions = [],
   }: {
     patientId: string;
     patientTimeZone: string;
     workouts: WorkoutRecord[];
     exerciseDefinitions: ExerciseDefinitionRecord[];
+    dataImports: DataImportRecord[];
     revisions: WorkoutClaimRevisionRecord[];
   } = $props();
 
@@ -88,9 +101,26 @@
   let saveError = $state('');
   let deleteError = $state('');
   let draft = $state<WorkoutDraft>(newDraft('session'));
+  let importerOpen = $state(false);
+  let importFile = $state<File | null>(null);
+  let importPreview = $state<HevyCsvParseResult | null>(null);
+  let importPreviewing = $state(false);
+  let importSaving = $state(false);
+  let importError = $state('');
+  let importComplete = $state<{
+    created: number;
+    updated: number;
+    unchanged: number;
+    conflicts: number;
+    repeated: boolean;
+  } | null>(null);
+  let importTimeZone = $state('UTC');
+  let importPreviewRequest = 0;
 
   const plans = $derived(workouts.filter((workout) => workout.kind === 'plan'));
   const sessions = $derived(workouts.filter((workout) => workout.kind === 'session'));
+  const hevyImports = $derived(dataImports.filter((item) => item.provider === 'hevy'));
+  const timeZones = supportedTimeZones();
   const plansById = $derived(new Map(plans.map((plan) => [plan.id, plan])));
   const revisionsByWorkout = $derived.by(() => {
     const grouped = new Map<string, WorkoutClaimRevisionRecord[]>();
@@ -243,6 +273,140 @@
     if (saving) return;
     editorOpen = false;
     saveError = '';
+  }
+
+  function openImporter() {
+    importFile = null;
+    importPreview = null;
+    importPreviewing = false;
+    importSaving = false;
+    importError = '';
+    importComplete = null;
+    importTimeZone = normalizeTimeZone(patientTimeZone);
+    importerOpen = true;
+  }
+
+  function closeImporter() {
+    if (importSaving) return;
+    importPreviewRequest += 1;
+    importerOpen = false;
+    importFile = null;
+    importPreview = null;
+    importError = '';
+    importComplete = null;
+  }
+
+  function hevyIssueLabel(issue: HevyCsvIssue) {
+    if (issue.code === 'ambiguous_time') return m.workouts_hevy_issue_ambiguous_time();
+    if (issue.code === 'column_count') return m.workouts_hevy_issue_column_count();
+    if (issue.code === 'conflicting_units') return m.workouts_hevy_issue_conflicting_units();
+    if (issue.code === 'duplicate_header') return m.workouts_hevy_issue_duplicate_header();
+    if (issue.code === 'duplicate_set_index') return m.workouts_hevy_issue_duplicate_set_index();
+    if (issue.code === 'field_too_long') return m.workouts_hevy_issue_field_too_long();
+    if (issue.code === 'invalid_end_time') return m.workouts_hevy_issue_invalid_end_time();
+    if (issue.code === 'invalid_number') return m.workouts_hevy_issue_invalid_number();
+    if (issue.code === 'invalid_time') return m.workouts_hevy_issue_invalid_time();
+    if (issue.code === 'missing_header') return m.workouts_hevy_issue_missing_header();
+    if (issue.code === 'missing_set_type') return m.workouts_hevy_issue_missing_set_type();
+    if (issue.code === 'missing_value') return m.workouts_hevy_issue_missing_value();
+    if (issue.code === 'unknown_set_type') return m.workouts_hevy_issue_unknown_set_type();
+    if (issue.code === 'workout_too_large') return m.workouts_hevy_issue_workout_too_large();
+    return m.workouts_hevy_invalid_file();
+  }
+
+  function hevyErrorLabel(error: unknown) {
+    if (error instanceof HevyCsvError && error.code === 'file_too_large') {
+      return m.workouts_hevy_file_too_large({ megabytes: MAX_HEVY_CSV_BYTES / 1024 / 1024 });
+    }
+    if (error instanceof HevyCsvError && error.code === 'invalid_encoding') {
+      return m.workouts_hevy_invalid_encoding();
+    }
+    return m.workouts_hevy_invalid_file();
+  }
+
+  async function previewHevyFile(file: File | null) {
+    const request = ++importPreviewRequest;
+    const timeZone = importTimeZone;
+    importFile = file;
+    importPreview = null;
+    importComplete = null;
+    importError = '';
+    if (!file) return;
+
+    importPreviewing = true;
+    try {
+      const { text } = await readHevyCsvFile(file);
+      const preview = parseHevyCsv(text, timeZone);
+      if (request === importPreviewRequest) importPreview = preview;
+    } catch (error) {
+      if (request === importPreviewRequest) importError = hevyErrorLabel(error);
+    } finally {
+      if (request === importPreviewRequest) importPreviewing = false;
+    }
+  }
+
+  async function refreshHevyPreview() {
+    const file = importFile;
+    if (file) await previewHevyFile(file);
+  }
+
+  const submitHevyImport: SubmitFunction = () => {
+    importSaving = true;
+    importError = '';
+    importComplete = null;
+
+    return async ({ result, update }) => {
+      if (result.type === 'success') {
+        const payload = result.data as {
+          hevyImport?: {
+            repeated?: boolean;
+            summary?: { result?: Partial<{
+              created: number;
+              updated: number;
+              unchanged: number;
+              conflicts: number;
+            }> };
+          };
+        };
+        const counts = payload.hevyImport?.summary?.result;
+        importComplete = {
+          created: counts?.created || 0,
+          updated: counts?.updated || 0,
+          unchanged: counts?.unchanged || 0,
+          conflicts: counts?.conflicts || 0,
+          repeated: Boolean(payload.hevyImport?.repeated),
+        };
+        await update({ reset: false, invalidateAll: true });
+      } else {
+        importError = result.type === 'failure' && result.status === 503
+          ? m.workouts_hevy_storage_unavailable()
+          : m.workouts_hevy_import_failed();
+      }
+      importSaving = false;
+    };
+  };
+
+  function sourceSummary(source: DataImportRecord) {
+    if (!source.summaryData || typeof source.summaryData !== 'object') return null;
+    const result = (source.summaryData as { result?: unknown }).result;
+    if (!result || typeof result !== 'object') return null;
+    const values = result as Record<string, unknown>;
+    const number = (key: string) => typeof values[key] === 'number' ? values[key] as number : 0;
+    return {
+      created: number('created'),
+      updated: number('updated'),
+      conflicts: number('conflicts'),
+    };
+  }
+
+  function formatImportTime(value: string) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat(getLocale(), {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: normalizeTimeZone(patientTimeZone),
+    }).format(parsed);
   }
 
   function addExercise() {
@@ -459,6 +623,7 @@
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && editorOpen) closeEditor();
+    if (event.key === 'Escape' && importerOpen) closeImporter();
   }
 </script>
 
@@ -479,6 +644,9 @@
         </div>
       </div>
       <div class="grid grid-cols-2 gap-2 sm:flex">
+        <button type="button" onclick={openImporter} class="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 sm:order-last sm:col-span-1">
+          {m.workouts_hevy_import()}
+        </button>
         <button type="button" onclick={() => openCreate('session')} class="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2">
           <span class="text-base leading-none">+</span>{m.workouts_record()}
         </button>
@@ -493,6 +661,38 @@
     <p class="rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3 text-xs leading-relaxed text-violet-800">
       {m.workouts_native_hint()}
     </p>
+
+    {#if hevyImports.length > 0}
+      <details class="rounded-xl border border-slate-200 bg-slate-50/60">
+        <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+          {m.workouts_hevy_sources({ count: hevyImports.length })}
+        </summary>
+        <div class="divide-y divide-slate-200 border-t border-slate-200">
+          {#each hevyImports as source (source.id)}
+            {@const summary = sourceSummary(source)}
+            <div class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-slate-800">{source.fileName || m.workouts_hevy_source_file()}</p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  {formatImportTime(source.updatedAt)} · {source.timezone || m.workouts_hevy_unknown_timezone()}
+                  {#if summary}
+                    · {m.workouts_hevy_source_result({ created: summary.created, updated: summary.updated, conflicts: summary.conflicts })}
+                  {/if}
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class={`rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold ${source.status === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : source.status === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                  {source.status === 'completed' ? m.workouts_hevy_status_completed() : source.status === 'failed' ? m.workouts_hevy_status_failed() : m.workouts_hevy_status_pending()}
+                </span>
+                <a href={source.sourceUrl} class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                  {m.workouts_hevy_download_source()}
+                </a>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </details>
+    {/if}
 
     {#if deleteError}
       <p class="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700" role="alert">{deleteError}</p>
@@ -607,6 +807,137 @@
     </section>
   </div>
 </section>
+
+{#if importerOpen}
+  <div class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation">
+    <div class="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="hevy-import-title">
+      <header class="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div>
+          <h3 id="hevy-import-title" class="text-lg font-semibold text-slate-900">{m.workouts_hevy_import_title()}</h3>
+          <p class="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{m.workouts_hevy_import_hint()}</p>
+        </div>
+        <button type="button" onclick={closeImporter} aria-label={m.cancel()} class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </header>
+
+      <form method="POST" action="?/importHevyCsv" enctype="multipart/form-data" use:enhance={submitHevyImport} class="flex min-h-0 flex-1 flex-col">
+        <input type="hidden" name="patientId" value={patientId} />
+        <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
+          {#if importComplete}
+            <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
+              <p class="font-semibold">{importComplete.repeated ? m.workouts_hevy_already_imported() : m.workouts_hevy_import_complete()}</p>
+              <p class="mt-2 text-sm leading-relaxed">
+                {m.workouts_hevy_import_result({
+                  created: importComplete.created,
+                  updated: importComplete.updated,
+                  unchanged: importComplete.unchanged,
+                  conflicts: importComplete.conflicts,
+                })}
+              </p>
+              {#if importComplete.conflicts > 0}
+                <p class="mt-2 text-xs leading-relaxed text-amber-800">{m.workouts_hevy_conflict_hint()}</p>
+              {/if}
+            </div>
+          {:else}
+            <ol class="list-decimal space-y-1 pl-5 text-xs leading-relaxed text-slate-600">
+              <li>{m.workouts_hevy_export_step_1()}</li>
+              <li>{m.workouts_hevy_export_step_2()}</li>
+              <li>{m.workouts_hevy_export_step_3()}</li>
+            </ol>
+
+            <label class="block rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-violet-300 hover:bg-violet-50/40">
+              <span class="block text-sm font-semibold text-slate-700">{m.workouts_hevy_choose_file()}</span>
+              <span class="mt-1 block text-xs text-slate-500">{m.workouts_hevy_file_hint({ megabytes: MAX_HEVY_CSV_BYTES / 1024 / 1024 })}</span>
+              <input
+                name="file"
+                type="file"
+                accept=".csv,text/csv"
+                required
+                class="mt-3 block w-full text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-violet-700 hover:file:bg-violet-200"
+                onchange={(event) => previewHevyFile(event.currentTarget.files?.[0] || null)}
+              />
+            </label>
+
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-semibold text-slate-700">{m.workouts_hevy_timezone()}</span>
+              <select name="timeZone" bind:value={importTimeZone} onchange={refreshHevyPreview} class="w-full rounded-lg border-slate-300 text-sm focus:border-violet-500 focus:ring-violet-500">
+                {#each timeZones as zone (zone)}<option value={zone}>{zone}</option>{/each}
+              </select>
+              <span class="mt-1.5 block text-xs leading-relaxed text-slate-500">
+                {m.workouts_hevy_timezone_hint({ label: timeZoneLabel(importTimeZone, new Date(), getLocale()) })}
+              </span>
+            </label>
+
+            {#if importPreviewing}
+              <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">{m.workouts_hevy_reading()}</div>
+            {:else if importPreview}
+              <section aria-labelledby="hevy-preview-heading" class="space-y-4 rounded-xl border border-slate-200 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 id="hevy-preview-heading" class="text-sm font-semibold text-slate-800">{m.workouts_hevy_preview()}</h4>
+                    <p class="mt-0.5 text-xs text-slate-500">{importFile?.name}</p>
+                  </div>
+                  <span class={`rounded-full border px-2.5 py-1 text-xs font-semibold ${importPreview.canImport ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                    {importPreview.canImport ? m.workouts_hevy_ready() : m.workouts_hevy_needs_attention()}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div class="rounded-lg bg-violet-50 px-3 py-2.5"><p class="text-[0.7rem] font-medium text-violet-700">{m.workouts_hevy_workouts()}</p><p class="mt-1 text-xl font-semibold text-violet-950">{importPreview.summary.workoutCount}</p></div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2.5"><p class="text-[0.7rem] font-medium text-slate-500">{m.workouts_hevy_exercises()}</p><p class="mt-1 text-xl font-semibold text-slate-900">{importPreview.summary.exerciseCount}</p></div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2.5"><p class="text-[0.7rem] font-medium text-slate-500">{m.workouts_hevy_sets()}</p><p class="mt-1 text-xl font-semibold text-slate-900">{importPreview.summary.setCount}</p></div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2.5"><p class="text-[0.7rem] font-medium text-slate-500">{m.workouts_hevy_rows()}</p><p class="mt-1 text-xl font-semibold text-slate-900">{importPreview.summary.rowCount}</p></div>
+                </div>
+
+                {#if importPreview.summary.firstLocalDate}
+                  <p class="text-xs text-slate-500">
+                    {m.workouts_hevy_date_range({ start: importPreview.summary.firstLocalDate, end: importPreview.summary.lastLocalDate || importPreview.summary.firstLocalDate })}
+                    {#if importPreview.summary.weightUnits.length > 0} · {m.workouts_hevy_load_units({ units: importPreview.summary.weightUnits.join(', ') })}{/if}
+                    {#if importPreview.summary.distanceUnits.length > 0} · {m.workouts_hevy_distance_units({ units: importPreview.summary.distanceUnits.join(', ') })}{/if}
+                  </p>
+                {/if}
+                {#if importPreview.summary.unknownHeaders.length > 0}
+                  <p class="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-800">
+                    {m.workouts_hevy_unknown_columns({ columns: importPreview.summary.unknownHeaders.join(', ') })}
+                  </p>
+                {/if}
+
+                {#if importPreview.issues.length > 0}
+                  <div class="space-y-1.5">
+                    {#each importPreview.issues.slice(0, 12) as issue, index (`${issue.code}-${issue.row}-${issue.column}-${index}`)}
+                      <p class={`rounded-lg px-3 py-2 text-xs leading-relaxed ${issue.severity === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800'}`}>
+                        {#if issue.row}{m.workouts_hevy_issue_row({ row: issue.row })}: {/if}{hevyIssueLabel(issue)}{#if issue.column} ({issue.column}){/if}
+                      </p>
+                    {/each}
+                    {#if importPreview.issues.length > 12}
+                      <p class="text-xs text-slate-500">{m.workouts_hevy_more_issues({ count: importPreview.issues.length - 12 })}</p>
+                    {/if}
+                  </div>
+                {/if}
+              </section>
+            {/if}
+
+            <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">{m.workouts_hevy_retention_hint()}</p>
+          {/if}
+
+          {#if importError}<p class="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700" role="alert">{importError}</p>{/if}
+        </div>
+
+        <footer class="flex justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
+          <button type="button" onclick={closeImporter} disabled={importSaving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            {importComplete ? m.workouts_hevy_done() : m.cancel()}
+          </button>
+          {#if !importComplete}
+            <button type="submit" disabled={importSaving || importPreviewing || !importPreview?.canImport} class="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">
+              {importSaving ? m.workouts_hevy_importing() : m.workouts_hevy_confirm({ count: importPreview?.summary.workoutCount || 0 })}
+            </button>
+          {/if}
+        </footer>
+      </form>
+    </div>
+  </div>
+{/if}
 
 {#if editorOpen}
   <div class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation">

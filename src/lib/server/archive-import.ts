@@ -2,6 +2,7 @@ import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
+  dataImport,
   energyClaim,
   exerciseDefinition,
   medicineClaim,
@@ -34,6 +35,7 @@ export const archiveEntityKinds = [
   'records',
   'medicines',
   'energy',
+  'dataImports',
   'exerciseDefinitions',
   'workouts',
   'revisions',
@@ -46,6 +48,7 @@ type ArchiveIdKind =
   | 'medicine'
   | 'energy'
   | 'energy-source'
+  | 'data-import'
   | 'exercise-definition'
   | 'workout'
   | 'workout-exercise'
@@ -57,6 +60,7 @@ export type ArchiveImportErrorCode =
   | 'invalid_batch'
   | 'invalid_claim_revision'
   | 'invalid_energy'
+  | 'invalid_data_import'
   | 'invalid_exercise_definition'
   | 'invalid_medicine'
   | 'invalid_profile'
@@ -289,6 +293,41 @@ export async function resolveArchiveEnergyClaimId(input: {
   return existing[0]?.id || candidateId;
 }
 
+export async function resolveArchiveDataImportId(input: {
+  patientId: string;
+  sourcePatientId: string;
+  sourceId: string;
+  provider: string;
+  format: string;
+  contentSha256: string;
+  interpretationKey: string;
+}) {
+  const candidateId = await resolveArchiveEntityId(
+    input.patientId,
+    input.sourcePatientId,
+    'data-import',
+    input.sourceId,
+  );
+  const existing = await db
+    .select({ id: dataImport.id })
+    .from(dataImport)
+    .where(
+      and(
+        eq(dataImport.patientId, input.patientId),
+        or(
+          eq(dataImport.id, candidateId),
+          and(
+            eq(dataImport.provider, input.provider),
+            eq(dataImport.format, input.format),
+            eq(dataImport.contentSha256, input.contentSha256),
+            eq(dataImport.interpretationKey, input.interpretationKey),
+          ),
+        ),
+      ),
+    );
+  return existing.find((row) => row.id === candidateId)?.id || existing[0]?.id || candidateId;
+}
+
 async function resolveArchiveExerciseDefinitionId(input: {
   patientId: string;
   sourcePatientId: string;
@@ -421,6 +460,43 @@ function parseProfile(value: unknown) {
     agab: optionalText(row.agab, 'invalid_profile', 100),
     birthday: optionalIsoDateText(row.birthday, 'invalid_profile'),
     extraData: jsonValue(row.extraData, 'invalid_profile'),
+  };
+}
+
+function parseDataImport(value: unknown) {
+  assertSerializedSize(value, 2 * 1024 * 1024, 'invalid_data_import');
+  const row = asRecord(value, 'invalid_data_import');
+  const status = requiredText(row.status, 'invalid_data_import', 32);
+  if (status !== 'pending' && status !== 'completed' && status !== 'failed') {
+    throw new ArchiveImportError('invalid_data_import');
+  }
+  const contentSha256 = requiredText(row.contentSha256, 'invalid_data_import', 64).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
+    throw new ArchiveImportError('invalid_data_import');
+  }
+  const timezone = optionalText(row.timezone, 'invalid_data_import', 100);
+  if (timezone && !isValidTimeZone(timezone)) {
+    throw new ArchiveImportError('invalid_data_import');
+  }
+
+  return {
+    sourceId: sourceId(row, 'invalid_data_import'),
+    provider: requiredText(row.provider, 'invalid_data_import', 120),
+    format: requiredText(row.format, 'invalid_data_import', 120),
+    status,
+    fileName: optionalText(row.fileName, 'invalid_data_import', 300),
+    mimeType: requiredText(row.mimeType, 'invalid_data_import', 200),
+    byteSize: requiredInteger(row.byteSize, 'invalid_data_import', {
+      min: 1,
+      max: 50 * 1024 * 1024,
+    }),
+    contentSha256,
+    interpretationKey: optionalText(row.interpretationKey, 'invalid_data_import', 500) || '',
+    timezone,
+    summaryData: jsonValue(row.summaryData, 'invalid_data_import'),
+    errorCode: optionalText(row.errorCode, 'invalid_data_import', 200),
+    createdAt: validDateText(row.createdAt, 'invalid_data_import'),
+    updatedAt: validDateText(row.updatedAt, 'invalid_data_import'),
   };
 }
 
@@ -914,6 +990,49 @@ async function importRecords(patientId: string, sourcePatientId: string, items: 
   return insertResult(items.length, inserted.length);
 }
 
+async function importDataImports(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const parsed = items.map(parseDataImport);
+  assertUniqueSourceIds(parsed);
+  const values = await Promise.all(
+    parsed.map(async (item) => {
+      const id = await resolveArchiveDataImportId({
+        patientId,
+        sourcePatientId,
+        sourceId: item.sourceId,
+        provider: item.provider,
+        format: item.format,
+        contentSha256: item.contentSha256,
+        interpretationKey: item.interpretationKey,
+      });
+      return {
+        id,
+        patientId,
+        provider: item.provider,
+        format: item.format,
+        status: item.status,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        byteSize: item.byteSize,
+        contentSha256: item.contentSha256,
+        interpretationKey: item.interpretationKey,
+        storageKey: `import-sources/${patientId}/archive-${id}`,
+        objectEtag: null,
+        timezone: item.timezone,
+        summaryData: item.summaryData,
+        errorCode: item.errorCode,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      };
+    }),
+  );
+  const inserted = await db
+    .insert(dataImport)
+    .values(values)
+    .onConflictDoNothing()
+    .returning({ id: dataImport.id });
+  return insertResult(items.length, inserted.length);
+}
+
 async function importMedicines(patientId: string, sourcePatientId: string, items: unknown[]) {
   const sourceRows = items.map((value) => ({ value, row: asRecord(value, 'invalid_medicine') }));
   const planned = await Promise.all(
@@ -1294,6 +1413,9 @@ export async function importArchiveBatch(input: {
   if (input.kind === 'records') return importRecords(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'medicines') return importMedicines(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'energy') return importEnergy(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'dataImports') {
+    return importDataImports(input.patientId, input.sourcePatientId, input.items);
+  }
   if (input.kind === 'exerciseDefinitions') {
     return importExerciseDefinitions(input.patientId, input.sourcePatientId, input.items);
   }

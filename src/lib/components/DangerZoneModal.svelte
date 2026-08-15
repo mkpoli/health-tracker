@@ -11,6 +11,7 @@
     medicines = [],
     energyEntries = [],
     energySources = [],
+    dataImports = [],
     exerciseDefinitions = [],
     workouts = [],
     claimRevisions = [],
@@ -22,6 +23,7 @@
     medicines?: unknown[];
     energyEntries?: unknown[];
     energySources?: unknown[];
+    dataImports?: unknown[];
     exerciseDefinitions?: unknown[];
     workouts?: unknown[];
     claimRevisions?: unknown[];
@@ -37,6 +39,7 @@
         medicines.length +
         energyEntries.length +
         energySources.length +
+        dataImports.length +
         exerciseDefinitions.length +
         workouts.length >
       0,
@@ -62,6 +65,7 @@
           medicines,
           energyEntries,
           energySources,
+          dataImports,
           exerciseDefinitions,
           workouts,
           claimRevisions,

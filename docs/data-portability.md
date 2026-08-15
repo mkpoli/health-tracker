@@ -16,6 +16,7 @@ The archive contains:
 - current medicine entries and their saved revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
 - exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
+- import records and retained source files, including Hevy workout CSV files;
 - retained report sources, including scans and PDFs.
 
 Account credentials, connected-assistant grants, and connector credentials live outside a profile archive.
@@ -57,7 +58,28 @@ Messages used to prepare Medicine or Calories drafts are copied into the claim's
 
 The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
 
-Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 6 carries exercise definitions before workouts during restoration, then restores workout revisions after the current records exist.
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 7 carries source imports and exercise definitions before workouts during restoration, then restores workout revisions after the current records exist.
+
+## Hevy workout CSV import
+
+Hevy documents its export path as **Profile → Settings → Export & Import Data → Export Data → Export Workouts**. See [How to Import Strong App CSV Files and Export Your Data in Hevy](https://help.hevyapp.com/hc/en-us/articles/38001424401943-How-to-Import-Strong-App-CSV-Files-and-Export-Your-Data-in-Hevy).
+
+To import the workout export:
+
+1. Open the profile's **Calories** section.
+2. In **Workouts**, choose **Import Hevy CSV**.
+3. Select the workout CSV.
+4. Select the IANA time zone represented by the file.
+5. Review workout, exercise, set, row, date-range, unit, warning, and error counts.
+6. Confirm the import.
+
+Hevy CSV timestamps have no time-zone field. One selected time zone applies to the entire file. A daylight-saving gap blocks the import. A repeated wall-clock time uses its earlier occurrence and appears as a warning.
+
+The importer accepts UTF-8 CSV files up to 10 MB and 10,000 data rows. It handles quoted commas, quoted line breaks, CRLF, UTF-8 BOM, metric or imperial load columns, and kilometre, metre, mile, or yard distance columns. Unknown columns stay in each raw source row. An unknown set type is stored as `other`, with the original value retained.
+
+Every row is validated before a database write. An error blocks the file. Database changes for one file use one transaction. The original CSV is stored privately, and each workout set carries its raw source row. The profile archive includes the import metadata and CSV bytes.
+
+The file checksum and selected time zone identify a completed import. Repeating that pair reuses the prior result and repairs a missing source object when the CSV is supplied again. A later export can update a workout created by an earlier Hevy import. A workout with newer local edits is reported as a conflict and keeps those edits. The CSV format supplies no workout ID, so the importer derives workout identity from the local start time and normalized title. The source row and derived identity remain available for review.
 
 ## Apple Health import
 
@@ -128,4 +150,4 @@ Optional connectors should attach these fields to each imported claim:
 - `originExternalId`: the provider's stable record ID;
 - source timestamps, raw payloads, and media needed for later review.
 
-The provider and external ID pair makes repeated syncs idempotent. Health Tracker keeps the native claim and its revision history after connector access ends. Apple Health XML is available through file import. Direct HealthKit sync and a Hevy connector are future connector work.
+The provider and external ID pair makes repeated syncs idempotent. Health Tracker keeps the native claim and its revision history after connector access ends. Apple Health XML and Hevy workout CSV files are available through file import. Direct HealthKit sync and account-linked Hevy API sync remain future connector work.

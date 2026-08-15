@@ -10,6 +10,7 @@ export interface PatientExportInput {
   medicines: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
+  dataImports: unknown[];
   exerciseDefinitions: unknown[];
   workouts: unknown[];
   claimRevisions: unknown[];
@@ -18,7 +19,7 @@ export interface PatientExportInput {
 export interface PatientArchiveMedia {
   archivePath: string;
   sourceUrl: string;
-  sourceKind: 'energy-photo' | 'report-source';
+  sourceKind: 'energy-photo' | 'import-file' | 'report-source';
   sourceId: string;
   fileName: string | null;
   mimeType: string | null;
@@ -107,6 +108,23 @@ export function listPatientArchiveMedia(input: PatientExportInput): PatientArchi
     });
   });
 
+  input.dataImports.forEach((value, index) => {
+    const source = asRecord(value);
+    if (!source || typeof source.sourceUrl !== 'string') return;
+
+    const sourceId = archiveSourceId(source.id, `data-import-${index + 1}`);
+    const pathId = safeArchiveName(sourceId, `data-import-${index + 1}`);
+    const fileName = typeof source.fileName === 'string' ? source.fileName : null;
+    media.push({
+      archivePath: `media/imports/${index + 1}-${pathId}-${safeArchiveName(fileName, 'source-file')}`,
+      sourceUrl: source.sourceUrl,
+      sourceKind: 'import-file',
+      sourceId,
+      fileName,
+      mimeType: typeof source.mimeType === 'string' ? source.mimeType : null,
+    });
+  });
+
   return media;
 }
 
@@ -117,6 +135,7 @@ export function buildPatientExport({
   medicines,
   energyEntries,
   energySources,
+  dataImports,
   exerciseDefinitions,
   workouts,
   claimRevisions,
@@ -128,6 +147,7 @@ export function buildPatientExport({
     medicines,
     energyEntries,
     energySources,
+    dataImports,
     exerciseDefinitions,
     workouts,
     claimRevisions,
@@ -143,6 +163,7 @@ export function buildPatientExport({
     medicines,
     energyEntries,
     energySources,
+    dataImports,
     exerciseDefinitions,
     workouts,
     claimRevisions,

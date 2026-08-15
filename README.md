@@ -11,6 +11,7 @@ Health Tracker is a multilingual SvelteKit app for storing health profiles, impo
 - Keep editable medicine plans with revision history
 - Record food intake and energy expenditure with retained source photos
 - Store workout sessions, detailed sets, and reusable plans with revision history
+- Import Hevy workout CSV files with preview and retained source rows
 - Turn a short Medicine or Calories message into an editable draft
 - Run on Cloudflare with SQLite/Turso-backed data storage
 - Connect an AI assistant to the data through an MCP server
