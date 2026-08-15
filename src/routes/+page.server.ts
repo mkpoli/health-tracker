@@ -53,6 +53,17 @@ import {
   toEnergyClaimRevision,
   toMedicineClaimRevision,
 } from '$lib/server/claim-revisions';
+import { CURRENT_HEALTH_ARCHIVE_VERSION } from '$lib/archive-format';
+import {
+  ArchiveImportError,
+  importArchiveBatch as saveArchiveBatch,
+  isArchiveEntityKind,
+} from '$lib/server/archive-import';
+import {
+  ArchiveMediaError,
+  parseArchiveMediaMetadata,
+  restoreArchiveMedia,
+} from '$lib/server/archive-media';
 
 const manualRevisionSource = { kind: 'manual', provider: 'local' } as const;
 
@@ -885,6 +896,91 @@ export const actions: Actions = {
     });
 
     return { success: true, ...result };
+  },
+
+  importArchiveBatch: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const sourcePatientId = data.get('sourcePatientId')?.toString();
+    const kind = data.get('kind')?.toString() || '';
+    const version = Number(data.get('version')?.toString());
+    const itemsStr = data.get('items')?.toString();
+
+    if (!patientId || !sourcePatientId || !itemsStr || !isArchiveEntityKind(kind)) {
+      return fail(400, { code: 'archive_invalid_batch' });
+    }
+    if (!Number.isSafeInteger(version) || version < 1 || version > CURRENT_HEALTH_ARCHIVE_VERSION) {
+      return fail(400, { code: 'archive_unsupported_version' });
+    }
+    if (itemsStr.length > 12 * 1024 * 1024) {
+      return fail(413, { code: 'archive_batch_too_large' });
+    }
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'archive_patient_not_found' });
+
+    let items: unknown;
+    try {
+      items = JSON.parse(itemsStr);
+    } catch {
+      return fail(400, { code: 'archive_invalid_batch' });
+    }
+    if (!Array.isArray(items)) return fail(400, { code: 'archive_invalid_batch' });
+
+    try {
+      const result = await saveArchiveBatch({
+        patientId: ownedPatient.id,
+        sourcePatientId,
+        kind,
+        items,
+      });
+      return { success: true, archiveImport: result };
+    } catch (error) {
+      if (error instanceof ArchiveImportError) {
+        return fail(400, { code: `archive_${error.code}` });
+      }
+      throw error;
+    }
+  },
+
+  importArchiveMedia: async ({ request, locals, platform }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    const sourcePatientId = data.get('sourcePatientId')?.toString();
+    const metadataStr = data.get('metadata')?.toString();
+    const fileValue = data.get('file');
+
+    if (!patientId || !sourcePatientId || !metadataStr || !(fileValue instanceof File)) {
+      return fail(400, { code: 'archive_invalid_media' });
+    }
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'archive_patient_not_found' });
+
+    try {
+      const metadata = parseArchiveMediaMetadata(JSON.parse(metadataStr));
+      const restored = await restoreArchiveMedia({
+        patientId: ownedPatient.id,
+        sourcePatientId,
+        metadata,
+        file: fileValue,
+        bucket: platform?.env.REPORT_SOURCES,
+      });
+      return { success: true, archiveMedia: restored };
+    } catch (error) {
+      if (error instanceof SyntaxError || error instanceof ArchiveMediaError) {
+        const code = error instanceof ArchiveMediaError ? error.code : 'invalid_metadata';
+        return fail(code === 'storage_unavailable' ? 503 : 400, { code: `archive_${code}` });
+      }
+      if (error instanceof EnergyPhotoError) {
+        return fail(error.code === 'source_storage_unavailable' ? 503 : 400, {
+          code: `archive_${error.code}`,
+        });
+      }
+      throw error;
+    }
   },
 
   removeImportedMeasurements: async ({ request, locals }) => {

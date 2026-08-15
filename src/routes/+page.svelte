@@ -70,6 +70,7 @@
   let showPatientModal = $state(false);
   let showDeleteModal = $state(false);
   let showImportModal = $state(false);
+  let importInitialFile = $state<File | null>(null);
   let showAddRecordModal = $state(false);
   let exportingPatientData = $state(false);
 
@@ -112,6 +113,16 @@
   const activeTabMeta = $derived(dashboardTabs.find((tab) => tab.id === activeTab) ?? dashboardTabs[0]);
 
   let accountMenuOpen = $state(false);
+
+  function openImportModal(file: File | null = null) {
+    importInitialFile = file;
+    showImportModal = true;
+  }
+
+  function closeImportModal() {
+    showImportModal = false;
+    importInitialFile = null;
+  }
 
   // Same dismissal rule as the metric combobox: a pointer outside closes it,
   // which a tap satisfies where a focus change does not.
@@ -1060,10 +1071,8 @@
   let isDragging = $state(false);
   let dragCounter = $state(0);
 
-  // A drop belongs to whichever uploader it landed on. The page only catches
-  // files dropped on open space, and only when no dialog is up — otherwise an
-  // Apple Health export dropped on the import sheet ended up in the lab
-  // report uploader behind it.
+  // A drop belongs to the nearest uploader. The page handler covers open space
+  // while dialogs and nested drop zones handle their own files.
   function dropBelongsElsewhere(e: DragEvent) {
     if (typeof document !== 'undefined' && document.querySelector('[role="dialog"]')) return true;
 
@@ -1103,10 +1112,9 @@
     if (e.dataTransfer?.files?.length && data.currentPatient) {
       const file = e.dataTransfer.files[0];
 
-      // Only a report belongs in the extractor. An Apple Health export dropped
-      // on the page opens the importer instead of being read as a document.
-      if (/\.(zip|xml)$/i.test(file.name)) {
-        showImportModal = true;
+      // Health archives and Apple Health exports open in the data importer.
+      if (/\.(zip|xml|json)$/i.test(file.name)) {
+        openImportModal(file);
         return;
       }
 
@@ -1714,7 +1722,11 @@
     {/if}
 
     {#if showImportModal && data.currentPatient}
-      <ImportModal patientId={data.currentPatient.id} onClose={() => (showImportModal = false)} />
+      <ImportModal
+        patientId={data.currentPatient.id}
+        initialFile={importInitialFile}
+        onClose={closeImportModal}
+      />
     {/if}
 
     {#if showDeleteModal && data.currentPatient}
@@ -2263,7 +2275,7 @@
             </button>
             <button
               type="button"
-              onclick={() => (showImportModal = true)}
+              onclick={() => openImportModal()}
               class="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap bg-white border border-slate-300 text-slate-700 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
             >
               <svg

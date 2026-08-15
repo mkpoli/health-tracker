@@ -1,0 +1,615 @@
+import { and, eq, inArray, or } from 'drizzle-orm';
+import { db } from '$lib/server/db';
+import {
+  claimRevision,
+  energyClaim,
+  medicineClaim,
+  patient,
+  record,
+  report,
+} from '$lib/server/db/schema';
+import { isEnergyDirection, isEnergyStatus, type EnergyClaimRecord } from '$lib/energy';
+import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
+import { claimRevisionValues } from '$lib/server/claim-revisions';
+
+export const archiveEntityKinds = [
+  'profile',
+  'reports',
+  'records',
+  'medicines',
+  'energy',
+  'revisions',
+] as const;
+
+export type ArchiveEntityKind = (typeof archiveEntityKinds)[number];
+type ArchiveIdKind = 'report' | 'record' | 'medicine' | 'energy' | 'energy-source';
+
+export type ArchiveImportErrorCode =
+  | 'batch_too_large'
+  | 'duplicate_source_id'
+  | 'invalid_batch'
+  | 'invalid_claim_revision'
+  | 'invalid_energy'
+  | 'invalid_medicine'
+  | 'invalid_profile'
+  | 'invalid_record'
+  | 'invalid_report'
+  | 'missing_claim'
+  | 'missing_report';
+
+export class ArchiveImportError extends Error {
+  constructor(public readonly code: ArchiveImportErrorCode) {
+    super(code);
+    this.name = 'ArchiveImportError';
+  }
+}
+
+export function isArchiveEntityKind(value: string): value is ArchiveEntityKind {
+  return archiveEntityKinds.includes(value as ArchiveEntityKind);
+}
+
+function asRecord(value: unknown, code: ArchiveImportErrorCode) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ArchiveImportError(code);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredText(
+  value: unknown,
+  code: ArchiveImportErrorCode,
+  maxLength: number,
+) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) {
+    throw new ArchiveImportError(code);
+  }
+  return value;
+}
+
+function optionalText(
+  value: unknown,
+  code: ArchiveImportErrorCode,
+  maxLength: number,
+) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string' || value.length > maxLength) throw new ArchiveImportError(code);
+  return value;
+}
+
+function positiveRevision(value: unknown, code: ArchiveImportErrorCode) {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) throw new ArchiveImportError(code);
+  return Number(value);
+}
+
+function finiteNumberOrNull(
+  value: unknown,
+  code: ArchiveImportErrorCode,
+  options?: { integer?: boolean; min?: number; max?: number },
+) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new ArchiveImportError(code);
+  if (options?.integer && !Number.isSafeInteger(value)) throw new ArchiveImportError(code);
+  if (options?.min !== undefined && value < options.min) throw new ArchiveImportError(code);
+  if (options?.max !== undefined && value > options.max) throw new ArchiveImportError(code);
+  return value;
+}
+
+function validDateText(value: unknown, code: ArchiveImportErrorCode, maxLength = 64) {
+  const text = requiredText(value, code, maxLength);
+  if (Number.isNaN(Date.parse(text))) throw new ArchiveImportError(code);
+  return text;
+}
+
+function isIsoCalendarDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthLengths = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= monthLengths[month - 1];
+}
+
+function optionalIsoDateText(value: unknown, code: ArchiveImportErrorCode) {
+  const text = optionalText(value, code, 10);
+  if (text && !isIsoCalendarDate(text)) throw new ArchiveImportError(code);
+  return text;
+}
+
+function requiredIsoDateText(value: unknown, code: ArchiveImportErrorCode) {
+  const text = requiredText(value, code, 10);
+  if (!isIsoCalendarDate(text)) throw new ArchiveImportError(code);
+  return text;
+}
+
+function jsonValue(value: unknown, code: ArchiveImportErrorCode) {
+  if (value === undefined) return null;
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined || serialized.length > 8 * 1024 * 1024) {
+      throw new ArchiveImportError(code);
+    }
+    return JSON.parse(serialized) as unknown;
+  } catch (error) {
+    if (error instanceof ArchiveImportError) throw error;
+    throw new ArchiveImportError(code);
+  }
+}
+
+function sourceId(row: Record<string, unknown>, code: ArchiveImportErrorCode) {
+  return requiredText(row.id, code, 512);
+}
+
+function assertUniqueSourceIds(rows: Array<{ sourceId: string }>) {
+  if (new Set(rows.map((row) => row.sourceId)).size !== rows.length) {
+    throw new ArchiveImportError('duplicate_source_id');
+  }
+}
+
+function hex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function archiveEntityId(
+  patientId: string,
+  sourcePatientId: string,
+  kind: ArchiveIdKind,
+  sourceIdValue: string,
+) {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(
+        `health-tracker-archive\0${patientId}\0${sourcePatientId}\0${kind}\0${sourceIdValue}`,
+      ),
+    ),
+  ).slice(0, 16);
+
+  digest[6] = (digest[6] & 0x0f) | 0x50;
+  digest[8] = (digest[8] & 0x3f) | 0x80;
+  const value = hex(digest);
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+export async function resolveArchiveEntityId(
+  patientId: string,
+  sourcePatientId: string,
+  kind: ArchiveIdKind,
+  sourceIdValue: string,
+) {
+  return patientId === sourcePatientId
+    ? sourceIdValue
+    : archiveEntityId(patientId, sourcePatientId, kind, sourceIdValue);
+}
+
+export async function resolveArchiveEnergyClaimId(input: {
+  patientId: string;
+  sourcePatientId: string;
+  sourceId: string;
+  originProvider?: string | null;
+  originExternalId?: string | null;
+}) {
+  const candidateId = await resolveArchiveEntityId(
+    input.patientId,
+    input.sourcePatientId,
+    'energy',
+    input.sourceId,
+  );
+
+  if (!input.originProvider || !input.originExternalId) return candidateId;
+
+  const existing = await db
+    .select({
+      id: energyClaim.id,
+      originProvider: energyClaim.originProvider,
+      originExternalId: energyClaim.originExternalId,
+    })
+    .from(energyClaim)
+    .where(
+      and(
+        eq(energyClaim.patientId, input.patientId),
+        or(
+          eq(energyClaim.id, candidateId),
+          and(
+            eq(energyClaim.originProvider, input.originProvider),
+            eq(energyClaim.originExternalId, input.originExternalId),
+          ),
+        ),
+      ),
+    );
+  const candidate = existing.find((row) => row.id === candidateId);
+  if (candidate) return candidate.id;
+
+  return existing[0]?.id || candidateId;
+}
+
+function importedRawData(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string' || value.length > 32 * 1024 * 1024) {
+    throw new ArchiveImportError('invalid_report');
+  }
+
+  try {
+    const descriptor = JSON.parse(value) as Record<string, unknown>;
+    if (descriptor.kind === 'r2-file') {
+      return JSON.stringify({
+        kind: 'archive-pending-file',
+        fileName: typeof descriptor.fileName === 'string' ? descriptor.fileName : null,
+        mimeType: typeof descriptor.mimeType === 'string' ? descriptor.mimeType : null,
+      });
+    }
+  } catch {
+    return value;
+  }
+
+  return value;
+}
+
+function parseReport(value: unknown) {
+  const row = asRecord(value, 'invalid_report');
+  return {
+    sourceId: sourceId(row, 'invalid_report'),
+    kind: requiredText(row.kind, 'invalid_report', 64),
+    testDate: validDateText(row.testDate, 'invalid_report'),
+    reportTime: optionalText(row.reportTime, 'invalid_report', 64),
+    rawData: importedRawData(row.rawData),
+    organizedData: jsonValue(row.organizedData, 'invalid_report'),
+    parsedJsonData: jsonValue(row.parsedJsonData, 'invalid_report'),
+    extraData: jsonValue(row.extraData, 'invalid_report'),
+  };
+}
+
+function parseProfile(value: unknown) {
+  const row = asRecord(value, 'invalid_profile');
+
+  return {
+    name: requiredText(row.name, 'invalid_profile', 200),
+    agab: optionalText(row.agab, 'invalid_profile', 100),
+    birthday: optionalIsoDateText(row.birthday, 'invalid_profile'),
+    extraData: jsonValue(row.extraData, 'invalid_profile'),
+  };
+}
+
+function parseRecord(value: unknown) {
+  const row = asRecord(value, 'invalid_record');
+  return {
+    sourceId: sourceId(row, 'invalid_record'),
+    sourceReportId: requiredText(row.reportId, 'invalid_record', 512),
+    metricName: requiredText(row.metricName, 'invalid_record', 500),
+    value: requiredText(row.value, 'invalid_record', 500),
+    unit: optionalText(row.unit, 'invalid_record', 120),
+    refRange: optionalText(row.refRange, 'invalid_record', 500),
+    status: optionalText(row.status, 'invalid_record', 120),
+    extraData: jsonValue(row.extraData, 'invalid_record'),
+  };
+}
+
+function parseMedicine(value: unknown, patientId: string, id: string): MedicineClaimRecord {
+  const row = asRecord(value, 'invalid_medicine');
+  const status = requiredText(row.status, 'invalid_medicine', 32);
+  if (!isMedicineStatus(status)) throw new ArchiveImportError('invalid_medicine');
+
+  const createdAt = validDateText(row.createdAt, 'invalid_medicine');
+  const updatedAt = validDateText(row.updatedAt, 'invalid_medicine');
+
+  return {
+    id,
+    patientId,
+    name: requiredText(row.name, 'invalid_medicine', 200),
+    genericName: optionalText(row.genericName, 'invalid_medicine', 200),
+    form: optionalText(row.form, 'invalid_medicine', 120),
+    strength: optionalText(row.strength, 'invalid_medicine', 120),
+    route: optionalText(row.route, 'invalid_medicine', 120),
+    schedule: optionalText(row.schedule, 'invalid_medicine', 1000),
+    status,
+    startDate: optionalIsoDateText(row.startDate, 'invalid_medicine'),
+    endDate: optionalIsoDateText(row.endDate, 'invalid_medicine'),
+    purpose: optionalText(row.purpose, 'invalid_medicine', 500),
+    prescriber: optionalText(row.prescriber, 'invalid_medicine', 300),
+    notes: optionalText(row.notes, 'invalid_medicine', 4000),
+    originKind: optionalText(row.originKind, 'invalid_medicine', 120) || 'manual',
+    originProvider: optionalText(row.originProvider, 'invalid_medicine', 300),
+    originExternalId: optionalText(row.originExternalId, 'invalid_medicine', 1000),
+    revision: positiveRevision(row.revision, 'invalid_medicine'),
+    createdAt,
+    updatedAt,
+  };
+}
+
+function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
+  const row = asRecord(value, 'invalid_energy');
+  const direction = requiredText(row.direction, 'invalid_energy', 32);
+  const status = requiredText(row.status, 'invalid_energy', 32);
+  if (!isEnergyDirection(direction) || !isEnergyStatus(status)) {
+    throw new ArchiveImportError('invalid_energy');
+  }
+
+  const timezoneOffsetMinutes = finiteNumberOrNull(row.timezoneOffsetMinutes, 'invalid_energy', {
+    integer: true,
+    min: -1440,
+    max: 1440,
+  });
+  if (timezoneOffsetMinutes === null) throw new ArchiveImportError('invalid_energy');
+
+  const createdAt = validDateText(row.createdAt, 'invalid_energy');
+  const updatedAt = validDateText(row.updatedAt, 'invalid_energy');
+
+  return {
+    id,
+    patientId,
+    direction,
+    label: optionalText(row.label, 'invalid_energy', 300),
+    category: optionalText(row.category, 'invalid_energy', 120),
+    energyKcal: finiteNumberOrNull(row.energyKcal, 'invalid_energy', { min: 0, max: 1_000_000 }),
+    occurredAt: validDateText(row.occurredAt, 'invalid_energy'),
+    localDate: requiredIsoDateText(row.localDate, 'invalid_energy'),
+    timezone: optionalText(row.timezone, 'invalid_energy', 120),
+    timezoneOffsetMinutes,
+    durationMinutes: finiteNumberOrNull(row.durationMinutes, 'invalid_energy', {
+      integer: true,
+      min: 0,
+      max: 10_080,
+    }),
+    status,
+    notes: optionalText(row.notes, 'invalid_energy', 4000),
+    originKind: optionalText(row.originKind, 'invalid_energy', 120) || 'manual',
+    originProvider: optionalText(row.originProvider, 'invalid_energy', 300),
+    originExternalId: optionalText(row.originExternalId, 'invalid_energy', 1000),
+    revision: positiveRevision(row.revision, 'invalid_energy'),
+    createdAt,
+    updatedAt,
+  };
+}
+
+function insertResult(received: number, inserted: number, skipped = 0) {
+  return {
+    received,
+    inserted,
+    existing: Math.max(0, received - inserted - skipped),
+    skipped,
+  };
+}
+
+async function importProfile(patientId: string, items: unknown[]) {
+  if (items.length !== 1) throw new ArchiveImportError('invalid_profile');
+  const profile = parseProfile(items[0]);
+  const updated = await db
+    .update(patient)
+    .set(profile)
+    .where(eq(patient.id, patientId))
+    .returning({ id: patient.id });
+  return insertResult(1, updated.length);
+}
+
+async function importReports(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const parsed = items.map(parseReport);
+  assertUniqueSourceIds(parsed);
+  const values = await Promise.all(
+    parsed.map(async (item) => ({
+      id: await resolveArchiveEntityId(patientId, sourcePatientId, 'report', item.sourceId),
+      patientId,
+      kind: item.kind,
+      testDate: item.testDate,
+      reportTime: item.reportTime,
+      rawData: item.rawData,
+      organizedData: item.organizedData,
+      parsedJsonData: item.parsedJsonData,
+      extraData: item.extraData,
+    })),
+  );
+  const inserted = await db.insert(report).values(values).onConflictDoNothing().returning({ id: report.id });
+  return insertResult(items.length, inserted.length);
+}
+
+async function importRecords(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const parsed = items.map(parseRecord);
+  assertUniqueSourceIds(parsed);
+  const values = await Promise.all(
+    parsed.map(async (item) => ({
+      id: await resolveArchiveEntityId(patientId, sourcePatientId, 'record', item.sourceId),
+      patientId,
+      reportId: await resolveArchiveEntityId(patientId, sourcePatientId, 'report', item.sourceReportId),
+      metricName: item.metricName,
+      value: item.value,
+      unit: item.unit,
+      refRange: item.refRange,
+      status: item.status,
+      extraData: item.extraData,
+    })),
+  );
+
+  const reportIds = [...new Set(values.map((item) => item.reportId))];
+  const parents = reportIds.length
+    ? await db
+        .select({ id: report.id })
+        .from(report)
+        .where(and(eq(report.patientId, patientId), inArray(report.id, reportIds)))
+    : [];
+  if (parents.length !== reportIds.length) throw new ArchiveImportError('missing_report');
+
+  const inserted = await db.insert(record).values(values).onConflictDoNothing().returning({ id: record.id });
+  return insertResult(items.length, inserted.length);
+}
+
+async function importMedicines(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const sourceRows = items.map((value) => ({ value, row: asRecord(value, 'invalid_medicine') }));
+  const planned = await Promise.all(
+    sourceRows.map(async ({ value, row }) => {
+      const sourceIdValue = sourceId(row, 'invalid_medicine');
+      const id = await resolveArchiveEntityId(patientId, sourcePatientId, 'medicine', sourceIdValue);
+      return { sourceId: sourceIdValue, snapshot: parseMedicine(value, patientId, id) };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(medicineClaim)
+      .values(planned.map(({ snapshot }) => snapshot))
+      .onConflictDoNothing()
+      .returning({ id: medicineClaim.id });
+    const ids = planned.map(({ snapshot }) => snapshot.id);
+    const stored = await tx
+      .select()
+      .from(medicineClaim)
+      .where(and(eq(medicineClaim.patientId, patientId), inArray(medicineClaim.id, ids)));
+
+    if (stored.length > 0) {
+      await tx
+        .insert(claimRevision)
+        .values(
+          stored.map((snapshot) =>
+            claimRevisionValues('medicine', snapshot as MedicineClaimRecord, {
+              kind: snapshot.originKind,
+              provider: snapshot.originProvider,
+            }),
+          ),
+        )
+        .onConflictDoNothing();
+    }
+
+    return insertResult(items.length, inserted.length, planned.length - stored.length);
+  });
+}
+
+async function importEnergy(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const sourceRows = items.map((value) => ({ value, row: asRecord(value, 'invalid_energy') }));
+  const planned = await Promise.all(
+    sourceRows.map(async ({ value, row }) => {
+      const sourceIdValue = sourceId(row, 'invalid_energy');
+      const originProvider = optionalText(row.originProvider, 'invalid_energy', 300);
+      const originExternalId = optionalText(row.originExternalId, 'invalid_energy', 1000);
+      const id = await resolveArchiveEnergyClaimId({
+        patientId,
+        sourcePatientId,
+        sourceId: sourceIdValue,
+        originProvider,
+        originExternalId,
+      });
+      return { sourceId: sourceIdValue, snapshot: parseEnergy(value, patientId, id) };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(energyClaim)
+      .values(planned.map(({ snapshot }) => snapshot))
+      .onConflictDoNothing()
+      .returning({ id: energyClaim.id });
+    const ids = planned.map(({ snapshot }) => snapshot.id);
+    const stored = await tx
+      .select()
+      .from(energyClaim)
+      .where(and(eq(energyClaim.patientId, patientId), inArray(energyClaim.id, ids)));
+
+    if (stored.length > 0) {
+      await tx
+        .insert(claimRevision)
+        .values(
+          stored.map((snapshot) =>
+            claimRevisionValues('energy', snapshot as EnergyClaimRecord, {
+              kind: snapshot.originKind,
+              provider: snapshot.originProvider,
+            }),
+          ),
+        )
+        .onConflictDoNothing();
+    }
+
+    return insertResult(items.length, inserted.length, planned.length - stored.length);
+  });
+}
+
+async function importRevisions(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const planned = await Promise.all(
+    items.map(async (value) => {
+      const row = asRecord(value, 'invalid_claim_revision');
+      const claimKind = row.claimKind;
+      if (claimKind !== 'medicine' && claimKind !== 'energy') {
+        throw new ArchiveImportError('invalid_claim_revision');
+      }
+
+      const sourceClaimId = requiredText(row.claimId, 'invalid_claim_revision', 512);
+      const revision = positiveRevision(row.revision, 'invalid_claim_revision');
+      const snapshotRow = asRecord(row.snapshot, 'invalid_claim_revision');
+      if (snapshotRow.id !== sourceClaimId || snapshotRow.revision !== revision) {
+        throw new ArchiveImportError('invalid_claim_revision');
+      }
+
+      const localClaimId = claimKind === 'energy'
+        ? await resolveArchiveEnergyClaimId({
+            patientId,
+            sourcePatientId,
+            sourceId: sourceClaimId,
+            originProvider: optionalText(snapshotRow.originProvider, 'invalid_claim_revision', 300),
+            originExternalId: optionalText(snapshotRow.originExternalId, 'invalid_claim_revision', 1000),
+          })
+        : await resolveArchiveEntityId(patientId, sourcePatientId, claimKind, sourceClaimId);
+      const snapshot = claimKind === 'medicine'
+        ? parseMedicine(snapshotRow, patientId, localClaimId)
+        : parseEnergy(snapshotRow, patientId, localClaimId);
+
+      return {
+        patientId,
+        claimKind,
+        claimId: localClaimId,
+        revision,
+        snapshot,
+        changedAt: validDateText(row.changedAt, 'invalid_claim_revision'),
+        changeOriginKind: optionalText(row.changeOriginKind, 'invalid_claim_revision', 120) || 'manual',
+        changeOriginProvider: optionalText(row.changeOriginProvider, 'invalid_claim_revision', 300),
+      };
+    }),
+  );
+
+  const medicineIds = [...new Set(planned.filter((row) => row.claimKind === 'medicine').map((row) => row.claimId))];
+  const energyIds = [...new Set(planned.filter((row) => row.claimKind === 'energy').map((row) => row.claimId))];
+  const [medicines, energyEntries] = await Promise.all([
+    medicineIds.length
+      ? db
+          .select({ id: medicineClaim.id })
+          .from(medicineClaim)
+          .where(and(eq(medicineClaim.patientId, patientId), inArray(medicineClaim.id, medicineIds)))
+      : [],
+    energyIds.length
+      ? db
+          .select({ id: energyClaim.id })
+          .from(energyClaim)
+          .where(and(eq(energyClaim.patientId, patientId), inArray(energyClaim.id, energyIds)))
+      : [],
+  ]);
+  const existingIds = new Set([...medicines, ...energyEntries].map((row) => row.id));
+  const eligible = planned.filter((row) => existingIds.has(row.claimId));
+
+  const inserted = eligible.length
+    ? await db.insert(claimRevision).values(eligible).onConflictDoNothing().returning({ id: claimRevision.id })
+    : [];
+  return insertResult(items.length, inserted.length, planned.length - eligible.length);
+}
+
+export async function importArchiveBatch(input: {
+  patientId: string;
+  sourcePatientId: string;
+  kind: ArchiveEntityKind;
+  items: unknown[];
+}) {
+  if (input.items.length === 0 || input.items.length > 250) {
+    throw new ArchiveImportError(input.items.length > 250 ? 'batch_too_large' : 'invalid_batch');
+  }
+
+  if (!input.sourcePatientId || input.sourcePatientId.length > 512) {
+    throw new ArchiveImportError('invalid_batch');
+  }
+
+  if (input.kind === 'profile') return importProfile(input.patientId, input.items);
+  if (input.kind === 'reports') return importReports(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'records') return importRecords(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'medicines') return importMedicines(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'energy') return importEnergy(input.patientId, input.sourcePatientId, input.items);
+  return importRevisions(input.patientId, input.sourcePatientId, input.items);
+}

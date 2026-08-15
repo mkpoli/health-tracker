@@ -56,18 +56,22 @@ export async function storeEnergyPhoto({
   energyClaimId,
   file,
   mimeType,
+  id: requestedId,
+  storageKey: requestedStorageKey,
 }: {
   bucket?: R2Bucket | null;
   patientId: string;
   energyClaimId: string;
   file: File;
   mimeType: string;
+  id?: string;
+  storageKey?: string;
 }): Promise<StoredEnergyPhoto> {
   if (!bucket) throw new EnergyPhotoError('source_storage_unavailable');
 
-  const id = crypto.randomUUID();
+  const id = requestedId || crypto.randomUUID();
   const extension = mimeExtensions.get(mimeType) || 'image';
-  const storageKey = `energy-sources/${patientId}/${energyClaimId}/${id}.${extension}`;
+  const storageKey = requestedStorageKey || `energy-sources/${patientId}/${energyClaimId}/${id}.${extension}`;
   const object = await bucket.put(storageKey, file.stream(), {
     httpMetadata: { contentType: mimeType },
   });
