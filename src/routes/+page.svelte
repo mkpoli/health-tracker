@@ -2298,21 +2298,16 @@
                 <div class="flex items-center">
                   <div class="w-1.5 h-6 bg-teal-500 rounded-full mr-3"></div>
                   <div>
-                    <h3 class="text-lg font-semibold text-slate-800">{m.assessed_records()}</h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3 class="text-lg font-semibold text-slate-800">{m.assessed_records()}</h3>
+                      <span class="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-500">
+                        {getItemCountLabel(labRecords.length)}
+                      </span>
+                    </div>
                     <p class="text-sm text-slate-500">{m.assessed_records_subtitle()}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onclick={() => (showAddRecordModal = true)}
-                  class="inline-flex items-center gap-2 self-start rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1 lg:self-auto"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="h-4 w-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  {m.add_clinical_record()}
-                </button>
-                <div class="flex items-center gap-4">
+                <div class="flex flex-wrap items-center gap-3 self-start lg:self-auto">
                   {#if selectedRecordIds.length > 0}
                     <form
                       method="POST"
@@ -2357,9 +2352,16 @@
                       </button>
                     </form>
                   {/if}
-                  <div class="text-sm font-medium text-slate-500">
-                    {getItemCountLabel(labRecords.length)}
-                  </div>
+                  <button
+                    type="button"
+                    onclick={() => (showAddRecordModal = true)}
+                    class="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-1"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="h-4 w-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    {m.add_clinical_record()}
+                  </button>
                 </div>
               </div>
 
