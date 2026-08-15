@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { medicineClaim, patient, report, record } from '$lib/server/db/schema';
+import { energyClaim, energySource, medicineClaim, patient, report, record } from '$lib/server/db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
@@ -15,6 +15,7 @@ import { isMeasurementKind } from '$lib/report-kind';
 import { deleteImportedSessions, importMeasurementSessions } from '$lib/server/measurement-import';
 import {
   getOwnedLabReport,
+  getOwnedEnergyClaim,
   getOwnedMedicineClaim,
   getOwnedPatient,
   getOwnedRecord,
@@ -25,6 +26,18 @@ import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medic
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import { normalizeTimeZone } from '$lib/time-zone';
 import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
+import { InvalidEnergyInputError, parseEnergyInput, validateEnergyEntry } from '$lib/server/energy';
+import {
+  EnergyPhotoError,
+  storeEnergyPhoto,
+  toEnergySourceRecord,
+  validateEnergyPhoto,
+} from '$lib/server/energy-source-storage';
+import {
+  isEnergyDirection,
+  isEnergyStatus,
+  type EnergyClaimRecord,
+} from '$lib/energy';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -41,6 +54,13 @@ function parseJsonLike(value: unknown) {
   return {} as Record<string, unknown>;
 }
 
+function storedReportSourceKey(value: unknown, patientId: string) {
+  const source = parseJsonLike(value);
+  const key = typeof source.key === 'string' ? source.key : '';
+  const match = /^report-sources\/([^/]+)\/[^/]+$/.exec(key);
+
+  return match?.[1] === patientId ? key : null;
+}
 function normalizeMetricMatchKey(value: unknown) {
   if (typeof value !== 'string') return '';
 
@@ -61,7 +81,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       currentPatient: null,
       records: [],
       reports: [],
-      medicines: []
+      medicines: [],
+      energyEntries: [],
+      energySources: []
     };
   }
 
@@ -78,28 +100,40 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let recordsList: typeof record.$inferSelect[] = [];
   let reportsList: typeof report.$inferSelect[] = [];
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
+  let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
+  let energySourcesList: typeof energySource.$inferSelect[] = [];
 
   if (patients.length > 0) {
     const targetId = selectedPatientId || patients[0].id;
     currentPatient = patients.find(p => p.id === targetId) || patients[0];
 
-    recordsList = await db
-      .select()
-      .from(record)
-      .where(eq(record.patientId, currentPatient.id))
-      .orderBy(desc(record.id));
-
-    reportsList = await db
-      .select()
-      .from(report)
-      .where(eq(report.patientId, currentPatient.id))
-      .orderBy(desc(report.testDate));
-
-    medicinesList = await db
-      .select()
-      .from(medicineClaim)
-      .where(eq(medicineClaim.patientId, currentPatient.id))
-      .orderBy(desc(medicineClaim.updatedAt));
+    [recordsList, reportsList, medicinesList, energyEntriesList, energySourcesList] = await Promise.all([
+      db
+        .select()
+        .from(record)
+        .where(eq(record.patientId, currentPatient.id))
+        .orderBy(desc(record.id)),
+      db
+        .select()
+        .from(report)
+        .where(eq(report.patientId, currentPatient.id))
+        .orderBy(desc(report.testDate)),
+      db
+        .select()
+        .from(medicineClaim)
+        .where(eq(medicineClaim.patientId, currentPatient.id))
+        .orderBy(desc(medicineClaim.updatedAt)),
+      db
+        .select()
+        .from(energyClaim)
+        .where(eq(energyClaim.patientId, currentPatient.id))
+        .orderBy(desc(energyClaim.occurredAt)),
+      db
+        .select()
+        .from(energySource)
+        .where(eq(energySource.patientId, currentPatient.id))
+        .orderBy(desc(energySource.createdAt)),
+    ]);
   }
 
   return {
@@ -112,7 +146,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     medicines: medicinesList.map((medicine) => ({
       ...medicine,
       status: isMedicineStatus(medicine.status) ? medicine.status : 'active',
-    } satisfies MedicineClaimRecord))
+    } satisfies MedicineClaimRecord)),
+    energyEntries: energyEntriesList.map((entry) => ({
+      ...entry,
+      direction: isEnergyDirection(entry.direction) ? entry.direction : 'intake',
+      status: isEnergyStatus(entry.status) ? entry.status : 'draft',
+    } satisfies EnergyClaimRecord)),
+    energySources: energySourcesList.map(toEnergySourceRecord)
   };
 };
 
@@ -213,6 +253,126 @@ export const actions: Actions = {
     if (!current) return fail(404, { code: 'medicine_not_found' });
 
     await db.delete(medicineClaim).where(eq(medicineClaim.id, current.id));
+    return { success: true };
+  },
+
+  createEnergyEntry: async ({ request, locals, platform }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+
+    if (!patientId) return fail(400, { code: 'energy_missing_patient' });
+
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'energy_patient_not_found' });
+
+    let storedPhoto: Awaited<ReturnType<typeof storeEnergyPhoto>> | null = null;
+    const entryId = crypto.randomUUID();
+
+    try {
+      const input = parseEnergyInput(data);
+      const photoValue = data.get('photo');
+      const photo = validateEnergyPhoto(photoValue instanceof File ? photoValue : null);
+      validateEnergyEntry(input, Boolean(photo));
+
+      if (photo) {
+        storedPhoto = await storeEnergyPhoto({
+          bucket: platform?.env.REPORT_SOURCES,
+          patientId: ownedPatient.id,
+          energyClaimId: entryId,
+          ...photo,
+        });
+      }
+
+      await db.insert(energyClaim).values({
+        id: entryId,
+        patientId: ownedPatient.id,
+        ...input,
+        originKind: 'manual',
+        originProvider: 'local',
+      });
+
+      if (storedPhoto) await db.insert(energySource).values(storedPhoto);
+      return { success: true };
+    } catch (error) {
+      const cleanup: PromiseLike<unknown>[] = [db.delete(energyClaim).where(eq(energyClaim.id, entryId))];
+      if (storedPhoto && platform?.env.REPORT_SOURCES) {
+        cleanup.push(platform.env.REPORT_SOURCES.delete(storedPhoto.storageKey));
+      }
+      await Promise.allSettled(cleanup);
+
+      if (error instanceof InvalidEnergyInputError || error instanceof EnergyPhotoError) {
+        return fail(error instanceof EnergyPhotoError && error.code === 'source_storage_unavailable' ? 503 : 400, {
+          code: `energy_${error.code}`,
+        });
+      }
+
+      throw error;
+    }
+  },
+
+  updateEnergyEntry: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'energy_missing_id' });
+
+    const current = await getOwnedEnergyClaim(userId, id);
+    if (!current) return fail(404, { code: 'energy_not_found' });
+
+    try {
+      const input = parseEnergyInput(data);
+      const existingSource = await db
+        .select({ id: energySource.id })
+        .from(energySource)
+        .where(eq(energySource.energyClaimId, current.id))
+        .limit(1);
+      validateEnergyEntry(input, existingSource.length > 0);
+
+      await db
+        .update(energyClaim)
+        .set({
+          ...input,
+          revision: current.revision + 1,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(energyClaim.id, current.id));
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof InvalidEnergyInputError) {
+        return fail(400, { code: `energy_${error.code}` });
+      }
+
+      throw error;
+    }
+  },
+
+  deleteEnergyEntry: async ({ request, locals, platform }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'energy_missing_id' });
+
+    const current = await getOwnedEnergyClaim(userId, id);
+    if (!current) return fail(404, { code: 'energy_not_found' });
+
+    const sources = await db
+      .select({ storageKey: energySource.storageKey })
+      .from(energySource)
+      .where(eq(energySource.energyClaimId, current.id));
+
+    if (sources.length > 0 && !platform?.env.REPORT_SOURCES) {
+      return fail(503, { code: 'energy_source_storage_unavailable' });
+    }
+
+    if (platform?.env.REPORT_SOURCES) {
+      await Promise.all(sources.map(({ storageKey }) => platform.env.REPORT_SOURCES.delete(storageKey)));
+    }
+
+    await db.delete(energyClaim).where(eq(energyClaim.id, current.id));
     return { success: true };
   },
 
@@ -382,7 +542,7 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  deleteReport: async ({ request, locals }) => {
+  deleteReport: async ({ request, locals, platform }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
@@ -393,13 +553,22 @@ export const actions: Actions = {
 
     if (!current) return fail(404, { error: 'Report not found' });
 
+    const sourceKey = storedReportSourceKey(current.rawData, current.patientId);
+    if (sourceKey && !platform?.env.REPORT_SOURCES) {
+      return fail(503, { code: 'source_storage_unavailable' });
+    }
+
+    if (sourceKey && platform?.env.REPORT_SOURCES) {
+      await platform.env.REPORT_SOURCES.delete(sourceKey);
+    }
+
     await db.delete(record).where(eq(record.reportId, id));
     await db.delete(report).where(eq(report.id, id));
 
     return { success: true };
   },
 
-  deletePatient: async ({ request, locals }) => {
+  deletePatient: async ({ request, locals, platform }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('patientId')?.toString();
@@ -410,6 +579,29 @@ export const actions: Actions = {
 
     if (!current) return fail(404, { error: 'Patient not found' });
 
+    const [energySourceKeys, reportSources] = await Promise.all([
+      db
+        .select({ storageKey: energySource.storageKey })
+        .from(energySource)
+        .where(eq(energySource.patientId, id)),
+      db.select({ rawData: report.rawData }).from(report).where(eq(report.patientId, id)),
+    ]);
+    const storageKeys = [
+      ...energySourceKeys.map(({ storageKey }) => storageKey),
+      ...reportSources
+        .map(({ rawData }) => storedReportSourceKey(rawData, id))
+        .filter((key): key is string => Boolean(key)),
+    ];
+
+    if (storageKeys.length > 0 && !platform?.env.REPORT_SOURCES) {
+      return fail(503, { code: 'source_storage_unavailable' });
+    }
+
+    if (platform?.env.REPORT_SOURCES) {
+      await Promise.all([...new Set(storageKeys)].map((storageKey) => platform.env.REPORT_SOURCES.delete(storageKey)));
+    }
+
+    await db.delete(energyClaim).where(eq(energyClaim.patientId, id));
     await db.delete(medicineClaim).where(eq(medicineClaim.patientId, id));
     await db.delete(record).where(eq(record.patientId, id));
     await db.delete(report).where(eq(report.patientId, id));

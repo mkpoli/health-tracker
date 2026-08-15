@@ -2,31 +2,54 @@
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
-  import { downloadPatientExport } from '$lib/export';
+  import { downloadPatientArchive } from '$lib/export';
 
   let {
     patient,
     reports = [],
     records,
     medicines = [],
+    energyEntries = [],
+    energySources = [],
     onClose,
   }: {
     patient: { id: string; name: string; [key: string]: unknown };
     reports?: unknown[];
     records: unknown[];
     medicines?: unknown[];
+    energyEntries?: unknown[];
+    energySources?: unknown[];
     onClose: () => void;
   } = $props();
 
   // Mounted behind {#if showDeleteModal}, so this reads the prop once on
   // purpose: the export a person did in one opening does not carry to the next.
-  const hasExportableData = untrack(() => records.length + reports.length + medicines.length > 0);
+  const hasExportableData = untrack(
+    () => records.length + reports.length + medicines.length + energyEntries.length + energySources.length > 0,
+  );
   let hasExported = $state(!hasExportableData);
   let confirmName = $state('');
+  let exporting = $state(false);
+  let exportError = $state('');
+  let skipArchive = $state(false);
+  let deleteError = $state('');
+  const deletionUnlocked = $derived(hasExported || skipArchive);
 
-  function exportPatientData() {
-    downloadPatientExport({ patient, reports, records, medicines }, patient?.name);
-    hasExported = true;
+  async function exportPatientData() {
+    exporting = true;
+    exportError = '';
+
+    try {
+      await downloadPatientArchive(
+        { patient, reports, records, medicines, energyEntries, energySources },
+        patient?.name,
+      );
+      hasExported = true;
+    } catch {
+      exportError = m.export_archive_failed();
+    } finally {
+      exporting = false;
+    }
   }
 </script>
 
@@ -97,6 +120,7 @@
             <button
               type="button"
               onclick={exportPatientData}
+              disabled={exporting}
               class="w-full inline-flex justify-center items-center gap-2 bg-white border border-slate-300 shadow-sm px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <svg
@@ -112,14 +136,21 @@
                   d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
                 /></svg
               >
-              {m.export_json_data()}
+              {exporting ? m.exporting_archive() : m.export_health_archive()}
             </button>
+            {#if exportError}
+              <p class="mt-2 text-xs font-medium text-rose-700" role="alert">{exportError}</p>
+              <label class="mt-3 flex items-start gap-2 text-xs text-slate-600">
+                <input type="checkbox" bind:checked={skipArchive} class="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
+                <span>{m.delete_without_archive()}</span>
+              </label>
+            {/if}
           </div>
         {/if}
 
         <div
           class="border border-slate-200 p-5 rounded-xl transition-opacity duration-300"
-          class:opacity-50={!hasExported}
+          class:opacity-50={!deletionUnlocked}
         >
           <p class="text-sm font-bold text-slate-800 mb-1">{hasExportableData ? m.step_2_confirm_deletion() : m.confirm_deletion()}</p>
           <p class="text-xs text-slate-500 mb-3">
@@ -131,7 +162,7 @@
           <input
             type="text"
             bind:value={confirmName}
-            disabled={!hasExported}
+            disabled={!deletionUnlocked}
             placeholder={m.type_name_here()}
             class="w-full text-sm font-semibold border-slate-300 bg-white rounded-lg shadow-sm focus:ring-2 focus:ring-rose-500 focus:border-rose-500 px-3 py-2.5 transition-shadow"
           />
@@ -142,9 +173,14 @@
         method="POST"
         action="?/deletePatient"
         use:enhance={() => {
-          return async ({ update }) => {
+          deleteError = '';
+          return async ({ result, update }) => {
             await update();
-            onClose();
+            if (result.type === 'success') {
+              onClose();
+            } else {
+              deleteError = m.delete_profile_failed();
+            }
           };
         }}
         class="pt-2 flex justify-end gap-3"
@@ -159,12 +195,15 @@
 
         <button
           type="submit"
-          disabled={!hasExported || confirmName !== patient.name}
+          disabled={!deletionUnlocked || confirmName !== patient.name}
           class="px-5 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-xl shadow-sm hover:bg-rose-700 transition-colors disabled:bg-rose-300 disabled:cursor-not-allowed border border-transparent"
         >
           {m.permanently_delete_data()}
         </button>
       </form>
+      {#if deleteError}
+        <p class="text-right text-xs font-medium text-rose-700" role="alert">{deleteError}</p>
+      {/if}
     </div>
   </div>
 </div>

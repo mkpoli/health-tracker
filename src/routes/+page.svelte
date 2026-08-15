@@ -2,7 +2,7 @@
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
-  import { downloadPatientExport } from '$lib/export';
+  import { downloadPatientArchive } from '$lib/export';
   import { tick } from 'svelte';
   import {
     normalizeComparableMeasurement,
@@ -48,6 +48,7 @@
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
   import MedicinePanel from '$lib/components/MedicinePanel.svelte';
+  import CaloriePanel from '$lib/components/CaloriePanel.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
   import TimeZoneField from '$lib/components/TimeZoneField.svelte';
 
@@ -70,6 +71,7 @@
   let showDeleteModal = $state(false);
   let showImportModal = $state(false);
   let showAddRecordModal = $state(false);
+  let exportingPatientData = $state(false);
 
   let selectedRecordIds = $state<string[]>([]);  let trendSearchQuery = $state('');  let lastSyncedTrendMetric = $state('');
   let reportFacilityName = $state('');
@@ -80,7 +82,7 @@
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
-  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine';
+  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine' | 'calories';
 
   let activeTab = $state<DashboardTab>('lab');
 
@@ -95,6 +97,7 @@
     { id: 'body', label: () => m.tab_body_measurements(), short: () => m.tab_body_measurements_short(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
     { id: 'vitals', label: () => m.tab_vitals(), short: () => m.tab_vitals_short(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
     { id: 'medicine', label: () => m.tab_medicine(), short: () => m.tab_medicine_short(), hint: () => m.tab_medicine_hint() },
+    { id: 'calories', label: () => m.tab_calories(), short: () => m.tab_calories_short(), hint: () => m.tab_calories_hint() },
   ];
 
   // Spelled out rather than composed, so Tailwind keeps the class names.
@@ -103,6 +106,7 @@
     body: { bar: 'bg-violet-500', active: 'text-violet-700' },
     vitals: { bar: 'bg-rose-500', active: 'text-rose-700' },
     medicine: { bar: 'bg-blue-500', active: 'text-blue-700' },
+    calories: { bar: 'bg-orange-500', active: 'text-orange-700' },
   };
 
   const activeTabMeta = $derived(dashboardTabs.find((tab) => tab.id === activeTab) ?? dashboardTabs[0]);
@@ -500,20 +504,28 @@
     return getReportFacility(report) || m.report_fallback();
   }
 
-  // Download the full dataset for the current patient (profile + every report +
-  // every record, with all columns intact) as a single re-importable JSON file.
-  function exportPatientData() {
+  async function exportPatientData() {
     if (!data.currentPatient) return;
 
-    downloadPatientExport(
-      {
-        patient: data.currentPatient,
-        reports: data.reports,
-        records: data.records,
-        medicines: data.medicines,
-      },
-      data.currentPatient.name,
-    );
+    exportingPatientData = true;
+
+    try {
+      await downloadPatientArchive(
+        {
+          patient: data.currentPatient,
+          reports: data.reports,
+          records: data.records,
+          medicines: data.medicines,
+          energyEntries: data.energyEntries,
+          energySources: data.energySources,
+        },
+        data.currentPatient.name,
+      );
+    } catch {
+      alert(m.export_archive_failed());
+    } finally {
+      exportingPatientData = false;
+    }
   }
 
   function getRecordMetadata(record: (typeof data.records)[number]) {
@@ -1710,6 +1722,8 @@
         reports={data.reports}
         records={data.records}
         medicines={data.medicines}
+        energyEntries={data.energyEntries}
+        energySources={data.energySources}
         onClose={() => (showDeleteModal = false)}
       />
     {/if}
@@ -2227,6 +2241,7 @@
             <button
               type="button"
               onclick={exportPatientData}
+              disabled={exportingPatientData}
               class="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap bg-white border border-slate-300 text-slate-700 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
             >
               <svg
@@ -2242,7 +2257,7 @@
                   d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
                 /></svg
               >
-              {m.export_json_data()}
+              {exportingPatientData ? m.exporting_archive() : m.export_health_archive()}
             </button>
             <button
               type="button"
@@ -2854,6 +2869,14 @@
         <div class="mt-6" hidden={activeTab !== 'medicine'}>
           <MedicinePanel patientId={data.currentPatient.id} medicines={data.medicines} />
         </div>
+
+        <div class="mt-6" hidden={activeTab !== 'calories'}>
+          <CaloriePanel
+            patientId={data.currentPatient.id}
+            entries={data.energyEntries}
+            sources={data.energySources}
+          />
+        </div>
       {/if}
     </main>
 
@@ -2888,9 +2911,14 @@
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h3l2.25-6 3.75 12 2.25-6h5.25" />
                   </svg>
-                {:else}
+                {:else if tab.id === 'medicine'}
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6.75l6.75 6.75m-9.9 3.15l9.3-9.3a3.182 3.182 0 00-4.5-4.5l-9.3 9.3a3.182 3.182 0 004.5 4.5zm0 0l-1.2 1.2a3.182 3.182 0 004.5 4.5l1.2-1.2" />
+                  </svg>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3.75c-1.72 2.4-4.5 4.97-4.5 8.25a4.5 4.5 0 109 0c0-3.28-2.78-5.85-4.5-8.25z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 10.5c-.9 1.12-1.5 2.08-1.5 3a1.5 1.5 0 003 0c0-.92-.6-1.88-1.5-3z" />
                   </svg>
                 {/if}
               </span>

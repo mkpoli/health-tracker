@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { medicineClaim, patient, record, report } from '$lib/server/db/schema';
+import { energyClaim, energySource, medicineClaim, patient, record, report } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { isLabReport } from '$lib/report-kind';
 
@@ -63,4 +63,24 @@ export async function getOwnedMedicineClaim(userId: string, medicineId: string) 
 
   const ownedPatient = await getOwnedPatient(userId, currentMedicine.patientId);
   return ownedPatient ? currentMedicine : null;
+}
+
+export async function getOwnedEnergyClaim(userId: string, energyClaimId: string) {
+  const rows = await db.select().from(energyClaim).where(eq(energyClaim.id, energyClaimId));
+  const currentClaim = rows[0];
+
+  if (!currentClaim) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentClaim.patientId);
+  return ownedPatient ? currentClaim : null;
+}
+
+export async function getOwnedEnergySource(userId: string, sourceId: string) {
+  const rows = await db.select().from(energySource).where(eq(energySource.id, sourceId));
+  const currentSource = rows[0];
+
+  if (!currentSource) return null;
+
+  const ownedClaim = await getOwnedEnergyClaim(userId, currentSource.energyClaimId);
+  return ownedClaim?.patientId === currentSource.patientId ? currentSource : null;
 }
