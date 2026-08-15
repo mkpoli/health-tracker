@@ -4,6 +4,8 @@ import {
   energyClaim,
   energySource,
   medicineClaim,
+  medicineIngredient,
+  medicineProduct,
   patient,
   record,
   report,
@@ -72,6 +74,27 @@ export async function getOwnedMedicineClaim(userId: string, medicineId: string) 
 
   const ownedPatient = await getOwnedPatient(userId, currentMedicine.patientId);
   return ownedPatient ? currentMedicine : null;
+}
+
+export async function getOwnedMedicineIngredient(userId: string, ingredientId: string) {
+  const rows = await db
+    .select()
+    .from(medicineIngredient)
+    .where(eq(medicineIngredient.id, ingredientId));
+  const currentIngredient = rows[0];
+  if (!currentIngredient) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentIngredient.patientId);
+  return ownedPatient ? currentIngredient : null;
+}
+
+export async function getOwnedMedicineProduct(userId: string, productId: string) {
+  const rows = await db.select().from(medicineProduct).where(eq(medicineProduct.id, productId));
+  const currentProduct = rows[0];
+  if (!currentProduct) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentProduct.patientId);
+  return ownedPatient ? currentProduct : null;
 }
 
 export async function getOwnedEnergyClaim(userId: string, energyClaimId: string) {

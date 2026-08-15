@@ -80,6 +80,7 @@ export function toMedicineClaimRevision(
     claimKind: 'medicine',
     snapshot: {
       ...snapshot,
+      productId: typeof snapshot.productId === 'string' ? snapshot.productId : null,
       status: isMedicineStatus(snapshot.status) ? snapshot.status : 'active',
     },
   };

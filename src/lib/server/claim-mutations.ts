@@ -7,6 +7,7 @@ import {
   energyClaim,
   energySource,
   medicineClaim,
+  medicineProduct,
 } from '$lib/server/db/schema';
 import type { EnergyInput } from '$lib/server/energy';
 import type { MedicineInput } from '$lib/server/medicines';
@@ -18,6 +19,29 @@ import {
 
 export interface ClaimOrigin extends ClaimRevisionSource {
   externalId?: string | null;
+}
+
+export class InvalidMedicineReferenceError extends Error {
+  constructor() {
+    super('The medicine product is outside this profile');
+    this.name = 'InvalidMedicineReferenceError';
+  }
+}
+
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function validateMedicineProduct(
+  tx: Transaction,
+  patientId: string,
+  productId: string | null,
+) {
+  if (!productId) return;
+  const rows = await tx
+    .select({ id: medicineProduct.id })
+    .from(medicineProduct)
+    .where(and(eq(medicineProduct.id, productId), eq(medicineProduct.patientId, patientId)))
+    .limit(1);
+  if (!rows[0]) throw new InvalidMedicineReferenceError();
 }
 
 export function normalizeMedicineClaim(
@@ -58,6 +82,7 @@ export async function createMedicineClaim(options: {
   idempotent?: boolean;
 }) {
   return db.transaction(async (tx) => {
+    await validateMedicineProduct(tx, options.patientId, options.input.productId);
     const values = {
       ...(options.id ? { id: options.id } : {}),
       patientId: options.patientId,
@@ -110,6 +135,11 @@ export async function updateMedicineClaim(options: {
   }
 
   return db.transaction(async (tx) => {
+    await validateMedicineProduct(
+      tx,
+      options.current.patientId,
+      options.input.productId,
+    );
     const currentSnapshot = normalizeMedicineClaim(options.current);
     await tx
       .insert(claimRevision)

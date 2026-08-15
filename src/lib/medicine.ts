@@ -5,6 +5,7 @@ export type MedicineStatus = (typeof medicineStatuses)[number];
 export interface MedicineClaimRecord {
   id: string;
   patientId: string;
+  productId: string | null;
   name: string;
   genericName: string | null;
   form: string | null;

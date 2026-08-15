@@ -525,6 +525,7 @@ function parseMedicine(value: unknown, patientId: string, id: string): MedicineC
   return {
     id,
     patientId,
+    productId: null,
     name: requiredText(row.name, 'invalid_medicine', 200),
     genericName: optionalText(row.genericName, 'invalid_medicine', 200),
     form: optionalText(row.form, 'invalid_medicine', 120),
