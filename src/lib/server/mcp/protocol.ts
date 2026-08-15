@@ -20,7 +20,7 @@ function serverIdentity(origin: string) {
   return {
     name: 'health-tracker',
     title: 'Health Tracker',
-    version: '1.0.0',
+    version: '1.1.0',
     description: "Lab results, measurements, medicine claims and energy records owned by this account holder.",
     websiteUrl: origin,
     icons: [
