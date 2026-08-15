@@ -10,6 +10,7 @@
   import { tick } from 'svelte';
   import TimeZoneField from './TimeZoneField.svelte';
   import { resolveZonedDateTime, timeZoneFromMetadata } from '$lib/time-zone';
+  import { normalizeExtractionEvidence } from '$lib/extraction-evidence';
 
   type ReviewMetric = {
     type: string;
@@ -58,6 +59,7 @@
     initialTimeZone = 'UTC',
     initialTargetReportId = 'new',
     initialRawSource = '',
+    initialExtractionEvidence = '',
     reportOptions = [],
     allowTargetSelection = true,
     allowManualAdd = false,
@@ -74,6 +76,7 @@
     initialTimeZone?: string;
     initialTargetReportId?: string;
     initialRawSource?: string;
+    initialExtractionEvidence?: string;
     reportOptions?: ReportItem[];
     allowTargetSelection?: boolean;
     allowManualAdd?: boolean;
@@ -243,6 +246,7 @@
   };
 
   const previewSource = $derived(parseRawReportSource(initialRawSource));
+  const extractionEvidence = $derived(normalizeExtractionEvidence(initialExtractionEvidence));
   const reviewRequiredCount = $derived(metrics.filter((metric) => metric.status === 'Review Required').length);
   const selectedTargetReport = $derived(
     reviewTargetReportId === 'new' ? null : reportOptions.find((report) => report.id === reviewTargetReportId) || null,
@@ -261,6 +265,7 @@
   <input type="hidden" name="reportFacility" value={reportFacilityName} />
   <input type="hidden" name="reportTestDate" value={reportTestDate} />
   <input type="hidden" name="reportRawSource" value={initialRawSource} />
+  <input type="hidden" name="reportExtractionEvidence" value={initialExtractionEvidence} />
   <input type="hidden" name="targetReportId" value={reviewTargetReportId === 'new' ? '' : reviewTargetReportId} />
   <input type="hidden" name="deletedRecordIds" value={JSON.stringify(deletedRecordIds)} />
 
@@ -362,6 +367,38 @@
       <div class="flex items-center border-b border-slate-100 bg-slate-50/50 px-6 py-4">
         <h2 class="font-semibold text-slate-800">{m.original_document()}</h2>
       </div>
+      {#if extractionEvidence}
+        <details class="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
+          <summary class="cursor-pointer text-sm font-semibold text-teal-700">
+            {m.extraction_evidence()}
+          </summary>
+          {#if extractionEvidence.dateEvidence.length > 0}
+            <div class="mt-3">
+              <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {m.transcribed_dates()}
+              </h3>
+              <ul class="mt-2 space-y-1 text-xs text-slate-700">
+                {#each extractionEvidence.dateEvidence as date}
+                  <li>
+                    <span class="font-medium">{date.sourceText}</span>
+                    {#if date.normalizedDate}
+                      <span class="text-slate-500"> · {date.normalizedDate} · {date.role}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+          {#if extractionEvidence.sourceTranscript}
+            <div class="mt-3">
+              <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {m.source_transcript()}
+              </h3>
+              <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{extractionEvidence.sourceTranscript}</pre>
+            </div>
+          {/if}
+        </details>
+      {/if}
       <div class="flex flex-1 items-start justify-center overflow-auto bg-slate-100/50 p-6">
         {#if (previewSource?.kind === 'file' && previewSource.dataUrl && previewSource.mimeType?.startsWith('image/')) || (previewSource?.kind === 'r2-file' && previewSource.sourceUrl && previewSource.mimeType?.startsWith('image/'))}
           <img

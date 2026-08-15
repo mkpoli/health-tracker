@@ -50,6 +50,7 @@ export const actions: Actions = {
         reportTimeZone: data.get('reportTimeZone')?.toString(),
         targetReportId: params.reportId,
         reportRawSource: data.get('reportRawSource')?.toString(),
+        reportExtractionEvidence: data.get('reportExtractionEvidence')?.toString(),
         deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
       });
     } catch (error) {
