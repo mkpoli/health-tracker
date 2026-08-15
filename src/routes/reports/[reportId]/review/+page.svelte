@@ -1,6 +1,7 @@
 <script lang="ts">
   import ReportReviewWorkspace from '$lib/components/ReportReviewWorkspace.svelte';
   import { getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
+  import { timeZoneFromMetadata, toDateTimeLocal } from '$lib/time-zone';
 
   type ReviewMetric = {
     type: string;
@@ -34,23 +35,17 @@
     return {} as Record<string, unknown>;
   }
 
-  function normalizeDateTimeLocal(value?: string | null) {
-    if (!value) return '';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '';
-    const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-  }
-
   function getReportTitle() {
     const title = typeof metadata.title === 'string' ? metadata.title.trim() : '';
     if (title) return title;
 
     const facility = typeof metadata.facilityName === 'string' && metadata.facilityName.trim() ? metadata.facilityName.trim() : 'Report';
-    return `${facility} ${normalizeDateTimeLocal(data.report.testDate).slice(0, 10)}`;
+    return `${facility} ${toDateTimeLocal(data.report.testDate, reportTimeZone).slice(0, 10)}`;
   }
 
   const metadata = $derived(parseJsonLike(data.report.extraData));
+  const patientTimeZone = $derived(timeZoneFromMetadata(data.currentPatient.extraData));
+  const reportTimeZone = $derived(timeZoneFromMetadata(data.report.extraData, patientTimeZone));
   const cancelHref = $derived(`/?patientId=${data.currentPatient.id}`);
   const initialMetrics = $derived(
     data.records.map((record: any) => {
@@ -96,7 +91,8 @@
       subtitle="Inspect the original source and update this report side by side."
       initialMetrics={initialMetrics}
       initialFacilityName={typeof metadata.facilityName === 'string' ? metadata.facilityName : ''}
-      initialTestDate={normalizeDateTimeLocal(data.report.testDate)}
+      initialTestDate={toDateTimeLocal(data.report.testDate, reportTimeZone)}
+      initialTimeZone={reportTimeZone}
       initialTargetReportId={data.report.id}
       initialRawSource={typeof data.report.rawData === 'string' ? data.report.rawData : ''}
       reportOptions={[data.report]}
