@@ -5,6 +5,7 @@ import { getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
 import { BODY_REPORT_KIND } from '$lib/report-kind';
 import { resolveReportTime } from '$lib/server/report-time';
+import { normalizeExtractionEvidence } from '$lib/extraction-evidence';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -61,6 +62,7 @@ export async function saveReviewedReport(input: {
   reportTimeZone?: string;
   targetReportId?: string;
   reportRawSource?: string;
+  reportExtractionEvidence?: string;
   deletedRecordIdsStr?: string;
 }) {
   const patientId = input.patientId;
@@ -69,6 +71,13 @@ export async function saveReviewedReport(input: {
   const requestedReportDate = requestedReportTime.instant;
   const targetReportId = input.targetReportId;
   const reportRawSource = input.reportRawSource;
+  const extractionEvidence = normalizeExtractionEvidence(input.reportExtractionEvidence);
+  const extractedDatePrecision =
+    extractionEvidence &&
+    !extractionEvidence.reportTime &&
+    /^\d{4}-\d{2}-\d{2}$/.test(extractionEvidence.reportDate)
+      ? 'date'
+      : 'minute';
   const deletedRecordIds = input.deletedRecordIdsStr ? JSON.parse(input.deletedRecordIdsStr) : [];
 
   const metrics = JSON.parse(input.metricsStr);
@@ -147,10 +156,12 @@ export async function saveReviewedReport(input: {
         patientId,
         testDate: requestedReportDate,
         rawData: reportRawSource || null,
+        organizedData: extractionEvidence ? JSON.stringify(extractionEvidence) : null,
         parsedJsonData: JSON.stringify(metricsToCreate),
         extraData: JSON.stringify({
           facilityName: reportFacility || null,
           timeZone: requestedReportTime.timeZone,
+          datePrecision: extractedDatePrecision,
         }),
       }).returning();
 
@@ -245,11 +256,17 @@ export async function saveReviewedReport(input: {
       await tx.update(report).set({
         testDate: requestedReportDate,
         rawData: reportRawSource || targetExistingReport.rawData || null,
+        organizedData: extractionEvidence
+          ? JSON.stringify(extractionEvidence)
+          : targetExistingReport.organizedData,
         parsedJsonData: JSON.stringify(metrics),
         extraData: JSON.stringify({
           ...existingExtraData,
           facilityName: reportFacility || existingExtraData.facilityName || null,
           timeZone: requestedReportTime.timeZone,
+          datePrecision: extractionEvidence
+            ? extractedDatePrecision
+            : existingExtraData.datePrecision || 'minute',
         }),
       }).where(eq(report.id, targetExistingReport.id));
     }

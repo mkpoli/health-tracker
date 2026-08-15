@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { env } from '$env/dynamic/private';
 import { metricSuggestions } from '$lib/metrics/catalog';
 import { MAX_INLINE_IMAGE_BYTES, MAX_UPLOAD_BYTES } from '$lib/upload-limits';
+import { normalizeExtractionEvidence } from '$lib/extraction-evidence';
 export { buildRawReportSource, resolveStoredReportSource } from '$lib/server/report-source-storage';
 export { MAX_INLINE_IMAGE_BYTES, MAX_UPLOAD_BYTES } from '$lib/upload-limits';
 
@@ -94,7 +95,16 @@ export async function extractMedicalData(textContext: string | null, file: File 
 Extract the document source and the metrics into a strictly typed JSON object like this:
 {
   "facilityName": "string representing the lab, hospital, clinic, or testing facility name if visible; otherwise empty string. Preserve the original hospital/facility name exactly as written in the document. Do not translate, transliterate, normalize, or rewrite it into English.",
-  "reportDate": "string representing the overall report/check date in ISO-like format if visible (prefer YYYY-MM-DD or YYYY-MM-DDTHH:mm); otherwise empty string",
+  "sourceTranscript": "complete plain-text transcription of every visible part of the document in reading order. Preserve the original language, spelling, dates, times, labels, values, units, notes, and footer text",
+  "dateEvidence": [
+    {
+      "sourceText": "date or timestamp exactly as printed in the document",
+      "normalizedDate": "the same value normalized to YYYY-MM-DD or YYYY-MM-DDTHH:mm when possible",
+      "role": "collection" | "report" | "issue" | "print" | "email" | "birth" | "unknown"
+    }
+  ],
+  "reportDate": "primary report/check timestamp in ISO-like format. Prefer a visible issue/result timestamp such as 発行日 when it includes a time, then the clinical collection or examination date. Use YYYY-MM-DD or YYYY-MM-DDTHH:mm; otherwise empty string",
+  "reportTime": "time portion of reportDate when it is printed in the document; otherwise empty string",
   "metrics": [
     {
       "type": "Blood Pressure" | "Blood Glucose" | "Weight" | "Cholesterol" | "Other",
@@ -176,7 +186,16 @@ Only output the raw JSON object. Do not wrap the JSON in markdown code blocks.`,
     const outputRaw = response.choices[0]?.message?.content || '{}';
     const cleanedOutput = outputRaw.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-    return JSON.parse(cleanedOutput);
+    const extracted = JSON.parse(cleanedOutput);
+    const evidence = normalizeExtractionEvidence(extracted);
+
+    return {
+      ...extracted,
+      sourceTranscript: evidence?.sourceTranscript || '',
+      dateEvidence: evidence?.dateEvidence || [],
+      reportDate: evidence?.reportDate || '',
+      reportTime: evidence?.reportTime || '',
+    };
   } finally {
     // The document is a person's medical record, so it does not stay in the
     // model provider's file storage beyond the request that needed it. A

@@ -66,6 +66,12 @@ export const actions: Actions = {
           rawSource,
           facilityName: extracted.facilityName || '',
           reportDate: extracted.reportDate || '',
+          extractionEvidence: JSON.stringify({
+            sourceTranscript: extracted.sourceTranscript || '',
+            dateEvidence: extracted.dateEvidence || [],
+            reportDate: extracted.reportDate || '',
+            reportTime: extracted.reportTime || '',
+          }),
           metrics: extracted.metrics || [],
         },
       };
@@ -111,6 +117,7 @@ export const actions: Actions = {
         reportTimeZone: data.get('reportTimeZone')?.toString(),
         targetReportId,
         reportRawSource: data.get('reportRawSource')?.toString(),
+        reportExtractionEvidence: data.get('reportExtractionEvidence')?.toString(),
         deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
       });
     } catch (error) {

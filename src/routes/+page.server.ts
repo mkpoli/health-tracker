@@ -173,6 +173,7 @@ export const actions: Actions = {
     const targetReportId = data.get('targetReportId')?.toString();
     const reportRawSource = data.get('reportRawSource')?.toString();
     const reportTimeZone = data.get('reportTimeZone')?.toString();
+    const reportExtractionEvidence = data.get('reportExtractionEvidence')?.toString();
 
     if (!patientId || !metricsStr) return fail(400, { error: 'Missing inputs' });
 
@@ -197,6 +198,7 @@ export const actions: Actions = {
         reportTimeZone,
         targetReportId,
         reportRawSource,
+        reportExtractionEvidence,
         deletedRecordIdsStr: data.get('deletedRecordIds')?.toString()
       });
     } catch (error) {

@@ -95,6 +95,7 @@
       initialTimeZone={reportTimeZone}
       initialTargetReportId={data.report.id}
       initialRawSource={typeof data.report.rawData === 'string' ? data.report.rawData : ''}
+      initialExtractionEvidence={JSON.stringify(data.report.organizedData || '')}
       reportOptions={[data.report]}
       allowTargetSelection={false}
       allowManualAdd={true}

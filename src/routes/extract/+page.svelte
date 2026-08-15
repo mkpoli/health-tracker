@@ -121,6 +121,7 @@
         initialTestDate={form.review.reportDate}
         initialTimeZone={profileTimeZone}
         initialRawSource={form.review.rawSource}
+        initialExtractionEvidence={form.review.extractionEvidence}
         reportOptions={data.reports}
         allowTargetSelection={true}
       />

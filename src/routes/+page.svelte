@@ -74,6 +74,7 @@
   let reportTestDate = $state('');
   let reportTimeZone = $state('UTC');
   let reportRawSource = $state('');
+  let reportExtractionEvidence = $state('');
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
@@ -460,6 +461,13 @@
     return typeof extraData?.timeZone === 'string';
   }
 
+  function getReportDateOptions(report: (typeof data.reports)[number]) {
+    const extraData = parseJsonLike(report.extraData);
+    return extraData?.datePrecision === 'date'
+      ? ({ dateStyle: 'medium' } satisfies Intl.DateTimeFormatOptions)
+      : undefined;
+  }
+
   function getReportNotes(report: (typeof data.reports)[number]) {
     const extraData = parseJsonLike(report.extraData);
     const organizedData = parseJsonLike(report.organizedData);
@@ -804,6 +812,7 @@
     reportTestDate = '';
     reportTimeZone = patientTimeZone;
     reportRawSource = '';
+    reportExtractionEvidence = '';
     reviewTargetReportId = 'new';
 
     if (previewFileURL) {
@@ -891,6 +900,12 @@
         reportTestDate = extractedReportDate || inferReportDateFromMetrics(metrics);
         reportTimeZone = patientTimeZone;
         reportRawSource = rawSource;
+        reportExtractionEvidence = JSON.stringify({
+          sourceTranscript: apiData.sourceTranscript || '',
+          dateEvidence: apiData.dateEvidence || [],
+          reportDate: apiData.reportDate || '',
+          reportTime: apiData.reportTime || '',
+        });
         reviewTargetReportId = 'new';
         if (previewFileURL) {
           URL.revokeObjectURL(previewFileURL);
@@ -1718,6 +1733,7 @@
           <input type="hidden" name="reportTestDate" value={reportTestDate} />
           <input type="hidden" name="reportTimeZone" value={reportTimeZone} />
           <input type="hidden" name="reportRawSource" value={reportRawSource} />
+          <input type="hidden" name="reportExtractionEvidence" value={reportExtractionEvidence} />
           <input
             type="hidden"
             name="targetReportId"
@@ -1807,7 +1823,7 @@
                     {m.check_date()}:
                     {formatDate(
                       getReviewTargetReport()!.testDate,
-                      undefined,
+                      getReportDateOptions(getReviewTargetReport()!),
                       getReportTimeZone(getReviewTargetReport()!),
                     )}
                   </div>
@@ -2747,7 +2763,11 @@
                                     {group.title}
                                   </h4>
                                   <p class="mt-1 text-sm text-slate-500">
-                                    {formatDate(group.report.testDate, undefined, getReportTimeZone(group.report))}
+                                    {formatDate(
+                                      group.report.testDate,
+                                      getReportDateOptions(group.report),
+                                      getReportTimeZone(group.report),
+                                    )}
                                     · {getReportTimeZoneLabel(group.report)}
                                     · {getRecordCountLabel(group.records.length)}
                                   </p>
