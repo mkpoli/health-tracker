@@ -5,6 +5,7 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { changedClaimFields, type EnergyClaimRevisionRecord } from '$lib/claim-revision';
+  import type { EnergyCaptureProposal } from '$lib/health-capture';
   import type {
     EnergyClaimRecord,
     EnergyDirection,
@@ -12,6 +13,7 @@
     EnergyStatus,
   } from '$lib/energy';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
+  import HealthCapture from './HealthCapture.svelte';
 
   let {
     patientId,
@@ -45,6 +47,7 @@
   let editorOpen = $state(false);
   let saving = $state(false);
   let saveError = $state('');
+  let captureReview = $state(false);
   let selectedDate = $state(todayLocalDate());
   let draft = $state<Draft>(newDraft('intake'));
 
@@ -150,6 +153,7 @@
   function openCreate(direction: EnergyDirection) {
     draft = newDraft(direction);
     saveError = '';
+    captureReview = false;
     editorOpen = true;
   }
 
@@ -169,6 +173,28 @@
       notes: entry.notes || '',
     };
     saveError = '';
+    captureReview = false;
+    editorOpen = true;
+  }
+
+  function applyCapture(proposal: EnergyCaptureProposal, sourceMessage: string) {
+    const direction = proposal.direction || 'intake';
+    const sourceNote = m.capture_source_note({ message: sourceMessage });
+    draft = {
+      ...newDraft(direction),
+      direction,
+      label: proposal.label || '',
+      category: direction === 'intake' ? proposal.category || 'meal' : '',
+      energyKcal: proposal.energyKcal === null ? '' : String(proposal.energyKcal),
+      occurredLocal: proposal.occurredLocal || currentLocalDateTime(),
+      durationMinutes:
+        proposal.durationMinutes === null ? '' : String(proposal.durationMinutes),
+      notes: [proposal.notes, sourceNote].filter(Boolean).join('\n\n').slice(0, 4000),
+    };
+    updateDraftTimeZone();
+    selectedDate = draft.occurredLocal.slice(0, 10);
+    saveError = '';
+    captureReview = true;
     editorOpen = true;
   }
 
@@ -187,6 +213,7 @@
     if (saving) return;
     editorOpen = false;
     saveError = '';
+    captureReview = false;
   }
 
   const submitEntry: SubmitFunction = () => {
@@ -198,6 +225,7 @@
         await update({ reset: true, invalidateAll: true });
         saving = false;
         editorOpen = false;
+        captureReview = false;
         draft = newDraft('intake');
         return;
       }
@@ -357,6 +385,14 @@
   </header>
 
   <div class="space-y-8 p-4 sm:p-6">
+    <HealthCapture
+      kind="energy"
+      {patientId}
+      onproposal={(proposal, sourceMessage) => {
+        if (proposal.kind === 'energy') applyCapture(proposal, sourceMessage);
+      }}
+    />
+
     <section aria-labelledby="calorie-day-heading">
       <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -567,6 +603,11 @@
         <input type="hidden" name="timezoneOffsetMinutes" value={draft.timezoneOffsetMinutes} />
 
         <div class="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
+          {#if captureReview}
+            <p class="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-800">
+              {m.capture_editor_notice()}
+            </p>
+          {/if}
           <fieldset>
             <legend class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               {m.calories_entry_type()}

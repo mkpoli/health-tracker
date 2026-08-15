@@ -50,6 +50,8 @@ Profile replacement stays off by default. The structured import runs in bounded 
 
 Each retained file may be up to 50 MB. JSON restoration leaves retained-file entries unresolved because JSON carries the manifest without file bytes. The review and completion screens report missing files. Native archive rollback currently uses the normal edit and delete controls for each imported record.
 
+Messages used to prepare Medicine or Calories drafts are copied into the claim's Notes field before review. A saved message is included in claim revisions and native archives. The user can edit or remove it in the review form.
+
 ## Apple Health import
 
 Apple documents the export path as **Health → Summary → profile picture or initials → Export All Health Data**. Choose a sharing destination for the generated ZIP. See [Share your data in Health on iPhone](https://support.apple.com/guide/iphone/share-your-health-data-iph5ede58c3d/ios).
