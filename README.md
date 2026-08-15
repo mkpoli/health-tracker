@@ -10,6 +10,7 @@ Health Tracker is a multilingual SvelteKit app for storing health profiles, impo
 - Track trends with localized dates and translated UI
 - Keep editable medicine plans with revision history
 - Record food intake and energy expenditure with retained source photos
+- Turn a short Medicine or Calories message into an editable draft
 - Run on Cloudflare with SQLite/Turso-backed data storage
 - Connect an AI assistant to the data through an MCP server
 
@@ -51,6 +52,35 @@ Uploaded documents, calorie photos, and the R2 bucket holding them stay outside
 the MCP grant. Energy tools report how many source files are retained.
 
 Backup, restore, Apple Health import, MCP client flow, and connector identity are documented in [Data portability](docs/data-portability.md).
+
+## Text capture
+
+Medicine and Calories each include a short text-capture field. The server sends
+one message to the selected Chat Completions provider. OpenAI uses a strict JSON
+schema. DeepSeek uses JSON-object output, followed by the same allowlisted local
+normalizer. The result opens in the existing editor; the user reviews every
+field and saves in a separate step. Calorie values are copied only when the
+message states them. Unknown energy remains a draft.
+
+The original message is copied into Notes and therefore travels with the claim
+through revision history and profile archives. The user may edit or remove it
+before saving. OpenAI requests set `store: false` and use a hashed account
+identifier for provider safety controls. DeepSeek processes messages under the
+retention settings and terms attached to its API account; its documented JSON
+request has no per-request storage setting.
+
+Set `DEEPSEEK_API_KEY` to select DeepSeek automatically. The default model is
+`deepseek-v4-flash`; `DEEPSEEK_API_CAPTURE_MODEL` may select
+`deepseek-v4-pro`. Set `HEALTH_CAPTURE_PROVIDER` to `openai` or `deepseek` when
+both provider keys exist. DeepSeek capture uses non-thinking mode for this
+bounded extraction task. See the official [DeepSeek JSON Output guide](https://api-docs.deepseek.com/guides/json_mode)
+and [model list](https://api-docs.deepseek.com/quick_start/pricing).
+
+The OpenAI path uses `OPENAI_API_CAPTURE_MODEL` and
+`OPENAI_API_CAPTURE_REASONING_EFFORT`, with `OPENAI_API_MODEL` and low reasoning
+effort as defaults. The current capture field accepts text. Source photos are
+attached in the Calories review form and retained at full fidelity; automatic
+food-photo interpretation will use a later provenance-aware design.
 
 ## Development
 

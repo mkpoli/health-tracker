@@ -5,8 +5,10 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
+  import type { MedicineCaptureProposal } from '$lib/health-capture';
   import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
+  import HealthCapture from './HealthCapture.svelte';
 
   let {
     patientId,
@@ -41,6 +43,7 @@
   let editorOpen = $state(false);
   let saving = $state(false);
   let saveError = $state('');
+  let captureReview = $state(false);
   let draft = $state<Draft>(emptyDraft());
 
   const currentMedicines = $derived(
@@ -87,6 +90,7 @@
   function openCreate() {
     draft = emptyDraft();
     saveError = '';
+    captureReview = false;
     editorOpen = true;
   }
 
@@ -108,6 +112,30 @@
       notes: medicine.notes || '',
     };
     saveError = '';
+    captureReview = false;
+    editorOpen = true;
+  }
+
+  function applyCapture(proposal: MedicineCaptureProposal, sourceMessage: string) {
+    const sourceNote = m.capture_source_note({ message: sourceMessage });
+    draft = {
+      id: '',
+      revision: 0,
+      name: proposal.name || '',
+      genericName: proposal.genericName || '',
+      form: proposal.form || '',
+      strength: proposal.strength || '',
+      route: proposal.route || '',
+      schedule: proposal.schedule || '',
+      status: proposal.status || 'active',
+      startDate: proposal.startDate || '',
+      endDate: proposal.endDate || '',
+      purpose: proposal.purpose || '',
+      prescriber: proposal.prescriber || '',
+      notes: [proposal.notes, sourceNote].filter(Boolean).join('\n\n').slice(0, 4000),
+    };
+    saveError = '';
+    captureReview = true;
     editorOpen = true;
   }
 
@@ -115,6 +143,7 @@
     if (saving) return;
     editorOpen = false;
     saveError = '';
+    captureReview = false;
   }
 
   const submitMedicine: SubmitFunction = () => {
@@ -126,6 +155,7 @@
         await update({ reset: true, invalidateAll: true });
         saving = false;
         editorOpen = false;
+        captureReview = false;
         draft = emptyDraft();
         return;
       }
@@ -266,6 +296,16 @@
       {m.add_medicine()}
     </button>
   </header>
+
+  <div class="border-b border-slate-100 p-4 sm:p-6">
+    <HealthCapture
+      kind="medicine"
+      {patientId}
+      onproposal={(proposal, sourceMessage) => {
+        if (proposal.kind === 'medicine') applyCapture(proposal, sourceMessage);
+      }}
+    />
+  </div>
 
   {#if medicines.length === 0}
     <div class="flex flex-col items-center px-6 py-16 text-center">
@@ -448,6 +488,11 @@
         {/if}
 
         <div class="space-y-7 px-5 py-5 sm:px-6 sm:py-6">
+          {#if captureReview}
+            <p class="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-800">
+              {m.capture_editor_notice()}
+            </p>
+          {/if}
           <fieldset>
             <legend class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               {m.medicine_details()}
