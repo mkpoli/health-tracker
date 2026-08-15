@@ -29,6 +29,7 @@
   import { buildTrendMetrics, type TrendPoint } from '$lib/metrics/trends';
   import { computeDerivedMetrics } from '$lib/metrics/derived';
   import { isLabReport, isMeasurementKind } from '$lib/report-kind';
+  import { formatReportSelectorLabel } from '$lib/report-selector-label';
   import { bodyDomain, vitalDomain, type MeasurementDomain } from '$lib/metrics/measurement-domains';
   import {
     timeZoneFromMetadata,
@@ -287,13 +288,22 @@
   });
 
   const groupedReports = $derived.by(() =>
-    labReports.map((report) => ({
-      report,
-      title: getReportTitle(report),
-      facilityName: reportFacilities[report.id],
-      notes: reportNotes[report.id],
-      records: labRecords.filter((record) => record.reportId === report.id),
-    })),
+    labReports.map((report) => {
+      const title = getReportTitle(report);
+      return {
+        report,
+        title,
+        selectorLabel: formatReportSelectorLabel({
+          title,
+          testDate: report.testDate,
+          timeZone: getReportTimeZone(report),
+          locale: currentLocale,
+        }),
+        facilityName: reportFacilities[report.id],
+        notes: reportNotes[report.id],
+        records: labRecords.filter((record) => record.reportId === report.id),
+      };
+    }),
   );
 
   // One series set per section, so each tab charts its own domain.
@@ -1858,7 +1868,7 @@
                 >
                   <option value="new">{m.create_new_report()}</option>
                   {#each groupedReports as group}
-                    <option value={group.report.id}>{group.title}</option>
+                    <option value={group.report.id}>{group.selectorLabel}</option>
                   {/each}
                 </select>
               </label>
