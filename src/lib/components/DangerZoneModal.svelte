@@ -11,6 +11,7 @@
     medicines = [],
     energyEntries = [],
     energySources = [],
+    claimRevisions = [],
     onClose,
   }: {
     patient: { id: string; name: string; [key: string]: unknown };
@@ -19,6 +20,7 @@
     medicines?: unknown[];
     energyEntries?: unknown[];
     energySources?: unknown[];
+    claimRevisions?: unknown[];
     onClose: () => void;
   } = $props();
 
@@ -41,7 +43,7 @@
 
     try {
       await downloadPatientArchive(
-        { patient, reports, records, medicines, energyEntries, energySources },
+        { patient, reports, records, medicines, energyEntries, energySources, claimRevisions },
         patient?.name,
       );
       hasExported = true;

@@ -1,20 +1,26 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
+  import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
   import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
+  import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
 
   let {
     patientId,
     medicines = [],
+    revisions = [],
   }: {
     patientId: string;
     medicines: MedicineClaimRecord[];
+    revisions: MedicineClaimRevisionRecord[];
   } = $props();
 
   type Draft = {
     id: string;
+    revision: number;
     name: string;
     genericName: string;
     form: string;
@@ -43,10 +49,26 @@
   const pastMedicines = $derived(
     medicines.filter((medicine) => pastStatuses.includes(medicine.status)),
   );
+  const revisionsByMedicine = $derived.by(() => {
+    const grouped = new Map<string, MedicineClaimRevisionRecord[]>();
+
+    for (const revision of revisions) {
+      const history = grouped.get(revision.claimId) || [];
+      history.push(revision);
+      grouped.set(revision.claimId, history);
+    }
+
+    for (const history of grouped.values()) {
+      history.sort((a, b) => b.revision - a.revision);
+    }
+
+    return grouped;
+  });
 
   function emptyDraft(): Draft {
     return {
       id: '',
+      revision: 0,
       name: '',
       genericName: '',
       form: '',
@@ -71,6 +93,7 @@
   function openEdit(medicine: MedicineClaimRecord) {
     draft = {
       id: medicine.id,
+      revision: medicine.revision,
       name: medicine.name,
       genericName: medicine.genericName || '',
       form: medicine.form || '',
@@ -107,8 +130,13 @@
         return;
       }
 
+      if (result.type === 'failure' && result.status === 409) {
+        await invalidateAll();
+        saveError = m.claim_revision_stale();
+      } else {
+        saveError = m.medicine_save_failed();
+      }
       saving = false;
-      saveError = m.medicine_save_failed();
     };
   };
 
@@ -157,6 +185,44 @@
     }
 
     return '';
+  }
+
+  function medicineFieldLabel(field: string) {
+    if (field === 'name') return m.medicine_name();
+    if (field === 'genericName') return m.medicine_generic_name();
+    if (field === 'form') return m.medicine_form();
+    if (field === 'strength') return m.medicine_strength();
+    if (field === 'route') return m.medicine_route();
+    if (field === 'schedule') return m.medicine_schedule();
+    if (field === 'status') return m.medicine_status();
+    if (field === 'startDate') return m.medicine_start_date();
+    if (field === 'endDate') return m.medicine_end_date();
+    if (field === 'purpose') return m.medicine_purpose();
+    if (field === 'prescriber') return m.medicine_prescriber();
+    if (field === 'notes') return m.notes();
+    if (field === 'originExternalId') return m.claim_field_source_reference();
+    if (field === 'originKind' || field === 'originProvider') return m.claim_field_source();
+    return field;
+  }
+
+  function medicineRevisionItems(medicine: MedicineClaimRecord) {
+    const history = revisionsByMedicine.get(medicine.id) || [];
+
+    return history.map((revision, index) => {
+      const previous = history[index + 1]?.snapshot || null;
+      const snapshot = revision.snapshot;
+      const fields = changedClaimFields(snapshot, previous).map(medicineFieldLabel);
+
+      return {
+        id: revision.id,
+        revision: revision.revision,
+        changedAt: revision.changedAt,
+        current: revision.revision === medicine.revision,
+        changedFields: [...new Set(fields)],
+        primary: [snapshot.name, medicineSummary(snapshot)].filter(Boolean).join(' · '),
+        secondary: [statusLabel(snapshot.status), snapshot.schedule].filter(Boolean).join(' · '),
+      };
+    });
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -246,7 +312,8 @@
 </section>
 
 {#snippet medicineCard(medicine: MedicineClaimRecord)}
-  <article class="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-blue-200 sm:p-5">
+  <article class="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors hover:border-blue-200">
+    <div class="p-4 sm:p-5">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -329,6 +396,8 @@
         </button>
       </form>
     </div>
+    </div>
+    <ClaimRevisionTimeline items={medicineRevisionItems(medicine)} />
   </article>
 {/snippet}
 
@@ -373,7 +442,10 @@
         class="app-scroll flex-1 overflow-y-auto"
       >
         <input type="hidden" name="patientId" value={patientId} />
-        {#if draft.id}<input type="hidden" name="id" value={draft.id} />{/if}
+        {#if draft.id}
+          <input type="hidden" name="id" value={draft.id} />
+          <input type="hidden" name="revision" value={draft.revision} />
+        {/if}
 
         <div class="space-y-7 px-5 py-5 sm:px-6 sm:py-6">
           <fieldset>
