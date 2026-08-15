@@ -2,6 +2,11 @@
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   let { onClose }: { onClose: () => void } = $props();
+  let browserTimeZone = $state('UTC');
+
+  $effect(() => {
+    browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  });
 </script>
 
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
@@ -30,6 +35,7 @@
       }}
       class="p-6 space-y-4"
     >
+      <input type="hidden" name="timeZone" value={browserTimeZone} />
       <div>
         <label for="name" class="block text-sm font-semibold text-slate-700 mb-1.5">{m.full_name()}</label>
         <input

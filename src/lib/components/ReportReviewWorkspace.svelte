@@ -8,6 +8,8 @@
   import RefRangePicker from './RefRangePicker.svelte';
   import type { PatientContext } from '$lib/metrics/ref-ranges';
   import { tick } from 'svelte';
+  import TimeZoneField from './TimeZoneField.svelte';
+  import { resolveZonedDateTime, timeZoneFromMetadata } from '$lib/time-zone';
 
   type ReviewMetric = {
     type: string;
@@ -53,6 +55,7 @@
     initialMetrics,
     initialFacilityName = '',
     initialTestDate = '',
+    initialTimeZone = 'UTC',
     initialTargetReportId = 'new',
     initialRawSource = '',
     reportOptions = [],
@@ -68,6 +71,7 @@
     initialMetrics: ReviewMetric[];
     initialFacilityName?: string;
     initialTestDate?: string;
+    initialTimeZone?: string;
     initialTargetReportId?: string;
     initialRawSource?: string;
     reportOptions?: ReportItem[];
@@ -83,11 +87,13 @@
   let metrics = $state(untrack(() => structuredClone(initialMetrics)));
   let reportFacilityName = $state(untrack(() => initialFacilityName));
   let reportTestDate = $state(untrack(() => initialTestDate));
+  let reportTimeZone = $state(untrack(() => initialTimeZone));
   let reviewTargetReportId = $state(untrack(() => initialTargetReportId));
   let deletedRecordIds = $state<string[]>([]);
   let metricCards = $state<Array<HTMLDivElement | null>>([]);
   let parsedLabelInputs = $state<Array<HTMLInputElement | null>>([]);
   let isSaving = $state(false);
+  let saveError = $state('');
 
   function parseJsonLike(value: unknown) {
     if (!value) return {} as Record<string, unknown>;
@@ -124,13 +130,14 @@
   function formatDate(
     value?: string | null,
     options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' },
+    timeZone = reportTimeZone,
   ) {
     if (!value) return '';
 
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
 
-    return new Intl.DateTimeFormat(currentLocale, options).format(parsed);
+    return new Intl.DateTimeFormat(currentLocale, { ...options, timeZone }).format(parsed);
   }
 
   function normalizeMetricMatchKey(value: unknown) {
@@ -162,7 +169,8 @@
     if (title) return title;
 
     const facility = getReportFacility(report) || 'Report';
-    return `${facility} ${formatDate(report.testDate, { dateStyle: 'medium' })}`;
+    const timeZone = timeZoneFromMetadata(report.extraData, reportTimeZone);
+    return `${facility} ${formatDate(report.testDate, { dateStyle: 'medium' }, timeZone)}`;
   }
 
   async function addMetricRow() {
@@ -218,7 +226,14 @@
     parsedLabelInputs = parsedLabelInputs.filter((_, metricIndex) => metricIndex !== index);
   }
 
-  const enhanceSaveForm: SubmitFunction = () => {
+  const enhanceSaveForm: SubmitFunction = ({ cancel }) => {
+    saveError = '';
+    if (!resolveZonedDateTime(reportTestDate, reportTimeZone)) {
+      cancel();
+      saveError = m.local_time_invalid();
+      return;
+    }
+
     isSaving = true;
 
     return async ({ update }) => {
@@ -294,7 +309,13 @@
     </div>
   {/if}
 
-  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+  {#if saveError}
+    <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+      {saveError}
+    </div>
+  {/if}
+
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-4">
     <label class="block">
       <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{m.lab_or_hospital()}</span>
       <input
@@ -312,6 +333,13 @@
         class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
       />
     </label>
+
+    <TimeZoneField
+      id="review-report-time-zone"
+      name="reportTimeZone"
+      bind:value={reportTimeZone}
+      dateTime={reportTestDate}
+    />
 
     {#if allowTargetSelection}
       <label class="block">

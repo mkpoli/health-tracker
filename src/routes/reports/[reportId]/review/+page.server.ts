@@ -6,6 +6,7 @@ import { record } from '$lib/server/db/schema';
 import { resolveStoredReportSource } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
 import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
+import { InvalidReportTimeError } from '$lib/server/report-time';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const userId = requireUserId(locals);
@@ -40,15 +41,21 @@ export const actions: Actions = {
     const currentReport = await getOwnedLabReport(userId, params.reportId);
     if (!currentReport) return fail(404, { error: 'Report not found' });
 
-    await saveReviewedReport({
-      patientId: currentReport.patientId,
-      metricsStr,
-      reportFacility: data.get('reportFacility')?.toString(),
-      reportTestDate: data.get('reportTestDate')?.toString(),
-      targetReportId: params.reportId,
-      reportRawSource: data.get('reportRawSource')?.toString(),
-      deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
-    });
+    try {
+      await saveReviewedReport({
+        patientId: currentReport.patientId,
+        metricsStr,
+        reportFacility: data.get('reportFacility')?.toString(),
+        reportTestDate: data.get('reportTestDate')?.toString(),
+        reportTimeZone: data.get('reportTimeZone')?.toString(),
+        targetReportId: params.reportId,
+        reportRawSource: data.get('reportRawSource')?.toString(),
+        deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
+      });
+    } catch (error) {
+      if (error instanceof InvalidReportTimeError) return fail(400, { code: 'invalid_report_time' });
+      throw error;
+    }
 
     throw redirect(303, `/?patientId=${currentReport.patientId}`);
   },

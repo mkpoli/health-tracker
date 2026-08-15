@@ -8,6 +8,7 @@ import { buildRawReportSource, ExtractionInputError, extractMedicalData } from '
 import { saveReviewedReport } from '$lib/server/report-review';
 import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
 import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { InvalidReportTimeError } from '$lib/server/report-time';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
   const userId = requireUserId(locals);
@@ -101,15 +102,21 @@ export const actions: Actions = {
       }
     }
 
-    await saveReviewedReport({
-      patientId: ownedPatient.id,
-      metricsStr,
-      reportFacility: data.get('reportFacility')?.toString(),
-      reportTestDate: data.get('reportTestDate')?.toString(),
-      targetReportId,
-      reportRawSource: data.get('reportRawSource')?.toString(),
-      deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
-    });
+    try {
+      await saveReviewedReport({
+        patientId: ownedPatient.id,
+        metricsStr,
+        reportFacility: data.get('reportFacility')?.toString(),
+        reportTestDate: data.get('reportTestDate')?.toString(),
+        reportTimeZone: data.get('reportTimeZone')?.toString(),
+        targetReportId,
+        reportRawSource: data.get('reportRawSource')?.toString(),
+        deletedRecordIdsStr: data.get('deletedRecordIds')?.toString(),
+      });
+    } catch (error) {
+      if (error instanceof InvalidReportTimeError) return fail(400, { code: 'invalid_report_time' });
+      throw error;
+    }
 
     throw redirect(303, `/?patientId=${ownedPatient.id}`);
   },

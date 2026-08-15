@@ -14,6 +14,8 @@ import {
 import { isMeasurementKind } from '$lib/report-kind';
 import { deleteImportedSessions, importMeasurementSessions } from '$lib/server/measurement-import';
 import { getOwnedLabReport, getOwnedPatient, getOwnedRecord, getOwnedReport, requireUserId } from '$lib/server/ownership';
+import { normalizeTimeZone } from '$lib/time-zone';
+import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -28,16 +30,6 @@ function parseJsonLike(value: unknown) {
   }
 
   return {} as Record<string, unknown>;
-}
-
-function normalizeReportDate(value?: string | null) {
-  const trimmed = value?.trim();
-  if (!trimmed) return new Date().toISOString();
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString();
-
-  return parsed.toISOString();
 }
 
 function normalizeMetricMatchKey(value: unknown) {
@@ -110,6 +102,7 @@ export const actions: Actions = {
     const name = data.get('name')?.toString();
     const agab = data.get('agab')?.toString();
     const birthday = data.get('birthday')?.toString();
+    const timeZone = normalizeTimeZone(data.get('timeZone')?.toString());
 
     if (!name) return fail(400, { error: 'Name is required' });
 
@@ -117,7 +110,8 @@ export const actions: Actions = {
       ownerUserId: userId,
       name,
       agab,
-      birthday
+      birthday,
+      extraData: JSON.stringify({ timeZone }),
     }).returning();
 
     return { success: true, patient: newPatient[0] };
@@ -132,6 +126,7 @@ export const actions: Actions = {
     const date = data.get('date')?.toString();
     const notes = data.get('notes')?.toString();
     const facilityName = data.get('facilityName')?.toString().trim();
+    const timeZone = data.get('timeZone')?.toString();
 
     if (!patientId || !type || !value) return fail(400, { error: 'Missing required fields' });
 
@@ -139,10 +134,21 @@ export const actions: Actions = {
 
     if (!ownedPatient) return fail(404, { error: 'Patient not found' });
 
+    let reportTime;
+    try {
+      reportTime = resolveReportTime(date, timeZone);
+    } catch (error) {
+      if (error instanceof InvalidReportTimeError) return fail(400, { code: 'invalid_report_time' });
+      throw error;
+    }
+
     const newReport = await db.insert(report).values({
       patientId: ownedPatient.id,
-      testDate: date || new Date().toISOString(),
-      extraData: JSON.stringify({ facilityName: facilityName || null })
+      testDate: reportTime.instant,
+      extraData: JSON.stringify({
+        facilityName: facilityName || null,
+        timeZone: reportTime.timeZone,
+      })
     }).returning();
 
     await db.insert(record).values({
@@ -166,6 +172,7 @@ export const actions: Actions = {
     const reportTestDate = data.get('reportTestDate')?.toString();
     const targetReportId = data.get('targetReportId')?.toString();
     const reportRawSource = data.get('reportRawSource')?.toString();
+    const reportTimeZone = data.get('reportTimeZone')?.toString();
 
     if (!patientId || !metricsStr) return fail(400, { error: 'Missing inputs' });
 
@@ -180,15 +187,22 @@ export const actions: Actions = {
       }
     }
 
-    const result = await saveReviewedReport({
-      patientId: ownedPatient.id,
-      metricsStr,
-      reportFacility,
-      reportTestDate,
-      targetReportId,
-      reportRawSource,
-      deletedRecordIdsStr: data.get('deletedRecordIds')?.toString()
-    });
+    let result;
+    try {
+      result = await saveReviewedReport({
+        patientId: ownedPatient.id,
+        metricsStr,
+        reportFacility,
+        reportTestDate,
+        reportTimeZone,
+        targetReportId,
+        reportRawSource,
+        deletedRecordIdsStr: data.get('deletedRecordIds')?.toString()
+      });
+    } catch (error) {
+      if (error instanceof InvalidReportTimeError) return fail(400, { code: 'invalid_report_time' });
+      throw error;
+    }
 
     return { success: true, ...result };
   },
@@ -235,6 +249,7 @@ export const actions: Actions = {
     const title = data.get('title')?.toString().trim();
     const facilityName = data.get('facilityName')?.toString().trim();
     const notes = data.get('notes')?.toString().trim();
+    const timeZone = data.get('timeZone')?.toString();
 
     if (!id || !testDate) return fail(400, { error: 'Missing required fields' });
 
@@ -244,13 +259,22 @@ export const actions: Actions = {
 
     const existingExtraData = parseJsonLike(current.extraData);
 
+    let reportTime;
+    try {
+      reportTime = resolveReportTime(testDate, timeZone);
+    } catch (error) {
+      if (error instanceof InvalidReportTimeError) return fail(400, { code: 'invalid_report_time' });
+      throw error;
+    }
+
     await db.update(report).set({
-      testDate: normalizeReportDate(testDate),
+      testDate: reportTime.instant,
       extraData: JSON.stringify({
         ...existingExtraData,
         title: title || null,
         facilityName: facilityName || null,
-        notes: notes || null
+        notes: notes || null,
+        timeZone: reportTime.timeZone,
       })
     }).where(eq(report.id, id));
 

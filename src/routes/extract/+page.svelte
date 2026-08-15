@@ -3,6 +3,7 @@
   import * as m from '$lib/paraglide/messages.js';
   import { fitImageForUpload } from '$lib/image-fit';
   import { MAX_INLINE_IMAGE_BYTES } from '$lib/upload-limits';
+  import { timeZoneFromMetadata } from '$lib/time-zone';
 
   type ReviewMetric = {
     type: string;
@@ -57,6 +58,7 @@
   const cancelHref = $derived(`/?patientId=${data.currentPatient.id}`);
   const saveAction = $derived(`?/save&patientId=${data.currentPatient.id}`);
   const extractAction = $derived(`/extract?/extract&patientId=${data.currentPatient.id}`);
+  const profileTimeZone = $derived(timeZoneFromMetadata(data.currentPatient.extraData));
   const initialMetrics = $derived(
     (form?.review?.metrics || []).map((metric: any) => ({
       ...metric,
@@ -117,6 +119,7 @@
         initialMetrics={initialMetrics}
         initialFacilityName={form.review.facilityName}
         initialTestDate={form.review.reportDate}
+        initialTimeZone={profileTimeZone}
         initialRawSource={form.review.rawSource}
         reportOptions={data.reports}
         allowTargetSelection={true}

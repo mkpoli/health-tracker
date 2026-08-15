@@ -4,6 +4,7 @@ import { record, report } from '$lib/server/db/schema';
 import { getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
 import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { resolveReportTime } from '$lib/server/report-time';
 
 function parseJsonLike(value: unknown) {
   if (!value) return {} as Record<string, unknown>;
@@ -18,16 +19,6 @@ function parseJsonLike(value: unknown) {
   }
 
   return {} as Record<string, unknown>;
-}
-
-function normalizeReportDate(value?: string | null) {
-  const trimmed = value?.trim();
-  if (!trimmed) return new Date().toISOString();
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString();
-
-  return parsed.toISOString();
 }
 
 function normalizeMetricMatchKey(value: unknown) {
@@ -67,13 +58,15 @@ export async function saveReviewedReport(input: {
   metricsStr: string;
   reportFacility?: string;
   reportTestDate?: string;
+  reportTimeZone?: string;
   targetReportId?: string;
   reportRawSource?: string;
   deletedRecordIdsStr?: string;
 }) {
   const patientId = input.patientId;
   const reportFacility = input.reportFacility?.trim();
-  const requestedReportDate = normalizeReportDate(input.reportTestDate);
+  const requestedReportTime = resolveReportTime(input.reportTestDate, input.reportTimeZone);
+  const requestedReportDate = requestedReportTime.instant;
   const targetReportId = input.targetReportId;
   const reportRawSource = input.reportRawSource;
   const deletedRecordIds = input.deletedRecordIdsStr ? JSON.parse(input.deletedRecordIdsStr) : [];
@@ -155,7 +148,10 @@ export async function saveReviewedReport(input: {
         testDate: requestedReportDate,
         rawData: reportRawSource || null,
         parsedJsonData: JSON.stringify(metricsToCreate),
-        extraData: JSON.stringify({ facilityName: reportFacility || null }),
+        extraData: JSON.stringify({
+          facilityName: reportFacility || null,
+          timeZone: requestedReportTime.timeZone,
+        }),
       }).returning();
 
       createdReport = insertedReports[0] || null;
@@ -253,6 +249,7 @@ export async function saveReviewedReport(input: {
         extraData: JSON.stringify({
           ...existingExtraData,
           facilityName: reportFacility || existingExtraData.facilityName || null,
+          timeZone: requestedReportTime.timeZone,
         }),
       }).where(eq(report.id, targetExistingReport.id));
     }

@@ -3,11 +3,13 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getMetricLabel } from '$lib/metrics/labels';
   import FileDropZone from './FileDropZone.svelte';
+  import TimeZoneField from './TimeZoneField.svelte';
 
   // The lab equivalent of the measurement dialog: one dashed "+" opens it, and
   // the manual form and the document extractor live inside as two modes.
   let {
     patientId,
+    timeZone,
     smartUploadActive = $bindable(true),
     recordType = $bindable('Blood Pressure'),
     valueLabel,
@@ -21,6 +23,7 @@
     onClose,
   }: {
     patientId: string;
+    timeZone: string;
     smartUploadActive?: boolean;
     recordType?: string;
     valueLabel: string;
@@ -33,6 +36,14 @@
     onExtractSubmit: (event: SubmitEvent) => void;
     onClose: () => void;
   } = $props();
+
+  let manualDate = $state('');
+
+  function initialTimeZone() {
+    return timeZone;
+  }
+
+  let manualTimeZone = $state(initialTimeZone());
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') onClose();
@@ -151,9 +162,16 @@
                         type="datetime-local"
                         name="date"
                         id="date-time"
+                        bind:value={manualDate}
                         class="w-full rounded-lg border-slate-300 shadow-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 sm:text-sm bg-white py-2.5 px-3 border outline-none transition-colors"
                       />
                     </div>
+                    <TimeZoneField
+                      id="manual-time-zone"
+                      name="timeZone"
+                      dateTime={manualDate}
+                      bind:value={manualTimeZone}
+                    />
                     <div>
                       <label for="notes" class="block text-sm font-semibold text-slate-700 mb-1.5"
                         >{m.clinical_notes()} <span class="text-slate-400 font-normal">({m.optional()})</span></label

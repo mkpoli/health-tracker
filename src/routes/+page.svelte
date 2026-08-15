@@ -1,6 +1,5 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { downloadPatientExport } from '$lib/export';
@@ -31,6 +30,11 @@
   import { computeDerivedMetrics } from '$lib/metrics/derived';
   import { isLabReport, isMeasurementKind } from '$lib/report-kind';
   import { bodyDomain, vitalDomain, type MeasurementDomain } from '$lib/metrics/measurement-domains';
+  import {
+    timeZoneFromMetadata,
+    timeZoneLabel,
+    toDateTimeLocal,
+  } from '$lib/time-zone';
 
   import WelcomeWizard from '$lib/components/WelcomeWizard.svelte';
   import MeasurementsPanel from '$lib/components/MeasurementsPanel.svelte';
@@ -43,6 +47,7 @@
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
+  import TimeZoneField from '$lib/components/TimeZoneField.svelte';
 
   let { data, form } = $props();
 
@@ -67,6 +72,7 @@
   let selectedRecordIds = $state<string[]>([]);  let trendSearchQuery = $state('');  let lastSyncedTrendMetric = $state('');
   let reportFacilityName = $state('');
   let reportTestDate = $state('');
+  let reportTimeZone = $state('UTC');
   let reportRawSource = $state('');
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
@@ -113,6 +119,7 @@
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
   });
   const currentLocale = $derived(getLocale());
+  const patientTimeZone = $derived(timeZoneFromMetadata(data.currentPatient?.extraData));
 
   type TrendPoint = {
     id: string;
@@ -385,6 +392,7 @@
       dateStyle: 'medium',
       timeStyle: 'short',
     },
+    timeZone = patientTimeZone,
   ) {
     if (!value) return m.date_unavailable();
 
@@ -393,6 +401,7 @@
 
     const resolvedOptions = {
       ...options,
+      timeZone,
       timeStyle: value.includes('T') ? options.timeStyle : undefined,
     } satisfies Intl.DateTimeFormatOptions;
 
@@ -438,6 +447,19 @@
     return '';
   }
 
+  function getReportTimeZone(report: (typeof data.reports)[number]) {
+    return timeZoneFromMetadata(report.extraData, patientTimeZone);
+  }
+
+  function getReportTimeZoneLabel(report: (typeof data.reports)[number]) {
+    return timeZoneLabel(getReportTimeZone(report), report.testDate, currentLocale);
+  }
+
+  function reportHasStoredTimeZone(report: (typeof data.reports)[number]) {
+    const extraData = parseJsonLike(report.extraData);
+    return typeof extraData?.timeZone === 'string';
+  }
+
   function getReportNotes(report: (typeof data.reports)[number]) {
     const extraData = parseJsonLike(report.extraData);
     const organizedData = parseJsonLike(report.organizedData);
@@ -460,7 +482,11 @@
     if (title) return title;
 
     const facility = getReportFacility(report) || m.report_fallback();
-    return `${facility} ${formatDate(report.testDate, { dateStyle: 'medium' })}`;
+    return `${facility} ${formatDate(
+      report.testDate,
+      { dateStyle: 'medium' },
+      getReportTimeZone(report),
+    )}`;
   }
 
   // Download the full dataset for the current patient (profile + every report +
@@ -511,11 +537,9 @@
       .trim();
   }
 
-  function getDateOnlyKey(value?: string | null) {
+  function getDateOnlyKey(value?: string | null, timeZone = patientTimeZone) {
     if (!value) return '';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '';
-    return parsed.toISOString().slice(0, 10);
+    return toDateTimeLocal(value, timeZone).slice(0, 10);
   }
 
   function getRecordMatchKeys(record: (typeof data.records)[number]) {
@@ -550,8 +574,10 @@
       labRecords
         .filter((record) => metricKeys.some((key) => getRecordMatchKeys(record).includes(key)))
         .sort((a, b) => {
-          const aDateKey = getDateOnlyKey(reportLookup[a.reportId]?.testDate);
-          const bDateKey = getDateOnlyKey(reportLookup[b.reportId]?.testDate);
+          const aReport = reportLookup[a.reportId];
+          const bReport = reportLookup[b.reportId];
+          const aDateKey = getDateOnlyKey(aReport?.testDate, aReport ? getReportTimeZone(aReport) : patientTimeZone);
+          const bDateKey = getDateOnlyKey(bReport?.testDate, bReport ? getReportTimeZone(bReport) : patientTimeZone);
           const aSameDay = extractedDateKey && aDateKey === extractedDateKey ? 1 : 0;
           const bSameDay = extractedDateKey && bDateKey === extractedDateKey ? 1 : 0;
 
@@ -667,7 +693,8 @@
     });
 
     reportFacilityName = group.facilityName || '';
-    reportTestDate = normalizeDateTimeLocal(group.report.testDate);
+    reportTimeZone = getReportTimeZone(group.report);
+    reportTestDate = normalizeDateTimeLocal(group.report.testDate, reportTimeZone);
     reportRawSource = typeof group.report.rawData === 'string' ? group.report.rawData : '';
     reviewTargetReportId = group.report.id;
     applyReportSource(parseRawReportSource(group.report.rawData));
@@ -714,38 +741,9 @@
     return fallbackStatus || null;
   }
 
-  function normalizeDateTimeLocal(value?: string | null) {
-    if (!value) return '';
-
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-
-    const parsed = new Date(trimmed);
-    if (!Number.isNaN(parsed.getTime())) {
-      const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-      return local.toISOString().slice(0, 16);
-    }
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      return `${trimmed}T00:00`;
-    }
-
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(trimmed)) {
-      return trimmed.slice(0, 16);
-    }
-
-    return '';
+  function normalizeDateTimeLocal(value?: string | null, timeZone = reportTimeZone) {
+    return toDateTimeLocal(value, timeZone);
   }
-
-  const enhanceUpdateReport: SubmitFunction = ({ formData }) => {
-    const testDate = formData.get('testDate');
-    if (typeof testDate !== 'string') return;
-
-    const parsed = new Date(testDate);
-    if (!Number.isNaN(parsed.getTime())) {
-      formData.set('testDate', parsed.toISOString());
-    }
-  };
 
   function inferReportDateFromMetrics(metrics: any[] | null | undefined) {
     if (!metrics?.length) return '';
@@ -764,6 +762,7 @@
     selectedRecordIds = [];
     reportFacilityName = '';
     reportTestDate = '';
+    reportTimeZone = patientTimeZone;
     expandedReportIds = labReports[0] ? [labReports[0].id] : [];
   });
 
@@ -803,6 +802,7 @@
     pendingMetrics = null;
     reportFacilityName = '';
     reportTestDate = '';
+    reportTimeZone = patientTimeZone;
     reportRawSource = '';
     reviewTargetReportId = 'new';
 
@@ -889,6 +889,7 @@
         pendingMetrics = metrics;
         reportFacilityName = apiData.facilityName || reportFacilityName;
         reportTestDate = extractedReportDate || inferReportDateFromMetrics(metrics);
+        reportTimeZone = patientTimeZone;
         reportRawSource = rawSource;
         reviewTargetReportId = 'new';
         if (previewFileURL) {
@@ -1623,6 +1624,12 @@
 
                 <div class="p-2">
                   <a
+                    href="/settings/time"
+                    class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    {m.time_settings_title()}
+                  </a>
+                  <a
                     href="/settings/connections"
                     class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
                   >
@@ -1655,6 +1662,7 @@
     {#if showAddRecordModal && data.currentPatient}
       <AddRecordModal
         patientId={data.currentPatient.id}
+        timeZone={patientTimeZone}
         bind:smartUploadActive
         bind:recordType
         {valueLabel}
@@ -1708,6 +1716,7 @@
           <input type="hidden" name="metrics" bind:this={hiddenMetricsInput} />
           <input type="hidden" name="reportFacility" value={reportFacilityName} />
           <input type="hidden" name="reportTestDate" value={reportTestDate} />
+          <input type="hidden" name="reportTimeZone" value={reportTimeZone} />
           <input type="hidden" name="reportRawSource" value={reportRawSource} />
           <input
             type="hidden"
@@ -1763,6 +1772,16 @@
                   class="w-full rounded-lg border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                 />
               </label>
+              <div class="mt-4 max-w-md">
+                <TimeZoneField
+                  id="review-report-time-zone"
+                  dateTime={reportTestDate}
+                  bind:value={reportTimeZone}
+                />
+              </div>
+              {#if form?.code === 'invalid_report_time'}
+                <p class="mt-2 text-sm text-rose-600">{m.local_time_invalid()}</p>
+              {/if}
               <label for="review-target-report" class="mt-4 block max-w-md">
                 <span class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
                   >{m.new_records_destination()}</span
@@ -1784,7 +1803,15 @@
                 >
                   <div class="font-semibold">{m.add_records_to_existing_report()}</div>
                   <div class="mt-1">{getReportTitle(getReviewTargetReport()!)}</div>
-                  <div class="mt-1">{m.check_date()}: {formatDate(getReviewTargetReport()!.testDate)}</div>
+                  <div class="mt-1">
+                    {m.check_date()}:
+                    {formatDate(
+                      getReviewTargetReport()!.testDate,
+                      undefined,
+                      getReportTimeZone(getReviewTargetReport()!),
+                    )}
+                  </div>
+                  <div class="mt-1 text-xs">{getReportTimeZoneLabel(getReviewTargetReport()!)}</div>
                 </div>
               {/if}
             </div>
@@ -2365,12 +2392,7 @@
                       <section id={`report-${group.report.id}`} class="border-t border-slate-100 first:border-t-0">
                         {#if isReportExpanded(group.report.id)}
                           <div class="border-t border-slate-100 bg-white px-6 py-5">
-                            <form
-                              method="POST"
-                              action="?/updateReport"
-                              use:enhance={enhanceUpdateReport}
-                              class="space-y-4"
-                            >
+                            <form method="POST" action="?/updateReport" use:enhance class="space-y-4">
                               <input type="hidden" name="id" value={group.report.id} />
                               <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0 flex-1 space-y-3">
@@ -2380,7 +2402,11 @@
                                       type="text"
                                       name="title"
                                       value={group.title}
-                                      placeholder={`${group.facilityName || m.report_fallback()} ${formatDate(group.report.testDate, { dateStyle: 'medium' })}`}
+                                      placeholder={`${group.facilityName || m.report_fallback()} ${formatDate(
+                                        group.report.testDate,
+                                        { dateStyle: 'medium' },
+                                        getReportTimeZone(group.report),
+                                      )}`}
                                       class="w-full border-0 bg-transparent px-0 py-0 text-lg font-semibold tracking-tight text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
                                     />
                                   </label>
@@ -2431,9 +2457,17 @@
                                   <input
                                     type="datetime-local"
                                     name="testDate"
-                                    value={normalizeDateTimeLocal(group.report.testDate)}
+                                    value={normalizeDateTimeLocal(group.report.testDate, getReportTimeZone(group.report))}
                                     class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                                   />
+                                  <div class="min-w-56">
+                                    <TimeZoneField
+                                      id={`report-time-zone-${group.report.id}`}
+                                      value={getReportTimeZone(group.report)}
+                                      dateTime={normalizeDateTimeLocal(group.report.testDate, getReportTimeZone(group.report))}
+                                      showLabel={false}
+                                    />
+                                  </div>
                                   <input
                                     type="text"
                                     name="facilityName"
@@ -2713,8 +2747,13 @@
                                     {group.title}
                                   </h4>
                                   <p class="mt-1 text-sm text-slate-500">
-                                    {formatDate(group.report.testDate)} - {getRecordCountLabel(group.records.length)}
+                                    {formatDate(group.report.testDate, undefined, getReportTimeZone(group.report))}
+                                    · {getReportTimeZoneLabel(group.report)}
+                                    · {getRecordCountLabel(group.records.length)}
                                   </p>
+                                  {#if !reportHasStoredTimeZone(group.report)}
+                                    <p class="mt-1 text-xs text-amber-700">{m.legacy_time_zone_hint()}</p>
+                                  {/if}
                                 </div>
                                 {#if group.facilityName}
                                   <span
