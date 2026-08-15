@@ -44,6 +44,8 @@ uploaded report.
 
 Uploaded documents and the R2 bucket holding them stay out of reach either way.
 
+Backup, restore, Apple Health import, MCP client flow, and connector identity are documented in [Data portability](docs/data-portability.md).
+
 ## Development
 
 Install dependencies and start the dev server:

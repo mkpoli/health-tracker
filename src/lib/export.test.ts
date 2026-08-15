@@ -16,7 +16,7 @@ describe('buildPatientExport', () => {
 
     expect(payload).toMatchObject({
       format: 'health-tracker-export',
-      version: 4,
+      version: 5,
       patient: { id: 'patient-1' },
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
@@ -56,11 +56,11 @@ describe('buildPatientExport', () => {
 
     expect(listPatientArchiveMedia(input)).toEqual([
       expect.objectContaining({
-        archivePath: 'media/calories/source-1-meal.jpg',
+        archivePath: 'media/calories/1-source-1-meal.jpg',
         sourceKind: 'energy-photo',
       }),
       expect.objectContaining({
-        archivePath: 'media/reports/report-1-scan.pdf',
+        archivePath: 'media/reports/1-report-1-scan.pdf',
         sourceKind: 'report-source',
       }),
     ]);
@@ -91,13 +91,19 @@ describe('buildPatientExport', () => {
     const files = unzipSync(archive);
 
     expect(requested).toEqual(['https://health.example/api/energy-source?id=source-1']);
-    expect(Array.from(files['media/calories/source-1-meal.jpg'])).toEqual([1, 2, 3]);
+    expect(Array.from(files['media/calories/1-source-1-meal.jpg'])).toEqual([1, 2, 3]);
     expect(JSON.parse(strFromU8(files['health-data.json']))).toMatchObject({
       format: 'health-tracker-export',
-      version: 4,
+      version: 5,
       energyEntries: [{ id: 'energy-1' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
-      mediaFiles: [{ archivePath: 'media/calories/source-1-meal.jpg' }],
+      mediaFiles: [
+        {
+          archivePath: 'media/calories/1-source-1-meal.jpg',
+          byteSize: 3,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      ],
     });
   });
 
@@ -115,5 +121,34 @@ describe('buildPatientExport', () => {
     await expect(buildPatientArchiveBytes(input, 'https://health.example')).rejects.toThrow(
       'Archive source must be served by this app',
     );
+  });
+
+  it('keeps source IDs while producing distinct safe ZIP paths', () => {
+    const media = listPatientArchiveMedia({
+      patient: { id: 'patient-1' },
+      reports: [],
+      records: [],
+      medicines: [],
+      energyEntries: [],
+      energySources: [
+        {
+          id: 'source/a',
+          sourceUrl: '/api/energy-source?id=source%2Fa',
+          fileName: 'meal.jpg',
+          mimeType: 'image/jpeg',
+        },
+        {
+          id: 'source:a',
+          sourceUrl: '/api/energy-source?id=source%3Aa',
+          fileName: 'meal.jpg',
+          mimeType: 'image/jpeg',
+        },
+      ],
+      claimRevisions: [],
+    });
+
+    expect(media.map((item) => item.sourceId)).toEqual(['source/a', 'source:a']);
+    expect(new Set(media.map((item) => item.archivePath))).toHaveProperty('size', 2);
+    expect(media.every((item) => !item.archivePath.includes('source/a'))).toBe(true);
   });
 });

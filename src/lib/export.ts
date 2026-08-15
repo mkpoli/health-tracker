@@ -1,6 +1,8 @@
 // A patient archive contains the structured snapshot and the source files that
 // can be read through the signed-in app.
 
+import { CURRENT_HEALTH_ARCHIVE_VERSION, sha256Hex } from '$lib/archive-format';
+
 export interface PatientExportInput {
   patient: unknown;
   reports: unknown[];
@@ -48,6 +50,13 @@ function safeArchiveName(value: unknown, fallback: string) {
   return cleaned || fallback;
 }
 
+function archiveSourceId(value: unknown, fallback: string) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
+    throw new Error(`Invalid archive source ID for ${fallback}`);
+  }
+  return value;
+}
+
 export function listPatientArchiveMedia(input: PatientExportInput): PatientArchiveMedia[] {
   const media: PatientArchiveMedia[] = [];
 
@@ -55,10 +64,11 @@ export function listPatientArchiveMedia(input: PatientExportInput): PatientArchi
     const source = asRecord(value);
     if (!source || typeof source.sourceUrl !== 'string') return;
 
-    const sourceId = safeArchiveName(source.id, `energy-source-${index + 1}`);
+    const sourceId = archiveSourceId(source.id, `energy-source-${index + 1}`);
+    const pathId = safeArchiveName(sourceId, `energy-source-${index + 1}`);
     const fileName = typeof source.fileName === 'string' ? source.fileName : null;
     media.push({
-      archivePath: `media/calories/${sourceId}-${safeArchiveName(fileName, 'meal-photo')}`,
+      archivePath: `media/calories/${index + 1}-${pathId}-${safeArchiveName(fileName, 'meal-photo')}`,
       sourceUrl: source.sourceUrl,
       sourceKind: 'energy-photo',
       sourceId,
@@ -82,10 +92,11 @@ export function listPatientArchiveMedia(input: PatientExportInput): PatientArchi
           : null;
     if (!sourceUrl) return;
 
-    const sourceId = safeArchiveName(report.id, `report-${index + 1}`);
+    const sourceId = archiveSourceId(report.id, `report-${index + 1}`);
+    const pathId = safeArchiveName(sourceId, `report-${index + 1}`);
     const fileName = typeof descriptor.fileName === 'string' ? descriptor.fileName : null;
     media.push({
-      archivePath: `media/reports/${sourceId}-${safeArchiveName(fileName, 'report-source')}`,
+      archivePath: `media/reports/${index + 1}-${pathId}-${safeArchiveName(fileName, 'report-source')}`,
       sourceUrl,
       sourceKind: 'report-source',
       sourceId,
@@ -110,7 +121,7 @@ export function buildPatientExport({
 
   return {
     format: 'health-tracker-export',
-    version: 4,
+    version: CURRENT_HEALTH_ARCHIVE_VERSION,
     exportedAt: new Date().toISOString(),
     patient,
     reports,
@@ -147,9 +158,8 @@ export async function buildPatientArchiveBytes(
   const { strToU8, zipSync } = await import('fflate');
   const appOrigin = new URL(origin).origin;
   const payload = buildPatientExport(input);
-  const files: Record<string, Uint8Array> = {
-    'health-data.json': strToU8(JSON.stringify(payload, null, 2)),
-  };
+  const mediaFiles = [];
+  const sourceFiles: Record<string, Uint8Array> = {};
 
   for (const media of listPatientArchiveMedia(input)) {
     const sourceUrl = new URL(media.sourceUrl, appOrigin);
@@ -159,8 +169,23 @@ export async function buildPatientArchiveBytes(
 
     const response = await fetchSource(sourceUrl, { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`Could not read ${media.archivePath}`);
-    files[media.archivePath] = new Uint8Array(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    sourceFiles[media.archivePath] = bytes;
+    mediaFiles.push({
+      archivePath: media.archivePath,
+      sourceKind: media.sourceKind,
+      sourceId: media.sourceId,
+      fileName: media.fileName,
+      mimeType: media.mimeType,
+      byteSize: bytes.byteLength,
+      sha256: await sha256Hex(bytes),
+    });
   }
+
+  const files: Record<string, Uint8Array> = {
+    'health-data.json': strToU8(JSON.stringify({ ...payload, mediaFiles }, null, 2)),
+    ...sourceFiles,
+  };
 
   return zipSync(files, { level: 0 });
 }
