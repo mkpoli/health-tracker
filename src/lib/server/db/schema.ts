@@ -1,5 +1,5 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import { relations } from 'drizzle-orm';
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { relations, sql } from 'drizzle-orm';
 
 export const task = sqliteTable('task', {
 	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -48,9 +48,47 @@ export const record = sqliteTable('record', {
 	extraData: text('extra_data', { mode: 'json' })
 });
 
+export const medicineClaim = sqliteTable(
+	'medicine_claim',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		genericName: text('generic_name'),
+		form: text('form'),
+		strength: text('strength'),
+		route: text('route'),
+		schedule: text('schedule'),
+		status: text('status').notNull().default('active'),
+		startDate: text('start_date'),
+		endDate: text('end_date'),
+		purpose: text('purpose'),
+		prescriber: text('prescriber'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		index('medicine_claim_patient_idx').on(table.patientId),
+		index('medicine_claim_patient_status_idx').on(table.patientId, table.status),
+		index('medicine_claim_patient_updated_idx').on(table.patientId, table.updatedAt)
+	]
+);
+
 export const patientRelations = relations(patient, ({ many }) => ({
 	reports: many(report),
-	records: many(record)
+	records: many(record),
+	medicineClaims: many(medicineClaim)
 }));
 
 export const reportRelations = relations(report, ({ one, many }) => ({
@@ -69,6 +107,13 @@ export const recordRelations = relations(record, ({ one }) => ({
 	report: one(report, {
 		fields: [record.reportId],
 		references: [report.id]
+	})
+}));
+
+export const medicineClaimRelations = relations(medicineClaim, ({ one }) => ({
+	patient: one(patient, {
+		fields: [medicineClaim.patientId],
+		references: [patient.id]
 	})
 }));
 

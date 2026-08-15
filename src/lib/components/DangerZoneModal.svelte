@@ -8,21 +8,24 @@
     patient,
     reports = [],
     records,
+    medicines = [],
     onClose,
   }: {
-    patient: any;
-    reports?: any[];
-    records: any[];
+    patient: { id: string; name: string; [key: string]: unknown };
+    reports?: unknown[];
+    records: unknown[];
+    medicines?: unknown[];
     onClose: () => void;
   } = $props();
 
   // Mounted behind {#if showDeleteModal}, so this reads the prop once on
   // purpose: the export a person did in one opening does not carry to the next.
-  let hasExported = $state(untrack(() => records.length === 0));
+  const hasExportableData = untrack(() => records.length + reports.length + medicines.length > 0);
+  let hasExported = $state(!hasExportableData);
   let confirmName = $state('');
 
   function exportPatientData() {
-    downloadPatientExport({ patient, reports, records }, patient?.name);
+    downloadPatientExport({ patient, reports, records, medicines }, patient?.name);
     hasExported = true;
   }
 </script>
@@ -69,7 +72,7 @@
       </div>
 
       <div class="space-y-4">
-        {#if records.length > 0}
+        {#if hasExportableData}
           <div class="bg-slate-50 p-5 rounded-xl border border-slate-200">
             <div class="flex items-start justify-between">
               <div>
@@ -118,7 +121,7 @@
           class="border border-slate-200 p-5 rounded-xl transition-opacity duration-300"
           class:opacity-50={!hasExported}
         >
-          <p class="text-sm font-bold text-slate-800 mb-1">{records.length > 0 ? m.step_2_confirm_deletion() : m.confirm_deletion()}</p>
+          <p class="text-sm font-bold text-slate-800 mb-1">{hasExportableData ? m.step_2_confirm_deletion() : m.confirm_deletion()}</p>
           <p class="text-xs text-slate-500 mb-3">
             {m.type_name_to_confirm({ name: patient.name })}
             <span class="font-bold font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800 select-all"
