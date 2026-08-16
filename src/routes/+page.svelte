@@ -53,6 +53,7 @@
   import WorkoutPanel from '$lib/components/WorkoutPanel.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
   import TimeZoneField from '$lib/components/TimeZoneField.svelte';
+  import PatientSelector from '$lib/components/PatientSelector.svelte';
 
   let { data, form } = $props();
 
@@ -1615,26 +1616,12 @@
         <!-- Two controls of one shape: the profile being viewed, and everything
              about the account behind one avatar. -->
         <div class="flex shrink-0 items-center gap-2">
-          <form method="GET" action="/" class="contents">
-            <div class="relative flex h-9 items-center rounded-full border border-slate-200 bg-slate-50 pl-3 pr-2 transition-colors focus-within:border-teal-500 focus-within:ring-1 focus-within:ring-teal-500 hover:bg-white">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="mr-1.5 hidden h-4 w-4 shrink-0 text-slate-400 sm:block">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.1a7.5 7.5 0 0115 0v.15H4.5v-.15z" />
-              </svg>
-              <select
-                name="patientId"
-                aria-label={m.patient_dashboard()}
-                onchange={(e) => e.currentTarget.form?.submit()}
-                class="max-w-[8rem] truncate border-0 bg-transparent py-0 pl-0 pr-6 text-sm font-medium text-slate-800 focus:outline-none focus:ring-0 sm:max-w-[12rem]"
-              >
-                {#if data.patients.length === 0}
-                  <option disabled>{m.no_patients()}</option>
-                {/if}
-                {#each data.patients as p}
-                  <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
-                {/each}
-              </select>
-            </div>
-          </form>
+          <PatientSelector
+            patients={data.patients}
+            currentPatientId={data.currentPatient?.id}
+            label={m.patient_dashboard()}
+            emptyLabel={m.no_patients()}
+          />
 
           <div class="relative" data-account-menu>
             <button
