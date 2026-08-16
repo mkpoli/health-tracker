@@ -1624,7 +1624,7 @@
                 name="patientId"
                 aria-label={m.patient_dashboard()}
                 onchange={(e) => e.currentTarget.form?.submit()}
-                class="max-w-[8rem] truncate border-0 bg-transparent py-0 pl-0 pr-6 text-sm font-medium text-slate-800 focus:outline-none focus:ring-0 sm:max-w-[12rem]"
+                class="max-w-[8rem] appearance-none truncate border-0 bg-transparent py-0 pl-0 pr-6 text-sm font-medium text-slate-800 focus:outline-none focus:ring-0 sm:max-w-[12rem]"
               >
                 {#if data.patients.length === 0}
                   <option disabled>{m.no_patients()}</option>
@@ -1633,6 +1633,17 @@
                   <option value={p.id} selected={data.currentPatient?.id === p.id}>{p.name}</option>
                 {/each}
               </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+                class="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
             </div>
           </form>
 
