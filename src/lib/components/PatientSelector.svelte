@@ -109,9 +109,15 @@
 
   function focusTypeaheadMatch(key: string) {
     if (typeaheadTimer) clearTimeout(typeaheadTimer);
-    typeahead += key.toLocaleLowerCase();
+    const lower = key.toLocaleLowerCase();
 
-    const start = activeIndex + 1;
+    // Repeating the same letter cycles through same-initial names; any other
+    // key extends the running query so multi-character prefixes still match.
+    const sameLetterRepeat = typeahead.length > 0 && typeahead.split('').every((char) => char === lower);
+    typeahead = sameLetterRepeat ? lower : typeahead + lower;
+
+    const step = sameLetterRepeat || typeahead.length === 1 ? 1 : 0;
+    const start = activeIndex + step;
     const orderedPatients = [...patients.slice(start), ...patients.slice(0, start)];
     const match = orderedPatients.find((patient) =>
       patient.name.toLocaleLowerCase().startsWith(typeahead),
@@ -158,7 +164,7 @@
     role="combobox"
     aria-label={`${label}: ${selectedPatient?.name ?? emptyLabel}`}
     aria-haspopup="listbox"
-    aria-controls={listboxId}
+    aria-controls={open ? listboxId : undefined}
     aria-expanded={open}
     aria-activedescendant={open ? optionId(activeIndex) : undefined}
     onclick={() => (open ? hideOptions() : showOptions())}
