@@ -1,6 +1,7 @@
 export const energyDirections = ['intake', 'expenditure'] as const;
 export const energyStatuses = ['recorded', 'draft', 'excluded'] as const;
 export const energyFoodDataSources = ['label', 'database', 'estimated', 'unknown'] as const;
+export const ENERGY_DIARY_DAY_START_HOUR = 5;
 
 export type EnergyDirection = (typeof energyDirections)[number];
 export type EnergyStatus = (typeof energyStatuses)[number];
@@ -74,4 +75,30 @@ export function isEnergyStatus(value: string): value is EnergyStatus {
 
 export function isEnergyFoodDataSource(value: string): value is EnergyFoodDataSource {
   return energyFoodDataSources.includes(value as EnergyFoodDataSource);
+}
+
+export function energyDiaryDateFromLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  if (hour < ENERGY_DIARY_DAY_START_HOUR) date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }

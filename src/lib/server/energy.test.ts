@@ -45,6 +45,17 @@ describe('parseEnergyInput', () => {
     });
   });
 
+  it.each([
+    ['2026-08-19T00:04', '2026-08-18'],
+    ['2026-08-19T04:59', '2026-08-18'],
+    ['2026-08-19T05:00', '2026-08-19'],
+    ['2026-01-01T02:30', '2025-12-31'],
+  ])('assigns %s to diary day %s', (occurredLocal, localDate) => {
+    const parsed = parseEnergyInput(form({ ...base, occurredLocal, energyKcal: '100' }));
+
+    expect(parsed.claim.localDate).toBe(localDate);
+  });
+
   it('keeps a photo-first entry pending when energy is unknown', () => {
     const input = parseEnergyInput(form(base));
 

@@ -897,6 +897,7 @@
   "calories_existing_photo_retained": "Attached source photos stay with this entry when its details change.",
   "calories_notes_placeholder": "Preparation, context, effort, or anything worth remembering",
   "calories_daily_diary": "Daily diary",
+  "calories_diary_day_window": "Diary day: 05:00–next day 04:59",
   "calories_previous_day": "Previous day",
   "calories_next_day": "Next day",
   "calories_today": "Today",

@@ -15,6 +15,7 @@
     EnergySourceRecord,
     EnergyStatus,
   } from '$lib/energy';
+  import { ENERGY_DIARY_DAY_START_HOUR } from '$lib/energy';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
   import HealthCapture from './HealthCapture.svelte';
 
@@ -196,6 +197,7 @@
 
   function todayLocalDate() {
     const now = new Date();
+    if (now.getHours() < ENERGY_DIARY_DAY_START_HOUR) now.setDate(now.getDate() - 1);
     return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   }
 
@@ -473,11 +475,13 @@
 
   function formatEntryTime(entry: EnergyClaimRecord) {
     const shifted = new Date(Date.parse(entry.occurredAt) + entry.timezoneOffsetMinutes * 60_000);
-    return new Intl.DateTimeFormat(getLocale(), {
+    const time = new Intl.DateTimeFormat(getLocale(), {
       hour: 'numeric',
       minute: '2-digit',
       timeZone: 'UTC',
     }).format(shifted);
+    const calendarDate = shifted.toISOString().slice(0, 10);
+    return calendarDate === entry.localDate ? time : `${m.calories_next_day()} ${time}`;
   }
 
   function formatQuantity(item: EnergyFoodItemRecord) {
@@ -595,6 +599,7 @@
         <div>
           <h4 id="calorie-day-heading" class="text-sm font-semibold text-slate-800">{m.calories_daily_diary()}</h4>
           <p class="mt-1 text-lg font-semibold tracking-tight text-slate-950">{formatDateOnly(selectedDate)}</p>
+          <p class="mt-0.5 text-xs text-slate-400">{m.calories_diary_day_window()}</p>
         </div>
         <div class="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
           <button type="button" onclick={() => changeSelectedDate(-1)} aria-label={m.calories_previous_day()} class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800">←</button>

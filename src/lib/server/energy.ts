@@ -1,4 +1,5 @@
 import {
+  energyDiaryDateFromLocalDateTime,
   isEnergyFoodDataSource,
   isEnergyDirection,
   isEnergyStatus,
@@ -227,7 +228,7 @@ function readLocalDateTime(data: FormData, timezoneOffsetMinutes: number) {
   }
 
   return {
-    localDate: `${match[1]}-${match[2]}-${match[3]}`,
+    localDate: energyDiaryDateFromLocalDateTime(value) || `${match[1]}-${match[2]}-${match[3]}`,
     occurredAt: new Date(localAsUtc.getTime() - timezoneOffsetMinutes * 60_000).toISOString(),
   };
 }

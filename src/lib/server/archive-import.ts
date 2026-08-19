@@ -29,6 +29,7 @@ import {
   workoutSet,
 } from '$lib/server/db/schema';
 import {
+  energyDiaryDateFromLocalDateTime,
   isEnergyDirection,
   isEnergyFoodDataSource,
   isEnergyStatus,
@@ -1155,6 +1156,12 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
 
   const createdAt = validDateText(row.createdAt, 'invalid_energy');
   const updatedAt = validDateText(row.updatedAt, 'invalid_energy');
+  const occurredAt = validDateText(row.occurredAt, 'invalid_energy');
+  const archivedLocalDate = requiredIsoDateText(row.localDate, 'invalid_energy');
+  const occurredLocal = new Date(
+    Date.parse(occurredAt) + timezoneOffsetMinutes * 60_000,
+  ).toISOString().slice(0, 16);
+  const localDate = energyDiaryDateFromLocalDateTime(occurredLocal) || archivedLocalDate;
 
   const snapshot = {
     id,
@@ -1163,8 +1170,8 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
     label: optionalText(row.label, 'invalid_energy', 300),
     category: optionalText(row.category, 'invalid_energy', 120),
     energyKcal: finiteNumberOrNull(row.energyKcal, 'invalid_energy', { min: 0, max: 1_000_000 }),
-    occurredAt: validDateText(row.occurredAt, 'invalid_energy'),
-    localDate: requiredIsoDateText(row.localDate, 'invalid_energy'),
+    occurredAt,
+    localDate,
     timezone: optionalText(row.timezone, 'invalid_energy', 120),
     timezoneOffsetMinutes,
     durationMinutes: finiteNumberOrNull(row.durationMinutes, 'invalid_energy', {
