@@ -121,6 +121,7 @@ describe('energy text capture', () => {
         category: 'lunch',
         energy_kcal: null,
         occurred_local: '2026-08-15T12:30',
+        diary_date: '2026-08-15',
         duration_minutes: null,
         notes: null,
         uncertain_fields: ['energyKcal'],
@@ -133,6 +134,7 @@ describe('energy text capture', () => {
       category: 'lunch',
       energyKcal: null,
       occurredLocal: '2026-08-15T12:30',
+      diaryDate: '2026-08-15',
       durationMinutes: null,
       notes: null,
       uncertainFields: ['energyKcal'],
@@ -148,6 +150,7 @@ describe('energy text capture', () => {
       category: null,
       energy_kcal: 312.1234,
       occurred_local: null,
+      diary_date: '2026-08-15',
       duration_minutes: 45,
       notes: null,
       uncertain_fields: [],
@@ -167,12 +170,13 @@ describe('energy text capture', () => {
       category: null,
       energy_kcal: null,
       occurred_local: null,
+      diary_date: null,
       duration_minutes: null,
       notes: null,
       uncertain_fields: [],
     });
 
-    expect(result.uncertainFields).toEqual(['occurredLocal', 'category']);
+    expect(result.uncertainFields).toEqual(['occurredLocal', 'category', 'diaryDate']);
   });
 
   it('rejects invalid wall times and non-integer durations', () => {
@@ -184,6 +188,7 @@ describe('energy text capture', () => {
       category: null,
       energy_kcal: 200,
       occurred_local: '2026-02-30T12:00',
+      diary_date: '2026-02-28',
       duration_minutes: 30.5,
       notes: null,
       uncertain_fields: [],

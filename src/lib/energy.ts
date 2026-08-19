@@ -1,7 +1,6 @@
 export const energyDirections = ['intake', 'expenditure'] as const;
 export const energyStatuses = ['recorded', 'draft', 'excluded'] as const;
 export const energyFoodDataSources = ['label', 'database', 'estimated', 'unknown'] as const;
-export const ENERGY_DIARY_DAY_START_HOUR = 5;
 
 export type EnergyDirection = (typeof energyDirections)[number];
 export type EnergyStatus = (typeof energyStatuses)[number];
@@ -77,7 +76,7 @@ export function isEnergyFoodDataSource(value: string): value is EnergyFoodDataSo
   return energyFoodDataSources.includes(value as EnergyFoodDataSource);
 }
 
-export function energyDiaryDateFromLocalDateTime(value: string) {
+export function energyCalendarDateFromLocalDateTime(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
 
@@ -99,6 +98,24 @@ export function energyDiaryDateFromLocalDateTime(value: string) {
     return null;
   }
 
-  if (hour < ENERGY_DIARY_DAY_START_HOUR) date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function suggestEnergyDiaryDate(
+  occurredLocal: string,
+  direction: EnergyDirection,
+  category: string | null,
+) {
+  const calendarDate = energyCalendarDateFromLocalDateTime(occurredLocal);
+  if (!calendarDate) return null;
+  const hour = Number(occurredLocal.slice(11, 13));
+  const continuesPreviousDay =
+    direction === 'intake' &&
+    hour < 5 &&
+    ['dinner', 'late_dinner', 'snack', 'drink'].includes(category || '');
+  if (!continuesPreviousDay) return calendarDate;
+
+  const date = new Date(`${calendarDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
   return date.toISOString().slice(0, 10);
 }

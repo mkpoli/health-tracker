@@ -23,6 +23,7 @@ export const energyCaptureFields = [
   'category',
   'energyKcal',
   'occurredLocal',
+  'diaryDate',
   'durationMinutes',
   'notes',
 ] as const;
@@ -55,6 +56,7 @@ export type EnergyCaptureProposal = {
   category: 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'meal' | null;
   energyKcal: number | null;
   occurredLocal: string | null;
+  diaryDate: string | null;
   durationMinutes: number | null;
   notes: string | null;
   uncertainFields: EnergyCaptureField[];
@@ -186,6 +188,7 @@ export function normalizeEnergyCapture(value: unknown): EnergyCaptureProposal {
   const energyKcal = nullableNumber(raw.energy_kcal, 1_000_000);
   const durationMinutes = nullableNumber(raw.duration_minutes, 10_080, true);
   const occurredLocal = localDateTime(raw.occurred_local);
+  const diaryDate = dateOnly(raw.diary_date);
   const statedUncertainFields = uncertainFields(raw.uncertain_fields, energyCaptureFields);
   const withDefaultTime = includeUncertainField(
     statedUncertainFields,
@@ -196,6 +199,11 @@ export function normalizeEnergyCapture(value: unknown): EnergyCaptureProposal {
     withDefaultTime,
     'category',
     direction === 'intake' && category === null,
+  );
+  const withDefaultDiaryDate = includeUncertainField(
+    withDefaultCategory,
+    'diaryDate',
+    diaryDate === null,
   );
 
   return {
@@ -209,9 +217,10 @@ export function normalizeEnergyCapture(value: unknown): EnergyCaptureProposal {
     category: category as EnergyCaptureProposal['category'],
     energyKcal,
     occurredLocal,
+    diaryDate,
     durationMinutes,
     notes: nullableText(raw.notes, 1000),
-    uncertainFields: withDefaultCategory,
+    uncertainFields: withDefaultDiaryDate,
   };
 }
 

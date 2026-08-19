@@ -818,6 +818,7 @@ describe('MCP energy claims', () => {
         },
       ],
       occurred_at: '2026-08-15T12:15:00+09:00',
+      diary_date: '2026-08-14',
       timezone: 'Asia/Tokyo',
     })) as any;
     const exercise = (await log.handler(context, {
@@ -846,7 +847,8 @@ describe('MCP energy claims', () => {
     });
     expect(meal.entry).toMatchObject({
       occurred_at: '2026-08-15T03:15:00.000Z',
-      local_date: '2026-08-15',
+      diary_date: '2026-08-14',
+      local_date: '2026-08-14',
       timezone_offset_minutes: 540,
       energy_kcal: 640,
       food_items: [
@@ -864,7 +866,7 @@ describe('MCP energy claims', () => {
 
     const listed = (await tool('list_energy_entries').handler(context, {
       patient_id: 'profile-1',
-      from: '2026-08-15',
+      from: '2026-08-14',
       to: '2026-08-15',
     })) as any;
     expect(listed.total).toBe(2);
@@ -911,6 +913,7 @@ describe('MCP energy claims', () => {
     })) as any;
     expect(changed.entry).toMatchObject({
       energy_kcal: 675,
+      diary_date: '2026-08-14',
       revision: 2,
       retained_file_count: 1,
       food_items: [

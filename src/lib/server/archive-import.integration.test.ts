@@ -1531,14 +1531,14 @@ describe('archive import storage', () => {
     expect(restoredFoods.rows).toEqual([
       expect.objectContaining({
         label: 'Structured breakfast',
-        local_date: '2026-08-02',
+        local_date: '2026-08-03',
         name: 'Rice',
         energy_kcal: 281,
         order_index: 0,
       }),
       expect.objectContaining({
         label: 'Structured breakfast',
-        local_date: '2026-08-02',
+        local_date: '2026-08-03',
         name: 'Tofu',
         energy_kcal: 108,
         order_index: 1,
@@ -1555,7 +1555,7 @@ describe('archive import storage', () => {
     `);
     expect(structuredRevision.rows[0]).toMatchObject({
       food_count: 2,
-      snapshot_local_date: '2026-08-02',
+      snapshot_local_date: '2026-08-03',
     });
 
     const workoutRelationship = await client.execute(`

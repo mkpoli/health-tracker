@@ -1,11 +1,12 @@
 import {
-  energyDiaryDateFromLocalDateTime,
+  energyCalendarDateFromLocalDateTime,
   isEnergyFoodDataSource,
   isEnergyDirection,
   isEnergyStatus,
   type EnergyDirection,
   type EnergyFoodDataSource,
   type EnergyStatus,
+  suggestEnergyDiaryDate,
 } from '$lib/energy';
 
 const fieldLimits = {
@@ -67,6 +68,7 @@ export type EnergyInputErrorCode =
   | 'invalid_time'
   | 'invalid_timezone'
   | 'invalid_duration'
+  | 'invalid_diary_date'
   | 'invalid_food_items'
   | 'field_too_long'
   | 'empty_entry';
@@ -228,9 +230,27 @@ function readLocalDateTime(data: FormData, timezoneOffsetMinutes: number) {
   }
 
   return {
-    localDate: energyDiaryDateFromLocalDateTime(value) || `${match[1]}-${match[2]}-${match[3]}`,
+    occurredLocal: value,
+    calendarDate: energyCalendarDateFromLocalDateTime(value) || `${match[1]}-${match[2]}-${match[3]}`,
     occurredAt: new Date(localAsUtc.getTime() - timezoneOffsetMinutes * 60_000).toISOString(),
   };
+}
+
+function readDiaryDate(data: FormData, calendarDate: string, suggestedDate: string) {
+  const raw = data.get('diaryDate');
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return suggestedDate;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new InvalidEnergyInputError('invalid_diary_date');
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new InvalidEnergyInputError('invalid_diary_date');
+  }
+  const calendar = new Date(`${calendarDate}T00:00:00.000Z`);
+  const differenceDays = Math.abs((parsed.getTime() - calendar.getTime()) / 86_400_000);
+  if (differenceDays > 1) throw new InvalidEnergyInputError('invalid_diary_date');
+  return value;
 }
 
 function readDuration(data: FormData, direction: EnergyDirection) {
@@ -264,8 +284,14 @@ export function parseEnergyInput(data: FormData): ParsedEnergyInput {
     throw new InvalidEnergyInputError('missing_energy');
   }
 
+  const category = readText(data, 'category');
   const timezoneOffsetMinutes = readTimezoneOffset(data);
-  const { occurredAt, localDate } = readLocalDateTime(data, timezoneOffsetMinutes);
+  const { occurredAt, occurredLocal, calendarDate } = readLocalDateTime(
+    data,
+    timezoneOffsetMinutes,
+  );
+  const suggestedDate = suggestEnergyDiaryDate(occurredLocal, direction, category) || calendarDate;
+  const localDate = readDiaryDate(data, calendarDate, suggestedDate);
   const timezone = readText(data, 'timezone');
 
   if (timezone) {
@@ -280,7 +306,7 @@ export function parseEnergyInput(data: FormData): ParsedEnergyInput {
     claim: {
       direction,
       label: readText(data, 'label'),
-      category: readText(data, 'category'),
+      category,
       energyKcal,
       occurredAt,
       localDate,

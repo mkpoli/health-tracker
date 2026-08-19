@@ -37,6 +37,7 @@ const energyResult = {
   category: 'lunch',
   energy_kcal: null,
   occurred_local: '2026-08-15T12:30',
+  diary_date: '2026-08-15',
   duration_minutes: null,
   notes: null,
   uncertain_fields: ['energyKcal'],

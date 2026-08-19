@@ -93,6 +93,7 @@ const energyFields = [
   'energy_kcal',
   'food_items',
   'occurred_at',
+  'diary_date',
   'timezone',
   'duration_minutes',
   'status',
@@ -147,6 +148,12 @@ const energyProperties = {
   occurred_at: {
     type: 'string',
     description: 'ISO timestamp with Z or a numeric UTC offset. Stored at minute resolution.',
+  },
+  diary_date: {
+    type: ['string', 'null'],
+    pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    description:
+      'Diary date in YYYY-MM-DD form. Use the date meant by context such as yesterday, last night, today or tomorrow. The timestamp remains unchanged.',
   },
   timezone: { type: 'string', description: 'IANA timezone. The profile timezone is the default.' },
   duration_minutes: { type: ['integer', 'null'], minimum: 0, maximum: 10_080 },
@@ -298,6 +305,7 @@ function energyForm(
     data.set('category', optionalTextField(args, 'category', current.category));
     data.set('energyKcal', optionalNumberField(args, 'energy_kcal', current.energyKcal));
     data.set('occurredLocal', fixedLocal);
+    data.set('diaryDate', optionalTextField(args, 'diary_date', current.localDate));
     data.set('timezoneOffsetMinutes', String(current.timezoneOffsetMinutes));
     data.set('timezone', current.timezone ?? '');
     data.set(
@@ -337,6 +345,7 @@ function energyForm(
   data.set('category', optionalTextField(args, 'category', current?.category ?? null));
   data.set('energyKcal', optionalNumberField(args, 'energy_kcal', current?.energyKcal ?? null));
   data.set('occurredLocal', occurredLocal);
+  data.set('diaryDate', optionalTextField(args, 'diary_date', current?.localDate ?? null));
   data.set('timezoneOffsetMinutes', String(offset));
   data.set('timezone', zone);
   data.set(
@@ -405,6 +414,7 @@ function serializeEnergy(claim: EnergyClaimRecord, retainedFileCount = 0) {
     energy_kcal: claim.energyKcal,
     food_items: claim.foodItems.map(serializeFoodItem),
     occurred_at: claim.occurredAt,
+    diary_date: claim.localDate,
     local_date: claim.localDate,
     timezone: claim.timezone,
     timezone_offset_minutes: claim.timezoneOffsetMinutes,
@@ -681,8 +691,8 @@ const listEnergyEntries: ToolDefinition = {
       patient_id: { type: 'string' },
       direction: { type: 'string', enum: energyDirections },
       status: { type: 'string', enum: energyStatuses },
-      from: { type: 'string', description: 'Local calendar date, inclusive, in YYYY-MM-DD form.' },
-      to: { type: 'string', description: 'Local calendar date, inclusive, in YYYY-MM-DD form.' },
+      from: { type: 'string', description: 'Diary date, inclusive, in YYYY-MM-DD form.' },
+      to: { type: 'string', description: 'Diary date, inclusive, in YYYY-MM-DD form.' },
       query: { type: 'string', maxLength: 300 },
       limit: { type: 'integer', minimum: 1, maximum: MAX_CLAIMS_PER_PAGE },
     },
