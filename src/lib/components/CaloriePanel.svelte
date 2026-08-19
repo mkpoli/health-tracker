@@ -31,6 +31,16 @@
   } = $props();
 
   type EditorStatus = EnergyStatus | 'auto';
+  type MealPeriod = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'meal';
+
+  const mealPeriodOrder: MealPeriod[] = [
+    'breakfast',
+    'lunch',
+    'dinner',
+    'snack',
+    'drink',
+    'meal',
+  ];
 
   type FoodDraft = {
     key: string;
@@ -109,6 +119,25 @@
   );
   const selectedActivities = $derived(
     selectedEntries.filter((entry) => entry.direction === 'expenditure'),
+  );
+  const selectedMealGroups = $derived.by(() =>
+    mealPeriodOrder.flatMap((period) => {
+      const periodEntries = selectedMeals.filter(
+        (entry) => mealPeriodKey(entry.category) === period,
+      );
+      if (periodEntries.length === 0) return [];
+      return [{
+        period,
+        entries: periodEntries,
+        foodCount: periodEntries.reduce((total, entry) => total + entry.foodItems.length, 0),
+        recordedTotal: periodEntries
+          .filter((entry) => entry.status === 'recorded' && entry.energyKcal !== null)
+          .reduce((total, entry) => total + (entry.energyKcal || 0), 0),
+        pendingCount: periodEntries.filter(
+          (entry) => entry.status === 'draft' || entry.energyKcal === null,
+        ).length,
+      }];
+    }),
   );
   const countedEntries = $derived(
     selectedEntries.filter((entry) => entry.status === 'recorded' && entry.energyKcal !== null),
@@ -410,11 +439,16 @@
     return m.calories_meal_other();
   }
 
+  function mealPeriodKey(category: string | null): MealPeriod {
+    if (category === 'breakfast' || category === 'lunch' || category === 'snack' || category === 'drink') {
+      return category;
+    }
+    if (category === 'dinner' || category === 'late_dinner') return 'dinner';
+    return 'meal';
+  }
+
   function categoryRank(category: string | null) {
-    const rank = ['breakfast', 'lunch', 'dinner', 'late_dinner', 'snack', 'drink', 'meal'].indexOf(
-      category || 'meal',
-    );
-    return rank < 0 ? 99 : rank;
+    return mealPeriodOrder.indexOf(mealPeriodKey(category));
   }
 
   function formatKcal(value: number) {
@@ -609,81 +643,105 @@
         </div>
       {:else}
         <div class="space-y-6">
-          {#if selectedMeals.length > 0}
-            <div class="space-y-3">
+          {#if selectedMealGroups.length > 0}
+            <div class="space-y-4">
               <h5 class="text-sm font-semibold text-slate-700">{m.calories_meals()}</h5>
-              {#each selectedMeals as entry (entry.id)}
-                {@const entrySources = sourcesByEntry.get(entry.id) || []}
-                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div class="flex gap-4 p-4 sm:p-5">
-                    {#if entrySources[0]}
-                      <img src={entrySources[0].sourceUrl} alt={m.calories_photo_alt({ name: entryLabel(entry) })} class="h-20 w-20 shrink-0 rounded-xl object-cover sm:h-24 sm:w-24" loading="lazy" decoding="async" />
-                    {/if}
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                          <div class="flex flex-wrap items-center gap-2 text-xs">
-                            <span class="font-semibold text-orange-700">{categoryLabel(entry.category)}</span>
-                            <span class="text-slate-400">{formatEntryTime(entry)}</span>
-                            <span class={`rounded-full border px-2 py-0.5 font-semibold ${statusTone(entry.status)}`}>{statusLabel(entry.status)}</span>
-                          </div>
-                          <h6 class="mt-1.5 font-semibold text-slate-900">{entryLabel(entry)}</h6>
-                        </div>
-                        <button type="button" onclick={() => openEdit(entry)} class="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700">{m.calories_edit_entry()}</button>
-                      </div>
-                      <div class="mt-2">
-                        {#if entry.energyKcal !== null}
-                          <span class="text-xl font-semibold tracking-tight text-slate-950">{formatKcal(entry.energyKcal)} <span class="text-xs font-medium text-slate-500">kcal</span></span>
-                        {:else}
-                          <span class="text-sm font-semibold text-amber-700">{m.calories_estimate_needed()}</span>
-                        {/if}
+              {#each selectedMealGroups as group, groupIndex (group.period)}
+                <section class="rounded-2xl border border-orange-100 bg-orange-50/40 p-3 sm:p-4" aria-labelledby={`meal-period-${group.period}`}>
+                  <header class="flex items-center justify-between gap-4">
+                    <div class="flex min-w-0 items-center gap-3">
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-600 text-sm font-semibold text-white">{groupIndex + 1}</span>
+                      <div class="min-w-0">
+                        <h6 id={`meal-period-${group.period}`} class="font-semibold text-slate-950">{categoryLabel(group.period)}</h6>
+                        <p class="mt-0.5 text-xs text-slate-500">{m.calories_meal_group_summary({ meals: group.entries.length, foods: group.foodCount })}</p>
                       </div>
                     </div>
-                  </div>
+                    <div class="shrink-0 text-right">
+                      <p class="text-xs text-slate-400">{m.calories_meal_total()}</p>
+                      <p class="font-semibold tabular-nums text-slate-900">{formatKcal(group.recordedTotal)} kcal</p>
+                      {#if group.pendingCount > 0}<p class="mt-0.5 text-xs font-semibold text-amber-700">{m.calories_pending_count({ count: group.pendingCount })}</p>{/if}
+                    </div>
+                  </header>
 
-                  {#if entry.foodItems.length > 0}
-                    <ul class="divide-y divide-slate-100 border-t border-slate-100">
-                      {#each entry.foodItems as food (food.id)}
-                        <li class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 sm:px-5">
-                          <div class="min-w-0">
-                            <div class="flex flex-wrap items-baseline gap-x-2">
-                              <p class="font-medium text-slate-800">{food.name}</p>
-                              {#if formatQuantity(food)}<span class="text-xs text-slate-400">{formatQuantity(food)}</span>{/if}
+                  <div class="mt-3 space-y-3 border-l-2 border-orange-200 pl-3 sm:ml-4 sm:pl-5">
+                    {#each group.entries as entry (entry.id)}
+                      {@const entrySources = sourcesByEntry.get(entry.id) || []}
+                      <article class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                        <div class="flex gap-4 p-4 sm:p-5">
+                          {#if entrySources[0]}
+                            <img src={entrySources[0].sourceUrl} alt={m.calories_photo_alt({ name: entryLabel(entry) })} class="h-20 w-20 shrink-0 rounded-xl object-cover sm:h-24 sm:w-24" loading="lazy" decoding="async" />
+                          {/if}
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-start justify-between gap-3">
+                              <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2 text-xs">
+                                  <span class="text-slate-400">{formatEntryTime(entry)}</span>
+                                  <span class={`rounded-full border px-2 py-0.5 font-semibold ${statusTone(entry.status)}`}>{statusLabel(entry.status)}</span>
+                                </div>
+                                <h6 class="mt-1.5 font-semibold text-slate-900">{entryLabel(entry)}</h6>
+                              </div>
+                              <button type="button" onclick={() => openEdit(entry)} class="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700">{m.calories_edit_entry()}</button>
                             </div>
-                            <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
-                              <span>{foodSourceLabel(food.dataSource)}</span>
-                              {#if foodRange(food)}<span>{foodRange(food)}</span>{/if}
-                              {#if food.proteinG !== null}<span>{m.calories_protein_short()} {formatNutrient(food.proteinG)} g</span>{/if}
-                              {#if food.carbohydrateG !== null}<span>{m.calories_carbs_short()} {formatNutrient(food.carbohydrateG)} g</span>{/if}
-                              {#if food.fatG !== null}<span>{m.calories_fat_short()} {formatNutrient(food.fatG)} g</span>{/if}
+                            <div class="mt-2">
+                              {#if entry.energyKcal !== null}
+                                <span class="text-xl font-semibold tracking-tight text-slate-950">{formatKcal(entry.energyKcal)} <span class="text-xs font-medium text-slate-500">kcal</span></span>
+                              {:else}
+                                <span class="text-sm font-semibold text-amber-700">{m.calories_estimate_needed()}</span>
+                              {/if}
                             </div>
                           </div>
-                          <p class={food.energyKcal === null ? 'text-sm font-semibold text-amber-700' : 'text-sm font-semibold tabular-nums text-slate-800'}>
-                            {food.energyKcal === null ? m.calories_pending_short() : `${formatKcal(food.energyKcal)} kcal`}
-                          </p>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
+                        </div>
 
-                  {#if entry.notes}<p class="border-t border-slate-100 px-4 py-3 text-sm leading-relaxed text-slate-600 sm:px-5">{entry.notes}</p>{/if}
-                  <ClaimRevisionTimeline items={energyRevisionItems(entry)} />
-                  <div class="flex justify-end border-t border-slate-100 px-4 py-2.5">
-                    <form method="POST" action="?/deleteEnergyEntry" use:enhance={(submission) => {
-                      if (!confirm(m.calories_delete_confirm({ name: entryLabel(entry) }))) {
-                        submission.cancel();
-                        return;
-                      }
-                      return async ({ result, update }) => {
-                        await update();
-                        if (result.type !== 'success') alert(m.calories_delete_failed());
-                      };
-                    }}>
-                      <input type="hidden" name="id" value={entry.id} />
-                      <button type="submit" class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.calories_delete_entry()}</button>
-                    </form>
+                        {#if entry.foodItems.length > 0}
+                          <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-4 py-2 sm:px-5">
+                            <p class="text-xs font-semibold text-slate-600">{m.calories_foods_in_meal()}</p>
+                            <p class="text-xs text-slate-400">{m.calories_food_count({ count: entry.foodItems.length })}</p>
+                          </div>
+                          <ul class="divide-y divide-slate-100">
+                            {#each entry.foodItems as food (food.id)}
+                              <li class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 sm:px-5">
+                                <div class="min-w-0">
+                                  <div class="flex flex-wrap items-baseline gap-x-2">
+                                    <p class="font-medium text-slate-800">{food.name}</p>
+                                    {#if formatQuantity(food)}<span class="text-xs text-slate-400">{formatQuantity(food)}</span>{/if}
+                                  </div>
+                                  <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                                    <span>{foodSourceLabel(food.dataSource)}</span>
+                                    {#if foodRange(food)}<span>{foodRange(food)}</span>{/if}
+                                    {#if food.proteinG !== null}<span>{m.calories_protein_short()} {formatNutrient(food.proteinG)} g</span>{/if}
+                                    {#if food.carbohydrateG !== null}<span>{m.calories_carbs_short()} {formatNutrient(food.carbohydrateG)} g</span>{/if}
+                                    {#if food.fatG !== null}<span>{m.calories_fat_short()} {formatNutrient(food.fatG)} g</span>{/if}
+                                  </div>
+                                </div>
+                                <p class={food.energyKcal === null ? 'text-sm font-semibold text-amber-700' : 'text-sm font-semibold tabular-nums text-slate-800'}>
+                                  {food.energyKcal === null ? m.calories_pending_short() : `${formatKcal(food.energyKcal)} kcal`}
+                                </p>
+                              </li>
+                            {/each}
+                          </ul>
+                        {/if}
+
+                        {#if entry.notes}<p class="border-t border-slate-100 px-4 py-3 text-sm leading-relaxed text-slate-600 sm:px-5">{entry.notes}</p>{/if}
+                        <ClaimRevisionTimeline items={energyRevisionItems(entry)} />
+                        <div class="flex justify-end border-t border-slate-100 px-4 py-2.5">
+                          <form method="POST" action="?/deleteEnergyEntry" use:enhance={(submission) => {
+                            if (!confirm(m.calories_delete_confirm({ name: entryLabel(entry) }))) {
+                              submission.cancel();
+                              return;
+                            }
+                            return async ({ result, update }) => {
+                              await update();
+                              if (result.type !== 'success') alert(m.calories_delete_failed());
+                            };
+                          }}>
+                            <input type="hidden" name="id" value={entry.id} />
+                            <button type="submit" class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.calories_delete_entry()}</button>
+                          </form>
+                        </div>
+                      </article>
+                    {/each}
                   </div>
-                </article>
+                </section>
               {/each}
             </div>
           {/if}
