@@ -1,8 +1,34 @@
 export const energyDirections = ['intake', 'expenditure'] as const;
 export const energyStatuses = ['recorded', 'draft', 'excluded'] as const;
+export const energyFoodDataSources = ['label', 'database', 'estimated', 'unknown'] as const;
 
 export type EnergyDirection = (typeof energyDirections)[number];
 export type EnergyStatus = (typeof energyStatuses)[number];
+export type EnergyFoodDataSource = (typeof energyFoodDataSources)[number];
+
+export interface EnergyFoodItemRecord {
+  id: string;
+  patientId: string;
+  energyClaimId: string;
+  orderIndex: number;
+  name: string;
+  quantityValue: number | null;
+  quantityUnit: string | null;
+  energyKcal: number | null;
+  energyKcalMin: number | null;
+  energyKcalMax: number | null;
+  proteinG: number | null;
+  carbohydrateG: number | null;
+  fatG: number | null;
+  fiberG: number | null;
+  sodiumMg: number | null;
+  dataSource: EnergyFoodDataSource;
+  notes: string | null;
+  originExternalId: string | null;
+  nutritionData: Record<string, number> | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface EnergyClaimRecord {
   id: string;
@@ -24,6 +50,7 @@ export interface EnergyClaimRecord {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  foodItems: EnergyFoodItemRecord[];
 }
 
 export interface EnergySourceRecord {
@@ -43,4 +70,8 @@ export function isEnergyDirection(value: string): value is EnergyDirection {
 
 export function isEnergyStatus(value: string): value is EnergyStatus {
   return energyStatuses.includes(value as EnergyStatus);
+}
+
+export function isEnergyFoodDataSource(value: string): value is EnergyFoodDataSource {
+  return energyFoodDataSources.includes(value as EnergyFoodDataSource);
 }

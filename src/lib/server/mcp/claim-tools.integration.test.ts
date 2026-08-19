@@ -256,6 +256,35 @@ beforeAll(async () => {
     CREATE UNIQUE INDEX energy_claim_id_patient_idx ON energy_claim(id, patient_id);
     CREATE UNIQUE INDEX energy_claim_external_idx
       ON energy_claim(patient_id, origin_provider, origin_external_id);
+    CREATE TABLE energy_food_item (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      energy_claim_id TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      quantity_value REAL,
+      quantity_unit TEXT,
+      energy_kcal REAL,
+      energy_kcal_min REAL,
+      energy_kcal_max REAL,
+      protein_g REAL,
+      carbohydrate_g REAL,
+      fat_g REAL,
+      fiber_g REAL,
+      sodium_mg REAL,
+      data_source TEXT NOT NULL DEFAULT 'unknown',
+      notes TEXT,
+      origin_external_id TEXT,
+      nutrition_data TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      FOREIGN KEY (energy_claim_id, patient_id)
+        REFERENCES energy_claim(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX energy_food_item_order_idx
+      ON energy_food_item(energy_claim_id, order_index);
+    CREATE UNIQUE INDEX energy_food_item_external_idx
+      ON energy_food_item(energy_claim_id, origin_external_id);
     CREATE TABLE energy_source (
       id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -770,9 +799,24 @@ describe('MCP energy claims', () => {
       patient_id: 'profile-1',
       request_id: 'meal-1',
       direction: 'intake',
-      label: 'Rice bowl',
+      label: 'Lunch bowl',
       category: 'lunch',
-      energy_kcal: 640,
+      food_items: [
+        {
+          name: 'Rice',
+          quantity_value: 180,
+          quantity_unit: 'g',
+          energy_kcal: 281,
+          data_source: 'database',
+        },
+        {
+          name: 'Beef and vegetables',
+          quantity_value: 1,
+          quantity_unit: 'bowl',
+          energy_kcal: 359,
+          data_source: 'estimated',
+        },
+      ],
       occurred_at: '2026-08-15T12:15:00+09:00',
       timezone: 'Asia/Tokyo',
     })) as any;
@@ -804,6 +848,11 @@ describe('MCP energy claims', () => {
       occurred_at: '2026-08-15T03:15:00.000Z',
       local_date: '2026-08-15',
       timezone_offset_minutes: 540,
+      energy_kcal: 640,
+      food_items: [
+        { name: 'Rice', energy_kcal: 281, data_source: 'database' },
+        { name: 'Beef and vegetables', energy_kcal: 359, data_source: 'estimated' },
+      ],
     });
 
     await client.execute({
@@ -842,13 +891,32 @@ describe('MCP energy claims', () => {
       patient_id: 'profile-1',
       energy_entry_id: meal.energy_entry_id,
       expected_revision: meal.revision,
-      energy_kcal: 675,
+      food_items: [
+        {
+          name: 'Rice',
+          quantity_value: 180,
+          quantity_unit: 'g',
+          energy_kcal: 281,
+          data_source: 'database',
+        },
+        {
+          name: 'Beef and vegetables',
+          quantity_value: 1,
+          quantity_unit: 'bowl',
+          energy_kcal: 394,
+          data_source: 'estimated',
+        },
+      ],
       notes: 'Estimate corrected',
     })) as any;
     expect(changed.entry).toMatchObject({
       energy_kcal: 675,
       revision: 2,
       retained_file_count: 1,
+      food_items: [
+        { name: 'Rice', energy_kcal: 281 },
+        { name: 'Beef and vegetables', energy_kcal: 394 },
+      ],
     });
 
     await expect(
@@ -856,7 +924,7 @@ describe('MCP energy claims', () => {
         patient_id: 'profile-1',
         energy_entry_id: meal.energy_entry_id,
         expected_revision: 1,
-        energy_kcal: 700,
+        food_items: [{ name: 'Rice', energy_kcal: 700, data_source: 'estimated' }],
       }),
     ).rejects.toThrow('current_revision is 2');
 
@@ -865,9 +933,14 @@ describe('MCP energy claims', () => {
       request_id: 'unestimated-meal',
       direction: 'intake',
       label: 'Meal photo to review later',
+      food_items: [{ name: 'Unidentified meal', data_source: 'unknown' }],
       occurred_at: '2026-08-16T08:00:00+09:00',
     })) as any;
-    expect(draft.entry).toMatchObject({ energy_kcal: null, status: 'draft' });
+    expect(draft.entry).toMatchObject({
+      energy_kcal: null,
+      status: 'draft',
+      food_items: [{ name: 'Unidentified meal', energy_kcal: null }],
+    });
 
     const history = (await tool('get_claim_history').handler(context, {
       patient_id: 'profile-1',

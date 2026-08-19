@@ -217,6 +217,34 @@ beforeAll(async () => {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE UNIQUE INDEX energy_claim_id_patient_idx ON energy_claim(id, patient_id);
+    CREATE TABLE energy_food_item (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      energy_claim_id TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      quantity_value REAL,
+      quantity_unit TEXT,
+      energy_kcal REAL,
+      energy_kcal_min REAL,
+      energy_kcal_max REAL,
+      protein_g REAL,
+      carbohydrate_g REAL,
+      fat_g REAL,
+      fiber_g REAL,
+      sodium_mg REAL,
+      data_source TEXT NOT NULL DEFAULT 'unknown',
+      notes TEXT,
+      origin_external_id TEXT,
+      nutrition_data TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (energy_claim_id, patient_id)
+        REFERENCES energy_claim(id, patient_id) ON DELETE CASCADE,
+      UNIQUE(energy_claim_id, order_index),
+      UNIQUE(energy_claim_id, origin_external_id)
+    );
     CREATE TABLE exercise_definition (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -558,6 +586,38 @@ const energyCurrent = {
   revision: 1,
   createdAt: '2026-08-02T03:00:00.000Z',
   updatedAt: '2026-08-02T03:00:00.000Z',
+};
+
+const structuredEnergyCurrent = {
+  ...energyCurrent,
+  id: 'source-energy-structured',
+  label: 'Structured breakfast',
+  category: 'breakfast',
+  energyKcal: 389,
+  occurredAt: '2026-08-03T00:00:00.000Z',
+  localDate: '2026-08-03',
+  originExternalId: 'entry-structured',
+  createdAt: '2026-08-03T00:00:00.000Z',
+  updatedAt: '2026-08-03T00:00:00.000Z',
+  foodItems: [
+    {
+      id: 'source-food-rice',
+      name: 'Rice',
+      quantityValue: 180,
+      quantityUnit: 'g',
+      energyKcal: 281,
+      dataSource: 'database',
+    },
+    {
+      id: 'source-food-tofu',
+      name: 'Tofu',
+      quantityValue: 150,
+      quantityUnit: 'g',
+      energyKcal: 108,
+      proteinG: 9.9,
+      dataSource: 'label',
+    },
+  ],
 };
 
 const exerciseDefinitionCurrent = {
@@ -1263,7 +1323,7 @@ describe('archive import storage', () => {
       { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
       { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
       { kind: 'medicines' as const, items: [medicineCurrent] },
-      { kind: 'energy' as const, items: [energyCurrent] },
+      { kind: 'energy' as const, items: [energyCurrent, structuredEnergyCurrent] },
       {
         kind: 'dataImports' as const,
         items: [
@@ -1400,6 +1460,7 @@ describe('archive import storage', () => {
         (SELECT count(*) FROM medicine_catalog_revision) AS medicine_catalog_revisions,
         (SELECT count(*) FROM medicine_claim) AS medicines,
         (SELECT count(*) FROM energy_claim) AS energy,
+        (SELECT count(*) FROM energy_food_item) AS energy_food_items,
         (SELECT count(*) FROM data_import) AS data_imports,
         (SELECT count(*) FROM exercise_definition) AS exercise_definitions,
         (SELECT count(*) FROM workout_claim) AS workouts,
@@ -1414,13 +1475,14 @@ describe('archive import storage', () => {
       medicine_products: 1,
       medicine_catalog_revisions: 3,
       medicines: 1,
-      energy: 1,
+      energy: 2,
+      energy_food_items: 2,
       data_imports: 1,
       exercise_definitions: 1,
       workouts: 2,
       workout_exercises: 2,
       workout_sets: 2,
-      revisions: 6,
+      revisions: 7,
     });
 
     const relationship = await client.execute(`
@@ -1455,9 +1517,40 @@ describe('archive import storage', () => {
       FROM claim_revision
       ORDER BY claim_kind, revision
     `);
-    expect(revisions.rows).toHaveLength(6);
+    expect(revisions.rows).toHaveLength(7);
     expect(revisions.rows.every((row) => row.snapshot_patient === 'destination-patient')).toBe(true);
     expect(revisions.rows.every((row) => row.snapshot_id === row.claim_id)).toBe(true);
+
+    const restoredFoods = await client.execute(`
+      SELECT energy_claim.label, energy_food_item.name, energy_food_item.energy_kcal,
+        energy_food_item.order_index
+      FROM energy_food_item
+      JOIN energy_claim ON energy_claim.id = energy_food_item.energy_claim_id
+      ORDER BY energy_food_item.order_index
+    `);
+    expect(restoredFoods.rows).toEqual([
+      expect.objectContaining({
+        label: 'Structured breakfast',
+        name: 'Rice',
+        energy_kcal: 281,
+        order_index: 0,
+      }),
+      expect.objectContaining({
+        label: 'Structured breakfast',
+        name: 'Tofu',
+        energy_kcal: 108,
+        order_index: 1,
+      }),
+    ]);
+
+    const structuredRevision = await client.execute(`
+      SELECT json_array_length(claim_revision.snapshot, '$.foodItems') AS food_count
+      FROM claim_revision
+      JOIN energy_claim ON energy_claim.id = claim_revision.claim_id
+      WHERE claim_revision.claim_kind = 'energy'
+        AND energy_claim.label = 'Structured breakfast'
+    `);
+    expect(structuredRevision.rows[0]?.food_count).toBe(2);
 
     const workoutRelationship = await client.execute(`
       SELECT session.id AS session_id, plan.id AS plan_id, workout_set.repetitions AS repetitions

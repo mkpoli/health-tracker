@@ -1,15 +1,22 @@
 import { and, eq } from 'drizzle-orm';
-import { isEnergyDirection, isEnergyStatus, type EnergyClaimRecord } from '$lib/energy';
+import {
+  isEnergyDirection,
+  isEnergyFoodDataSource,
+  isEnergyStatus,
+  type EnergyClaimRecord,
+  type EnergyFoodItemRecord,
+} from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
   energyClaim,
+  energyFoodItem,
   energySource,
   medicineClaim,
   medicineProduct,
 } from '$lib/server/db/schema';
-import type { EnergyInput } from '$lib/server/energy';
+import type { EnergyFoodItemInput, EnergyInput } from '$lib/server/energy';
 import type { MedicineInput } from '$lib/server/medicines';
 import {
   claimRevisionValues,
@@ -62,12 +69,40 @@ export function normalizeMedicineClaim(
 
 export function normalizeEnergyClaim(
   value: typeof energyClaim.$inferSelect,
+  foodItems: EnergyFoodItemRecord[] = [],
 ): EnergyClaimRecord {
   return {
     ...value,
     direction: isEnergyDirection(value.direction) ? value.direction : 'intake',
     status: isEnergyStatus(value.status) ? value.status : 'draft',
+    foodItems,
   };
+}
+
+export function normalizeEnergyFoodItem(
+  value: typeof energyFoodItem.$inferSelect,
+): EnergyFoodItemRecord {
+  return {
+    ...value,
+    dataSource: isEnergyFoodDataSource(value.dataSource) ? value.dataSource : 'unknown',
+    nutritionData:
+      value.nutritionData && typeof value.nutritionData === 'object' && !Array.isArray(value.nutritionData)
+        ? value.nutritionData
+        : null,
+  };
+}
+
+function foodItemValues(
+  patientId: string,
+  energyClaimId: string,
+  items: EnergyFoodItemInput[],
+) {
+  return items.map((item, orderIndex) => ({
+    patientId,
+    energyClaimId,
+    orderIndex,
+    ...item,
+  }));
 }
 
 function sameOrigin(
@@ -138,6 +173,7 @@ export async function createEnergyClaim(options: {
   id?: string;
   idempotent?: boolean;
   source?: typeof energySource.$inferInsert | null;
+  foodItems?: EnergyFoodItemInput[];
 }) {
   return db.transaction(async (tx) => {
     const values = {
@@ -168,10 +204,27 @@ export async function createEnergyClaim(options: {
         throw new Error('Claim identifier collision');
       }
 
-      return { claim: normalizeEnergyClaim(existing[0]), created: false };
+      const existingItems = await tx
+        .select()
+        .from(energyFoodItem)
+        .where(eq(energyFoodItem.energyClaimId, existing[0].id))
+        .orderBy(energyFoodItem.orderIndex);
+
+      return {
+        claim: normalizeEnergyClaim(existing[0], existingItems.map(normalizeEnergyFoodItem)),
+        created: false,
+      };
     }
 
-    const snapshot = normalizeEnergyClaim(inserted[0]);
+    let storedItems: typeof energyFoodItem.$inferSelect[] = [];
+    if (options.foodItems?.length) {
+      storedItems = await tx
+        .insert(energyFoodItem)
+        .values(foodItemValues(options.patientId, inserted[0].id, options.foodItems))
+        .returning();
+    }
+
+    const snapshot = normalizeEnergyClaim(inserted[0], storedItems.map(normalizeEnergyFoodItem));
     await tx
       .insert(claimRevision)
       .values(claimRevisionValues('energy', snapshot, options.origin));
@@ -188,13 +241,22 @@ export async function updateEnergyClaim(options: {
   expectedRevision: number;
   source: ClaimRevisionSource;
   changedAt?: string;
+  foodItems?: EnergyFoodItemInput[];
 }) {
   if (options.current.revision !== options.expectedRevision) {
     throw new StaleClaimRevisionError();
   }
 
   return db.transaction(async (tx) => {
-    const currentSnapshot = normalizeEnergyClaim(options.current);
+    const currentItems = await tx
+      .select()
+      .from(energyFoodItem)
+      .where(eq(energyFoodItem.energyClaimId, options.current.id))
+      .orderBy(energyFoodItem.orderIndex);
+    const currentSnapshot = normalizeEnergyClaim(
+      options.current,
+      currentItems.map(normalizeEnergyFoodItem),
+    );
     await tx
       .insert(claimRevision)
       .values(claimRevisionValues('energy', currentSnapshot, options.source))
@@ -218,7 +280,18 @@ export async function updateEnergyClaim(options: {
 
     if (!updated[0]) throw new StaleClaimRevisionError();
 
-    const snapshot = normalizeEnergyClaim(updated[0]);
+    let updatedItems = currentItems;
+    if (options.foodItems) {
+      await tx.delete(energyFoodItem).where(eq(energyFoodItem.energyClaimId, options.current.id));
+      updatedItems = options.foodItems.length
+        ? await tx
+            .insert(energyFoodItem)
+            .values(foodItemValues(options.current.patientId, options.current.id, options.foodItems))
+            .returning()
+        : [];
+    }
+
+    const snapshot = normalizeEnergyClaim(updated[0], updatedItems.map(normalizeEnergyFoodItem));
     await tx
       .insert(claimRevision)
       .values(claimRevisionValues('energy', snapshot, options.source));

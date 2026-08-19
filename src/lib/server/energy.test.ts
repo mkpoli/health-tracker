@@ -17,7 +17,7 @@ const base = {
 
 describe('parseEnergyInput', () => {
   it('keeps original local time while normalizing the instant to UTC', () => {
-    const input = parseEnergyInput(
+    const parsed = parseEnergyInput(
       form({
         ...base,
         label: '  Dinner  ',
@@ -27,7 +27,8 @@ describe('parseEnergyInput', () => {
       }),
     );
 
-    expect(input).toEqual({
+    expect(parsed).toEqual({
+      claim: {
       direction: 'intake',
       label: 'Dinner',
       category: 'dinner',
@@ -39,15 +40,17 @@ describe('parseEnergyInput', () => {
       durationMinutes: null,
       status: 'recorded',
       notes: 'Homemade',
+      },
+      foodItems: null,
     });
   });
 
   it('keeps a photo-first entry pending when energy is unknown', () => {
     const input = parseEnergyInput(form(base));
 
-    expect(input.energyKcal).toBeNull();
-    expect(input.status).toBe('draft');
-    expect(() => validateEnergyEntry(input, true)).not.toThrow();
+    expect(input.claim.energyKcal).toBeNull();
+    expect(input.claim.status).toBe('draft');
+    expect(() => validateEnergyEntry(input.claim, true, input.foodItems)).not.toThrow();
   });
 
   it('keeps an exercise duration on expenditure entries', () => {
@@ -55,8 +58,8 @@ describe('parseEnergyInput', () => {
       form({ ...base, direction: 'expenditure', energyKcal: '315', durationMinutes: '48' }),
     );
 
-    expect(input.direction).toBe('expenditure');
-    expect(input.durationMinutes).toBe(48);
+    expect(input.claim.direction).toBe('expenditure');
+    expect(input.claim.durationMinutes).toBe(48);
   });
 
   it('requires energy for an included entry', () => {
@@ -73,6 +76,33 @@ describe('parseEnergyInput', () => {
 
   it('rejects an empty entry without a retained photo', () => {
     const input = parseEnergyInput(form(base));
-    expect(() => validateEnergyEntry(input, false)).toThrowError(new InvalidEnergyInputError('empty_entry'));
+    expect(() => validateEnergyEntry(input.claim, false, input.foodItems)).toThrowError(new InvalidEnergyInputError('empty_entry'));
+  });
+
+  it('derives a meal total from structured foods', () => {
+    const data = form({ ...base, label: 'Lunch' });
+    data.set('foodItems', JSON.stringify([
+      { name: 'Rice', quantityValue: 180, quantityUnit: 'g', energyKcal: 281, dataSource: 'database' },
+      { name: 'Tofu', quantityValue: 150, quantityUnit: 'g', energyKcal: 108, proteinG: 9.9, dataSource: 'label' },
+    ]));
+
+    const parsed = parseEnergyInput(data);
+
+    expect(parsed.claim.energyKcal).toBe(389);
+    expect(parsed.claim.status).toBe('recorded');
+    expect(parsed.foodItems).toHaveLength(2);
+    expect(parsed.foodItems?.[1]).toMatchObject({ name: 'Tofu', proteinG: 9.9, dataSource: 'label' });
+  });
+
+  it('keeps a meal pending when one food has unknown energy', () => {
+    const data = form({ ...base, label: 'Breakfast' });
+    data.set('foodItems', JSON.stringify([
+      { name: 'Drink', energyKcal: null, dataSource: 'unknown' },
+    ]));
+
+    const parsed = parseEnergyInput(data);
+
+    expect(parsed.claim.energyKcal).toBeNull();
+    expect(parsed.claim.status).toBe('draft');
   });
 });

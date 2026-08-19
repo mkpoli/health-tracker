@@ -14,7 +14,7 @@ describe('buildPatientExport', () => {
       medicineCourses: [],
       doseRegimens: [],
       doseOccurrences: [],
-      energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
+      energyEntries: [{ id: 'energy-1', energyKcal: 540, foodItems: [{ id: 'food-1', name: 'Rice' }] }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
       dataImports: [{ id: 'import-1', provider: 'hevy' }],
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
@@ -25,7 +25,7 @@ describe('buildPatientExport', () => {
 
     expect(payload).toMatchObject({
       format: 'health-tracker-export',
-      version: 8,
+      version: 9,
       patient: { id: 'patient-1' },
       medicineIngredients: [{ id: 'ingredient-1', canonicalName: 'amoxicillin' }],
       medicineProducts: [{ id: 'product-1', displayName: 'Amoxicillin 500 mg' }],
@@ -33,7 +33,7 @@ describe('buildPatientExport', () => {
       medicineCourses: [],
       doseRegimens: [],
       doseOccurrences: [],
-      energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
+      energyEntries: [{ id: 'energy-1', energyKcal: 540, foodItems: [{ id: 'food-1', name: 'Rice' }] }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
       dataImports: [{ id: 'import-1', provider: 'hevy' }],
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
@@ -141,7 +141,7 @@ describe('buildPatientExport', () => {
     expect(Array.from(files['media/calories/1-source-1-meal.jpg'])).toEqual([1, 2, 3]);
     expect(JSON.parse(strFromU8(files['health-data.json']))).toMatchObject({
       format: 'health-tracker-export',
-      version: 8,
+      version: 9,
       energyEntries: [{ id: 'energy-1' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
