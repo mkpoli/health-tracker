@@ -194,6 +194,10 @@
     regimenEditorOpen = true;
   }
 
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && (courseEditorOpen || regimenEditorOpen)) closeEditors();
+  }
+
   function closeEditors() {
     if (saving) return;
     courseEditorOpen = false;
@@ -331,6 +335,8 @@
   }
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="mt-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
   <div class="flex items-center justify-between gap-2">
     <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -456,9 +462,10 @@
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="course-editor-title"
     >
       <header class="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-5 py-4">
-        <h2 class="text-lg font-semibold tracking-tight text-slate-900">
+        <h2 id="course-editor-title" class="text-lg font-semibold tracking-tight text-slate-900">
           {courseDraft.id ? m.course_edit() : m.course_start()}
         </h2>
         <button type="button" onclick={closeEditors} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-40" aria-label={m.close()}>
@@ -559,10 +566,11 @@
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="regimen-editor-title"
     >
       <header class="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-5 py-4">
         <div>
-          <h2 class="text-lg font-semibold tracking-tight text-slate-900">
+          <h2 id="regimen-editor-title" class="text-lg font-semibold tracking-tight text-slate-900">
             {regimenDraft.id ? m.regimen_edit() : m.regimen_change()}
           </h2>
           <p class="mt-1 text-sm text-slate-500">{m.regimen_editor_hint()}</p>

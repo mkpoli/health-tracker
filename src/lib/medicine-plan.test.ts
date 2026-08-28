@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDays,
+  assignDoseSlotKeys,
   buildDoseChecklist,
   countAdherence,
   normalizeDaysOfWeek,
@@ -289,6 +290,18 @@ describe('countAdherence', () => {
     const counts = countAdherence(buildDoseChecklist(planned, []), '2026-08-11T00:00:00.000Z');
 
     expect(counts).toMatchObject({ due: 1, unrecorded: 1 });
+  });
+});
+
+describe('assignDoseSlotKeys', () => {
+  it('keeps first claim on a key and moves duplicates to free keys', () => {
+    const assigned = assignDoseSlotKeys([
+      slot({ key: 1 }),
+      slot({ key: 1 }),
+      slot({ key: null }),
+    ]);
+
+    expect(assigned.map((entry) => entry.key)).toEqual([1, 0, 2]);
   });
 });
 

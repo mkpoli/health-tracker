@@ -1626,10 +1626,17 @@ async function importDoseOccurrences(patientId: string, sourcePatientId: string,
     ];
     if (regimenIds.length > 0) {
       const regimens = await tx
-        .select({ id: doseRegimen.id })
+        .select({ id: doseRegimen.id, courseId: doseRegimen.courseId })
         .from(doseRegimen)
         .where(and(eq(doseRegimen.patientId, patientId), inArray(doseRegimen.id, regimenIds)));
       if (regimens.length !== regimenIds.length) throw new ArchiveImportError('missing_claim');
+
+      const regimenCourse = new Map(regimens.map((row) => [row.id, row.courseId]));
+      for (const { snapshot } of planned) {
+        if (snapshot.regimenId && regimenCourse.get(snapshot.regimenId) !== snapshot.courseId) {
+          throw new ArchiveImportError('invalid_dose_occurrence');
+        }
+      }
     }
 
     const inserted = await tx

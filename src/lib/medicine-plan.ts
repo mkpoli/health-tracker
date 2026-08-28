@@ -542,20 +542,18 @@ export function normalizeDoseSlots(value: unknown): DoseSlot[] {
  * connector payloads) pass through here before they are stored.
  */
 export function assignDoseSlotKeys(slots: DoseSlot[]): DoseSlot[] {
-  const used = new Set<number>();
-  for (const slot of slots) {
-    if (slot.key !== null && !used.has(slot.key)) used.add(slot.key);
-  }
+  const consumed = new Set<number>();
+  let nextKey = 0;
 
-  let nextKey = used.size > 0 ? Math.max(...used) + 1 : 0;
   return slots.map((slot) => {
-    if (slot.key !== null && used.has(slot.key)) {
-      used.delete(slot.key);
-      used.add(slot.key);
+    if (slot.key !== null && !consumed.has(slot.key)) {
+      consumed.add(slot.key);
       return slot;
     }
+
+    while (consumed.has(nextKey)) nextKey += 1;
     const key = nextKey;
-    nextKey += 1;
+    consumed.add(key);
     return { ...slot, key };
   });
 }

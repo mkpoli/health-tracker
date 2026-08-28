@@ -739,6 +739,8 @@ export const actions: Actions = {
         }
 
         const input = parseDoseActionInput(data, current.timezone);
+        // A correction without a time keeps the recorded one.
+        input.actualAt = input.actualAt ?? current.actualAt;
         const occurrence = await updateDoseOccurrence({
           current,
           input,
@@ -765,6 +767,10 @@ export const actions: Actions = {
         if (!course) return fail(404, { code: 'plan_not_found' });
 
         const input = parseDoseActionInput(data, regimen.timezone);
+        // The moment of the tap, stamped where the clock is trusted.
+        if (!input.actualAt && (input.status === 'taken' || input.status === 'partial')) {
+          input.actualAt = new Date().toISOString();
+        }
         const occurrence = await recordPlannedDose({
           course,
           regimen,

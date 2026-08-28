@@ -189,7 +189,6 @@
               <input type="hidden" name="localDate" value={entry.localDate} />
               <input type="hidden" name="slotKey" value={entry.slotKey} />
               <input type="hidden" name="status" value="taken" />
-              <input type="hidden" name="actualAt" value={new Date().toISOString()} />
               <button
                 type="submit"
                 disabled={saving}
