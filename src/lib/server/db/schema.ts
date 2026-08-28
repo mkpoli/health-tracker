@@ -223,6 +223,32 @@ export const doseOccurrence = sqliteTable(
 	]
 );
 
+export const doseDelivery = sqliteTable(
+	'dose_delivery',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		occurrenceRef: text('occurrence_ref').notNull(),
+		deliveredAt: text('delivered_at').notNull(),
+		channel: text('channel').notNull(),
+		provider: text('provider'),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		uniqueIndex('dose_delivery_attempt_idx').on(
+			table.patientId,
+			table.occurrenceRef,
+			table.deliveredAt,
+			table.channel
+		),
+		index('dose_delivery_patient_idx').on(table.patientId, table.deliveredAt)
+	]
+);
+
 export const energyClaim = sqliteTable(
 	'energy_claim',
 	{
