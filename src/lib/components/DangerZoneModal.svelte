@@ -9,6 +9,9 @@
     reports = [],
     records,
     medicines = [],
+    medicineCourses = [],
+    doseRegimens = [],
+    doseOccurrences = [],
     energyEntries = [],
     energySources = [],
     dataImports = [],
@@ -21,6 +24,9 @@
     reports?: unknown[];
     records: unknown[];
     medicines?: unknown[];
+    medicineCourses?: unknown[];
+    doseRegimens?: unknown[];
+    doseOccurrences?: unknown[];
     energyEntries?: unknown[];
     energySources?: unknown[];
     dataImports?: unknown[];
@@ -63,6 +69,9 @@
           reports,
           records,
           medicines,
+          medicineCourses,
+          doseRegimens,
+          doseOccurrences,
           energyEntries,
           energySources,
           dataImports,

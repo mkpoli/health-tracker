@@ -8,6 +8,9 @@ export interface PatientExportInput {
   reports: unknown[];
   records: unknown[];
   medicines: unknown[];
+  medicineCourses: unknown[];
+  doseRegimens: unknown[];
+  doseOccurrences: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
   dataImports: unknown[];
@@ -133,6 +136,9 @@ export function buildPatientExport({
   reports,
   records,
   medicines,
+  medicineCourses,
+  doseRegimens,
+  doseOccurrences,
   energyEntries,
   energySources,
   dataImports,
@@ -145,6 +151,9 @@ export function buildPatientExport({
     reports,
     records,
     medicines,
+    medicineCourses,
+    doseRegimens,
+    doseOccurrences,
     energyEntries,
     energySources,
     dataImports,
@@ -161,6 +170,9 @@ export function buildPatientExport({
     reports,
     records,
     medicines,
+    medicineCourses,
+    doseRegimens,
+    doseOccurrences,
     energyEntries,
     energySources,
     dataImports,

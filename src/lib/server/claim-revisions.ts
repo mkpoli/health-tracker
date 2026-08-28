@@ -1,10 +1,24 @@
 import type {
   ClaimKind,
   ClaimRevisionSnapshot,
+  DoseOccurrenceRevisionRecord,
+  DoseRegimenRevisionRecord,
   EnergyClaimRevisionRecord,
   MedicineClaimRevisionRecord,
+  MedicineCourseRevisionRecord,
   WorkoutClaimRevisionRecord,
 } from '$lib/claim-revision';
+import {
+  isCourseKind,
+  isCourseStatus,
+  isDoseStatus,
+  isRegimenRuleKind,
+  normalizeDaysOfWeek,
+  normalizeDoseSlots,
+  type DoseOccurrenceRecord,
+  type DoseRegimenRecord,
+  type MedicineCourseRecord,
+} from '$lib/medicine-plan';
 import {
   isEnergyDirection,
   isEnergyStatus,
@@ -153,6 +167,63 @@ function isWorkoutSnapshot(value: unknown): value is WorkoutRecord {
         isWorkoutSetStatus(set.status),
     );
   });
+}
+
+export function toMedicineCourseRevision(
+  row: StoredClaimRevision,
+): MedicineCourseRevisionRecord | null {
+  if (row.claimKind !== 'medicine_course' || !isObject(row.snapshot)) return null;
+
+  const snapshot = row.snapshot as unknown as MedicineCourseRecord;
+  if (snapshot.id !== row.claimId || snapshot.patientId !== row.patientId) return null;
+
+  return {
+    ...row,
+    claimKind: 'medicine_course',
+    snapshot: {
+      ...snapshot,
+      kind: isCourseKind(snapshot.kind) ? snapshot.kind : 'initial',
+      status: isCourseStatus(snapshot.status) ? snapshot.status : 'active',
+    },
+  };
+}
+
+export function toDoseRegimenRevision(
+  row: StoredClaimRevision,
+): DoseRegimenRevisionRecord | null {
+  if (row.claimKind !== 'dose_regimen' || !isObject(row.snapshot)) return null;
+
+  const snapshot = row.snapshot as unknown as DoseRegimenRecord;
+  if (snapshot.id !== row.claimId || snapshot.patientId !== row.patientId) return null;
+
+  return {
+    ...row,
+    claimKind: 'dose_regimen',
+    snapshot: {
+      ...snapshot,
+      ruleKind: isRegimenRuleKind(snapshot.ruleKind) ? snapshot.ruleKind : 'as_needed',
+      slots: normalizeDoseSlots(snapshot.slots),
+      daysOfWeek: normalizeDaysOfWeek(snapshot.daysOfWeek),
+    },
+  };
+}
+
+export function toDoseOccurrenceRevision(
+  row: StoredClaimRevision,
+): DoseOccurrenceRevisionRecord | null {
+  if (row.claimKind !== 'dose_occurrence' || !isObject(row.snapshot)) return null;
+
+  const snapshot = row.snapshot as unknown as DoseOccurrenceRecord;
+  if (snapshot.id !== row.claimId || snapshot.patientId !== row.patientId) return null;
+
+  return {
+    ...row,
+    claimKind: 'dose_occurrence',
+    snapshot: {
+      ...snapshot,
+      status: isDoseStatus(snapshot.status) ? snapshot.status : 'unknown',
+    },
+  };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

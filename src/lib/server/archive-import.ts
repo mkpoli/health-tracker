@@ -3,9 +3,12 @@ import { db } from '$lib/server/db';
 import {
   claimRevision,
   dataImport,
+  doseOccurrence,
+  doseRegimen,
   energyClaim,
   exerciseDefinition,
   medicineClaim,
+  medicineCourse,
   patient,
   record,
   report,
@@ -15,6 +18,18 @@ import {
 } from '$lib/server/db/schema';
 import { isEnergyDirection, isEnergyStatus, type EnergyClaimRecord } from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
+import {
+  assignDoseSlotKeys,
+  isCourseKind,
+  isCourseStatus,
+  isDoseStatus,
+  isRegimenRuleKind,
+  normalizeDaysOfWeek,
+  normalizeDoseSlots,
+  type DoseOccurrenceRecord,
+  type DoseRegimenRecord,
+  type MedicineCourseRecord,
+} from '$lib/medicine-plan';
 import { claimRevisionValues } from '$lib/server/claim-revisions';
 import { isValidTimeZone, toDateTimeLocal, utcOffsetMinutesAt } from '$lib/time-zone';
 import {
@@ -34,6 +49,9 @@ export const archiveEntityKinds = [
   'reports',
   'records',
   'medicines',
+  'medicineCourses',
+  'doseRegimens',
+  'doseOccurrences',
   'energy',
   'dataImports',
   'exerciseDefinitions',
@@ -46,6 +64,9 @@ type ArchiveIdKind =
   | 'report'
   | 'record'
   | 'medicine'
+  | 'medicine-course'
+  | 'dose-regimen'
+  | 'dose-occurrence'
   | 'energy'
   | 'energy-source'
   | 'data-import'
@@ -63,6 +84,9 @@ export type ArchiveImportErrorCode =
   | 'invalid_data_import'
   | 'invalid_exercise_definition'
   | 'invalid_medicine'
+  | 'invalid_medicine_course'
+  | 'invalid_dose_regimen'
+  | 'invalid_dose_occurrence'
   | 'invalid_profile'
   | 'invalid_record'
   | 'invalid_report'
@@ -1313,12 +1337,350 @@ async function importWorkouts(patientId: string, sourcePatientId: string, items:
   });
 }
 
+
+function parseMedicineCourse(
+  value: unknown,
+  patientId: string,
+  ids: { id: string; medicineClaimId: string; previousCourseId: string | null },
+): MedicineCourseRecord {
+  const row = asRecord(value, 'invalid_medicine_course');
+  const kind = requiredText(row.kind, 'invalid_medicine_course', 32);
+  const status = requiredText(row.status, 'invalid_medicine_course', 32);
+  if (!isCourseKind(kind) || !isCourseStatus(status)) {
+    throw new ArchiveImportError('invalid_medicine_course');
+  }
+
+  return {
+    id: ids.id,
+    patientId,
+    medicineClaimId: ids.medicineClaimId,
+    kind,
+    status,
+    previousCourseId: ids.previousCourseId,
+    startDate: requiredIsoDateText(row.startDate, 'invalid_medicine_course'),
+    endDate: optionalIsoDateText(row.endDate, 'invalid_medicine_course'),
+    endReason: optionalText(row.endReason, 'invalid_medicine_course', 500),
+    notes: optionalText(row.notes, 'invalid_medicine_course', 4000),
+    originKind: optionalText(row.originKind, 'invalid_medicine_course', 120) || 'manual',
+    originProvider: optionalText(row.originProvider, 'invalid_medicine_course', 300),
+    originExternalId: optionalText(row.originExternalId, 'invalid_medicine_course', 1000),
+    revision: positiveRevision(row.revision, 'invalid_medicine_course'),
+    createdAt: validDateText(row.createdAt, 'invalid_medicine_course'),
+    updatedAt: validDateText(row.updatedAt, 'invalid_medicine_course'),
+  };
+}
+
+function parseDoseRegimen(
+  value: unknown,
+  patientId: string,
+  ids: { id: string; courseId: string },
+): DoseRegimenRecord {
+  const row = asRecord(value, 'invalid_dose_regimen');
+  const ruleKind = requiredText(row.ruleKind, 'invalid_dose_regimen', 32);
+  if (!isRegimenRuleKind(ruleKind)) throw new ArchiveImportError('invalid_dose_regimen');
+
+  const timezone = requiredText(row.timezone, 'invalid_dose_regimen', 64);
+  if (!isValidTimeZone(timezone)) throw new ArchiveImportError('invalid_dose_regimen');
+
+  return {
+    id: ids.id,
+    patientId,
+    courseId: ids.courseId,
+    ruleKind,
+    slots: assignDoseSlotKeys(normalizeDoseSlots(row.slots)),
+    daysOfWeek: normalizeDaysOfWeek(row.daysOfWeek),
+    intervalHours: finiteNumberOrNull(row.intervalHours, 'invalid_dose_regimen', {
+      min: 0,
+      max: 24 * 45,
+    }),
+    anchorAt: optionalDateText(row.anchorAt, 'invalid_dose_regimen'),
+    doseText: optionalText(row.doseText, 'invalid_dose_regimen', 200),
+    route: optionalText(row.route, 'invalid_dose_regimen', 120),
+    site: optionalText(row.site, 'invalid_dose_regimen', 120),
+    timezone,
+    effectiveFrom: requiredIsoDateText(row.effectiveFrom, 'invalid_dose_regimen'),
+    effectiveTo: optionalIsoDateText(row.effectiveTo, 'invalid_dose_regimen'),
+    remindMinutesBefore: finiteNumberOrNull(row.remindMinutesBefore, 'invalid_dose_regimen', {
+      integer: true,
+      min: 0,
+      max: 24 * 60,
+    }),
+    notes: optionalText(row.notes, 'invalid_dose_regimen', 4000),
+    originKind: optionalText(row.originKind, 'invalid_dose_regimen', 120) || 'manual',
+    originProvider: optionalText(row.originProvider, 'invalid_dose_regimen', 300),
+    originExternalId: optionalText(row.originExternalId, 'invalid_dose_regimen', 1000),
+    revision: positiveRevision(row.revision, 'invalid_dose_regimen'),
+    createdAt: validDateText(row.createdAt, 'invalid_dose_regimen'),
+    updatedAt: validDateText(row.updatedAt, 'invalid_dose_regimen'),
+  };
+}
+
+function parseDoseOccurrence(
+  value: unknown,
+  patientId: string,
+  ids: { id: string; courseId: string; regimenId: string | null },
+): DoseOccurrenceRecord {
+  const row = asRecord(value, 'invalid_dose_occurrence');
+  const status = requiredText(row.status, 'invalid_dose_occurrence', 32);
+  if (!isDoseStatus(status)) throw new ArchiveImportError('invalid_dose_occurrence');
+
+  const timezone = requiredText(row.timezone, 'invalid_dose_occurrence', 64);
+  if (!isValidTimeZone(timezone)) throw new ArchiveImportError('invalid_dose_occurrence');
+
+  return {
+    id: ids.id,
+    patientId,
+    courseId: ids.courseId,
+    regimenId: ids.regimenId,
+    regimenRevision: finiteNumberOrNull(row.regimenRevision, 'invalid_dose_occurrence', {
+      integer: true,
+      min: 1,
+    }),
+    slotKey: finiteNumberOrNull(row.slotKey, 'invalid_dose_occurrence', { integer: true, min: 0 }),
+    localDate: requiredIsoDateText(row.localDate, 'invalid_dose_occurrence'),
+    plannedAt: optionalDateText(row.plannedAt, 'invalid_dose_occurrence'),
+    timezone,
+    status,
+    actualAt: optionalDateText(row.actualAt, 'invalid_dose_occurrence'),
+    actualValue: finiteNumberOrNull(row.actualValue, 'invalid_dose_occurrence', {
+      min: 0,
+      max: 100_000,
+    }),
+    actualUnit: optionalText(row.actualUnit, 'invalid_dose_occurrence', 40),
+    actualText: optionalText(row.actualText, 'invalid_dose_occurrence', 200),
+    route: optionalText(row.route, 'invalid_dose_occurrence', 120),
+    site: optionalText(row.site, 'invalid_dose_occurrence', 120),
+    reason: optionalText(row.reason, 'invalid_dose_occurrence', 500),
+    reaction: optionalText(row.reaction, 'invalid_dose_occurrence', 2000),
+    notes: optionalText(row.notes, 'invalid_dose_occurrence', 4000),
+    originKind: optionalText(row.originKind, 'invalid_dose_occurrence', 120) || 'manual',
+    originProvider: optionalText(row.originProvider, 'invalid_dose_occurrence', 300),
+    originExternalId: optionalText(row.originExternalId, 'invalid_dose_occurrence', 1000),
+    revision: positiveRevision(row.revision, 'invalid_dose_occurrence'),
+    createdAt: validDateText(row.createdAt, 'invalid_dose_occurrence'),
+    updatedAt: validDateText(row.updatedAt, 'invalid_dose_occurrence'),
+  };
+}
+
+async function importMedicineCourses(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const planned = await Promise.all(
+    items.map(async (value) => {
+      const row = asRecord(value, 'invalid_medicine_course');
+      const sourceIdValue = sourceId(row, 'invalid_medicine_course');
+      const id = await resolveArchiveEntityId(patientId, sourcePatientId, 'medicine-course', sourceIdValue);
+      const medicineClaimId = await resolveArchiveEntityId(
+        patientId,
+        sourcePatientId,
+        'medicine',
+        requiredText(row.medicineClaimId, 'invalid_medicine_course', 512),
+      );
+      const sourcePrevious = optionalText(row.previousCourseId, 'invalid_medicine_course', 512);
+      const previousCourseId = sourcePrevious
+        ? await resolveArchiveEntityId(patientId, sourcePatientId, 'medicine-course', sourcePrevious)
+        : null;
+      return {
+        sourceId: sourceIdValue,
+        snapshot: parseMedicineCourse(value, patientId, { id, medicineClaimId, previousCourseId }),
+      };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const parentIds = [...new Set(planned.map(({ snapshot }) => snapshot.medicineClaimId))];
+    const parents = await tx
+      .select({ id: medicineClaim.id })
+      .from(medicineClaim)
+      .where(and(eq(medicineClaim.patientId, patientId), inArray(medicineClaim.id, parentIds)));
+    if (parents.length !== parentIds.length) throw new ArchiveImportError('missing_claim');
+
+    const inserted = await tx
+      .insert(medicineCourse)
+      .values(planned.map(({ snapshot }) => snapshot))
+      .onConflictDoNothing()
+      .returning({ id: medicineCourse.id });
+    const ids = planned.map(({ snapshot }) => snapshot.id);
+    const stored = await tx
+      .select()
+      .from(medicineCourse)
+      .where(and(eq(medicineCourse.patientId, patientId), inArray(medicineCourse.id, ids)));
+
+    if (stored.length > 0) {
+      await tx
+        .insert(claimRevision)
+        .values(
+          stored.map((snapshot) =>
+            claimRevisionValues('medicine_course', snapshot as MedicineCourseRecord, {
+              kind: snapshot.originKind,
+              provider: snapshot.originProvider,
+            }),
+          ),
+        )
+        .onConflictDoNothing();
+    }
+
+    return insertResult(items.length, inserted.length, planned.length - stored.length);
+  });
+}
+
+async function importDoseRegimens(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const planned = await Promise.all(
+    items.map(async (value) => {
+      const row = asRecord(value, 'invalid_dose_regimen');
+      const sourceIdValue = sourceId(row, 'invalid_dose_regimen');
+      const id = await resolveArchiveEntityId(patientId, sourcePatientId, 'dose-regimen', sourceIdValue);
+      const courseId = await resolveArchiveEntityId(
+        patientId,
+        sourcePatientId,
+        'medicine-course',
+        requiredText(row.courseId, 'invalid_dose_regimen', 512),
+      );
+      return { sourceId: sourceIdValue, snapshot: parseDoseRegimen(value, patientId, { id, courseId }) };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const parentIds = [...new Set(planned.map(({ snapshot }) => snapshot.courseId))];
+    const parents = await tx
+      .select({ id: medicineCourse.id })
+      .from(medicineCourse)
+      .where(and(eq(medicineCourse.patientId, patientId), inArray(medicineCourse.id, parentIds)));
+    if (parents.length !== parentIds.length) throw new ArchiveImportError('missing_claim');
+
+    const inserted = await tx
+      .insert(doseRegimen)
+      .values(planned.map(({ snapshot }) => snapshot))
+      .onConflictDoNothing()
+      .returning({ id: doseRegimen.id });
+    const ids = planned.map(({ snapshot }) => snapshot.id);
+    const stored = await tx
+      .select()
+      .from(doseRegimen)
+      .where(and(eq(doseRegimen.patientId, patientId), inArray(doseRegimen.id, ids)));
+
+    if (stored.length > 0) {
+      await tx
+        .insert(claimRevision)
+        .values(
+          stored.map((snapshot) =>
+            claimRevisionValues(
+              'dose_regimen',
+              {
+                ...snapshot,
+                slots: normalizeDoseSlots(snapshot.slots),
+                daysOfWeek: normalizeDaysOfWeek(snapshot.daysOfWeek),
+              } as DoseRegimenRecord,
+              {
+                kind: snapshot.originKind,
+                provider: snapshot.originProvider,
+              },
+            ),
+          ),
+        )
+        .onConflictDoNothing();
+    }
+
+    return insertResult(items.length, inserted.length, planned.length - stored.length);
+  });
+}
+
+async function importDoseOccurrences(patientId: string, sourcePatientId: string, items: unknown[]) {
+  const planned = await Promise.all(
+    items.map(async (value) => {
+      const row = asRecord(value, 'invalid_dose_occurrence');
+      const sourceIdValue = sourceId(row, 'invalid_dose_occurrence');
+      const id = await resolveArchiveEntityId(patientId, sourcePatientId, 'dose-occurrence', sourceIdValue);
+      const courseId = await resolveArchiveEntityId(
+        patientId,
+        sourcePatientId,
+        'medicine-course',
+        requiredText(row.courseId, 'invalid_dose_occurrence', 512),
+      );
+      const sourceRegimenId = optionalText(row.regimenId, 'invalid_dose_occurrence', 512);
+      const regimenId = sourceRegimenId
+        ? await resolveArchiveEntityId(patientId, sourcePatientId, 'dose-regimen', sourceRegimenId)
+        : null;
+      return {
+        sourceId: sourceIdValue,
+        snapshot: parseDoseOccurrence(value, patientId, { id, courseId, regimenId }),
+      };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const courseIds = [...new Set(planned.map(({ snapshot }) => snapshot.courseId))];
+    const courses = await tx
+      .select({ id: medicineCourse.id })
+      .from(medicineCourse)
+      .where(and(eq(medicineCourse.patientId, patientId), inArray(medicineCourse.id, courseIds)));
+    if (courses.length !== courseIds.length) throw new ArchiveImportError('missing_claim');
+
+    const regimenIds = [
+      ...new Set(
+        planned
+          .map(({ snapshot }) => snapshot.regimenId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (regimenIds.length > 0) {
+      const regimens = await tx
+        .select({ id: doseRegimen.id, courseId: doseRegimen.courseId })
+        .from(doseRegimen)
+        .where(and(eq(doseRegimen.patientId, patientId), inArray(doseRegimen.id, regimenIds)));
+      if (regimens.length !== regimenIds.length) throw new ArchiveImportError('missing_claim');
+
+      const regimenCourse = new Map(regimens.map((row) => [row.id, row.courseId]));
+      for (const { snapshot } of planned) {
+        if (snapshot.regimenId && regimenCourse.get(snapshot.regimenId) !== snapshot.courseId) {
+          throw new ArchiveImportError('invalid_dose_occurrence');
+        }
+      }
+    }
+
+    const inserted = await tx
+      .insert(doseOccurrence)
+      .values(planned.map(({ snapshot }) => snapshot))
+      .onConflictDoNothing()
+      .returning({ id: doseOccurrence.id });
+    const ids = planned.map(({ snapshot }) => snapshot.id);
+    const stored = await tx
+      .select()
+      .from(doseOccurrence)
+      .where(and(eq(doseOccurrence.patientId, patientId), inArray(doseOccurrence.id, ids)));
+
+    if (stored.length > 0) {
+      await tx
+        .insert(claimRevision)
+        .values(
+          stored.map((snapshot) =>
+            claimRevisionValues('dose_occurrence', snapshot as DoseOccurrenceRecord, {
+              kind: snapshot.originKind,
+              provider: snapshot.originProvider,
+            }),
+          ),
+        )
+        .onConflictDoNothing();
+    }
+
+    return insertResult(items.length, inserted.length, planned.length - stored.length);
+  });
+}
+
 async function importRevisions(patientId: string, sourcePatientId: string, items: unknown[]) {
   const planned = await Promise.all(
     items.map(async (value) => {
       const row = asRecord(value, 'invalid_claim_revision');
       const claimKind = row.claimKind;
-      if (claimKind !== 'medicine' && claimKind !== 'energy' && claimKind !== 'workout') {
+      if (
+        claimKind !== 'medicine' &&
+        claimKind !== 'energy' &&
+        claimKind !== 'workout' &&
+        claimKind !== 'medicine_course' &&
+        claimKind !== 'dose_regimen' &&
+        claimKind !== 'dose_occurrence'
+      ) {
         throw new ArchiveImportError('invalid_claim_revision');
       }
 
@@ -1332,6 +1694,14 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
       const workoutPlan = claimKind === 'workout'
         ? await planWorkout(snapshotRow, patientId, sourcePatientId)
         : null;
+      const planIdKind =
+        claimKind === 'medicine_course'
+          ? ('medicine-course' as const)
+          : claimKind === 'dose_regimen'
+            ? ('dose-regimen' as const)
+            : claimKind === 'dose_occurrence'
+              ? ('dose-occurrence' as const)
+              : null;
       const localClaimId = workoutPlan
         ? workoutPlan.snapshot.id
         : claimKind === 'energy'
@@ -1342,12 +1712,63 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
               originProvider: optionalText(snapshotRow.originProvider, 'invalid_claim_revision', 300),
               originExternalId: optionalText(snapshotRow.originExternalId, 'invalid_claim_revision', 1000),
             })
-          : await resolveArchiveEntityId(patientId, sourcePatientId, claimKind, sourceClaimId);
+          : await resolveArchiveEntityId(
+              patientId,
+              sourcePatientId,
+              planIdKind ?? (claimKind as 'medicine' | 'workout'),
+              sourceClaimId,
+            );
       const snapshot = workoutPlan
         ? workoutPlan.snapshot
         : claimKind === 'medicine'
           ? parseMedicine(snapshotRow, patientId, localClaimId)
-          : parseEnergy(snapshotRow, patientId, localClaimId);
+          : claimKind === 'medicine_course'
+            ? parseMedicineCourse(snapshotRow, patientId, {
+                id: localClaimId,
+                medicineClaimId: await resolveArchiveEntityId(
+                  patientId,
+                  sourcePatientId,
+                  'medicine',
+                  requiredText(snapshotRow.medicineClaimId, 'invalid_claim_revision', 512),
+                ),
+                previousCourseId: snapshotRow.previousCourseId
+                  ? await resolveArchiveEntityId(
+                      patientId,
+                      sourcePatientId,
+                      'medicine-course',
+                      requiredText(snapshotRow.previousCourseId, 'invalid_claim_revision', 512),
+                    )
+                  : null,
+              })
+            : claimKind === 'dose_regimen'
+              ? parseDoseRegimen(snapshotRow, patientId, {
+                  id: localClaimId,
+                  courseId: await resolveArchiveEntityId(
+                    patientId,
+                    sourcePatientId,
+                    'medicine-course',
+                    requiredText(snapshotRow.courseId, 'invalid_claim_revision', 512),
+                  ),
+                })
+              : claimKind === 'dose_occurrence'
+                ? parseDoseOccurrence(snapshotRow, patientId, {
+                    id: localClaimId,
+                    courseId: await resolveArchiveEntityId(
+                      patientId,
+                      sourcePatientId,
+                      'medicine-course',
+                      requiredText(snapshotRow.courseId, 'invalid_claim_revision', 512),
+                    ),
+                    regimenId: snapshotRow.regimenId
+                      ? await resolveArchiveEntityId(
+                          patientId,
+                          sourcePatientId,
+                          'dose-regimen',
+                          requiredText(snapshotRow.regimenId, 'invalid_claim_revision', 512),
+                        )
+                      : null,
+                  })
+                : parseEnergy(snapshotRow, patientId, localClaimId);
 
       return {
         patientId,
@@ -1365,7 +1786,10 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
   const medicineIds = [...new Set(planned.filter((row) => row.claimKind === 'medicine').map((row) => row.claimId))];
   const energyIds = [...new Set(planned.filter((row) => row.claimKind === 'energy').map((row) => row.claimId))];
   const workoutIds = [...new Set(planned.filter((row) => row.claimKind === 'workout').map((row) => row.claimId))];
-  const [medicines, energyEntries, workoutEntries] = await Promise.all([
+  const courseIds = [...new Set(planned.filter((row) => row.claimKind === 'medicine_course').map((row) => row.claimId))];
+  const regimenIds = [...new Set(planned.filter((row) => row.claimKind === 'dose_regimen').map((row) => row.claimId))];
+  const occurrenceIds = [...new Set(planned.filter((row) => row.claimKind === 'dose_occurrence').map((row) => row.claimId))];
+  const [medicines, energyEntries, workoutEntries, courses, regimens, occurrences] = await Promise.all([
     medicineIds.length
       ? db
           .select({ id: medicineClaim.id })
@@ -1384,8 +1808,30 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
           .from(workoutClaim)
           .where(and(eq(workoutClaim.patientId, patientId), inArray(workoutClaim.id, workoutIds)))
       : [],
+    courseIds.length
+      ? db
+          .select({ id: medicineCourse.id })
+          .from(medicineCourse)
+          .where(and(eq(medicineCourse.patientId, patientId), inArray(medicineCourse.id, courseIds)))
+      : [],
+    regimenIds.length
+      ? db
+          .select({ id: doseRegimen.id })
+          .from(doseRegimen)
+          .where(and(eq(doseRegimen.patientId, patientId), inArray(doseRegimen.id, regimenIds)))
+      : [],
+    occurrenceIds.length
+      ? db
+          .select({ id: doseOccurrence.id })
+          .from(doseOccurrence)
+          .where(and(eq(doseOccurrence.patientId, patientId), inArray(doseOccurrence.id, occurrenceIds)))
+      : [],
   ]);
-  const existingIds = new Set([...medicines, ...energyEntries, ...workoutEntries].map((row) => row.id));
+  const existingIds = new Set(
+    [...medicines, ...energyEntries, ...workoutEntries, ...courses, ...regimens, ...occurrences].map(
+      (row) => row.id,
+    ),
+  );
   const eligible = planned.filter((row) => existingIds.has(row.claimId));
 
   const inserted = eligible.length
@@ -1412,6 +1858,15 @@ export async function importArchiveBatch(input: {
   if (input.kind === 'reports') return importReports(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'records') return importRecords(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'medicines') return importMedicines(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'medicineCourses') {
+    return importMedicineCourses(input.patientId, input.sourcePatientId, input.items);
+  }
+  if (input.kind === 'doseRegimens') {
+    return importDoseRegimens(input.patientId, input.sourcePatientId, input.items);
+  }
+  if (input.kind === 'doseOccurrences') {
+    return importDoseOccurrences(input.patientId, input.sourcePatientId, input.items);
+  }
   if (input.kind === 'energy') return importEnergy(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'dataImports') {
     return importDataImports(input.patientId, input.sourcePatientId, input.items);

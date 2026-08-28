@@ -1,9 +1,12 @@
 import { db } from '$lib/server/db';
 import {
   dataImport,
+  doseOccurrence,
+  doseRegimen,
   energyClaim,
   energySource,
   medicineClaim,
+  medicineCourse,
   patient,
   record,
   report,
@@ -112,4 +115,34 @@ export async function getOwnedWorkoutClaim(userId: string, workoutId: string) {
 
   const ownedPatient = await getOwnedPatient(userId, currentWorkout.patientId);
   return ownedPatient ? currentWorkout : null;
+}
+
+export async function getOwnedMedicineCourse(userId: string, courseId: string) {
+  const rows = await db.select().from(medicineCourse).where(eq(medicineCourse.id, courseId));
+  const currentCourse = rows[0];
+
+  if (!currentCourse) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentCourse.patientId);
+  return ownedPatient ? currentCourse : null;
+}
+
+export async function getOwnedDoseRegimen(userId: string, regimenId: string) {
+  const rows = await db.select().from(doseRegimen).where(eq(doseRegimen.id, regimenId));
+  const currentRegimen = rows[0];
+
+  if (!currentRegimen) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentRegimen.patientId);
+  return ownedPatient ? currentRegimen : null;
+}
+
+export async function getOwnedDoseOccurrence(userId: string, occurrenceId: string) {
+  const rows = await db.select().from(doseOccurrence).where(eq(doseOccurrence.id, occurrenceId));
+  const currentOccurrence = rows[0];
+
+  if (!currentOccurrence) return null;
+
+  const ownedPatient = await getOwnedPatient(userId, currentOccurrence.patientId);
+  return ownedPatient ? currentOccurrence : null;
 }

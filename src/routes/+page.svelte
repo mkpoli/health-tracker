@@ -539,6 +539,9 @@
           reports: data.reports,
           records: data.records,
           medicines: data.medicines,
+          medicineCourses: data.medicineCourses,
+          doseRegimens: data.doseRegimens,
+          doseOccurrences: data.doseOccurrences,
           energyEntries: data.energyEntries,
           energySources: data.energySources,
           dataImports: data.dataImports,
@@ -1736,6 +1739,9 @@
         reports={data.reports}
         records={data.records}
         medicines={data.medicines}
+        medicineCourses={data.medicineCourses}
+        doseRegimens={data.doseRegimens}
+        doseOccurrences={data.doseOccurrences}
         energyEntries={data.energyEntries}
         energySources={data.energySources}
         dataImports={data.dataImports}
@@ -2889,6 +2895,10 @@
             patientId={data.currentPatient.id}
             medicines={data.medicines}
             revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
+            courses={data.medicineCourses}
+            regimens={data.doseRegimens}
+            occurrences={data.doseOccurrences}
+            {patientTimeZone}
           />
         </div>
 
