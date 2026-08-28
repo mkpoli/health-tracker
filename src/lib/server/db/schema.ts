@@ -86,6 +86,143 @@ export const medicineClaim = sqliteTable(
 	]
 );
 
+export const medicineCourse = sqliteTable(
+	'medicine_course',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		medicineClaimId: text('medicine_claim_id')
+			.notNull()
+			.references(() => medicineClaim.id, { onDelete: 'cascade' }),
+		kind: text('kind').notNull().default('initial'),
+		status: text('status').notNull().default('active'),
+		previousCourseId: text('previous_course_id'),
+		startDate: text('start_date').notNull(),
+		endDate: text('end_date'),
+		endReason: text('end_reason'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check('medicine_course_kind_check', sql`${table.kind} in ('initial', 'restart')`),
+		check(
+			'medicine_course_status_check',
+			sql`${table.status} in ('planned', 'active', 'held', 'ended')`
+		),
+		foreignKey({
+			name: 'medicine_course_previous_fk',
+			columns: [table.previousCourseId],
+			foreignColumns: [table.id]
+		}).onDelete('set null'),
+		index('medicine_course_patient_idx').on(table.patientId),
+		index('medicine_course_medicine_idx').on(table.medicineClaimId)
+	]
+);
+
+export const doseRegimen = sqliteTable(
+	'dose_regimen',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		courseId: text('course_id')
+			.notNull()
+			.references(() => medicineCourse.id, { onDelete: 'cascade' }),
+		ruleKind: text('rule_kind').notNull(),
+		slots: text('slots', { mode: 'json' }).notNull().default([]).$type<unknown>(),
+		daysOfWeek: text('days_of_week', { mode: 'json' }).$type<unknown>(),
+		intervalHours: real('interval_hours'),
+		anchorAt: text('anchor_at'),
+		doseText: text('dose_text'),
+		route: text('route'),
+		site: text('site'),
+		timezone: text('timezone').notNull(),
+		effectiveFrom: text('effective_from').notNull(),
+		effectiveTo: text('effective_to'),
+		remindMinutesBefore: integer('remind_minutes_before'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check(
+			'dose_regimen_rule_check',
+			sql`${table.ruleKind} in ('fixed_slots', 'interval', 'as_needed')`
+		),
+		index('dose_regimen_patient_idx').on(table.patientId),
+		index('dose_regimen_course_idx').on(table.courseId)
+	]
+);
+
+export const doseOccurrence = sqliteTable(
+	'dose_occurrence',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		courseId: text('course_id')
+			.notNull()
+			.references(() => medicineCourse.id, { onDelete: 'cascade' }),
+		regimenId: text('regimen_id').references(() => doseRegimen.id, { onDelete: 'set null' }),
+		regimenRevision: integer('regimen_revision'),
+		slotKey: integer('slot_key'),
+		localDate: text('local_date').notNull(),
+		plannedAt: text('planned_at'),
+		timezone: text('timezone').notNull(),
+		status: text('status').notNull().default('planned'),
+		actualAt: text('actual_at'),
+		actualValue: real('actual_value'),
+		actualUnit: text('actual_unit'),
+		actualText: text('actual_text'),
+		route: text('route'),
+		site: text('site'),
+		reason: text('reason'),
+		reaction: text('reaction'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check(
+			'dose_occurrence_status_check',
+			sql`${table.status} in ('planned', 'taken', 'partial', 'skipped', 'missed', 'delayed', 'held', 'unknown')`
+		),
+		uniqueIndex('dose_occurrence_slot_idx').on(table.regimenId, table.localDate, table.slotKey),
+		index('dose_occurrence_patient_date_idx').on(table.patientId, table.localDate),
+		index('dose_occurrence_patient_planned_idx').on(table.patientId, table.plannedAt),
+		index('dose_occurrence_course_idx').on(table.courseId)
+	]
+);
+
 export const energyClaim = sqliteTable(
 	'energy_claim',
 	{
@@ -389,7 +526,10 @@ export const claimRevision = sqliteTable(
 		changeOriginProvider: text('change_origin_provider')
 	},
 	(table) => [
-		check('claim_revision_kind_check', sql`${table.claimKind} in ('medicine', 'energy', 'workout')`),
+		check(
+			'claim_revision_kind_check',
+			sql`${table.claimKind} in ('medicine', 'energy', 'workout', 'medicine_course', 'dose_regimen', 'dose_occurrence')`
+		),
 		uniqueIndex('claim_revision_claim_idx').on(table.claimKind, table.claimId, table.revision),
 		index('claim_revision_patient_idx').on(table.patientId),
 		index('claim_revision_patient_changed_idx').on(table.patientId, table.changedAt)
@@ -400,6 +540,9 @@ export const patientRelations = relations(patient, ({ many }) => ({
 	reports: many(report),
 	records: many(record),
 	medicineClaims: many(medicineClaim),
+	medicineCourses: many(medicineCourse),
+	doseRegimens: many(doseRegimen),
+	doseOccurrences: many(doseOccurrence),
 	energyClaims: many(energyClaim),
 	energySources: many(energySource),
 	dataImports: many(dataImport),
@@ -429,10 +572,51 @@ export const recordRelations = relations(record, ({ one }) => ({
 	})
 }));
 
-export const medicineClaimRelations = relations(medicineClaim, ({ one }) => ({
+export const medicineClaimRelations = relations(medicineClaim, ({ one, many }) => ({
 	patient: one(patient, {
 		fields: [medicineClaim.patientId],
 		references: [patient.id]
+	}),
+	courses: many(medicineCourse)
+}));
+
+export const medicineCourseRelations = relations(medicineCourse, ({ one, many }) => ({
+	patient: one(patient, {
+		fields: [medicineCourse.patientId],
+		references: [patient.id]
+	}),
+	medicine: one(medicineClaim, {
+		fields: [medicineCourse.medicineClaimId],
+		references: [medicineClaim.id]
+	}),
+	regimens: many(doseRegimen),
+	occurrences: many(doseOccurrence)
+}));
+
+export const doseRegimenRelations = relations(doseRegimen, ({ one, many }) => ({
+	patient: one(patient, {
+		fields: [doseRegimen.patientId],
+		references: [patient.id]
+	}),
+	course: one(medicineCourse, {
+		fields: [doseRegimen.courseId],
+		references: [medicineCourse.id]
+	}),
+	occurrences: many(doseOccurrence)
+}));
+
+export const doseOccurrenceRelations = relations(doseOccurrence, ({ one }) => ({
+	patient: one(patient, {
+		fields: [doseOccurrence.patientId],
+		references: [patient.id]
+	}),
+	course: one(medicineCourse, {
+		fields: [doseOccurrence.courseId],
+		references: [medicineCourse.id]
+	}),
+	regimen: one(doseRegimen, {
+		fields: [doseOccurrence.regimenId],
+		references: [doseRegimen.id]
 	})
 }));
 

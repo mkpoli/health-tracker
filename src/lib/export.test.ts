@@ -9,6 +9,9 @@ describe('buildPatientExport', () => {
       reports: [{ id: 'report-1' }],
       records: [{ id: 'record-1' }],
       medicines: [{ id: 'medicine-1', revision: 2 }],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
       dataImports: [{ id: 'import-1', provider: 'hevy' }],
@@ -22,6 +25,9 @@ describe('buildPatientExport', () => {
       version: 7,
       patient: { id: 'patient-1' },
       medicines: [{ id: 'medicine-1', revision: 2 }],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
       dataImports: [{ id: 'import-1', provider: 'hevy' }],
@@ -48,6 +54,9 @@ describe('buildPatientExport', () => {
       ],
       records: [],
       medicines: [],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [],
       energySources: [
         {
@@ -92,6 +101,9 @@ describe('buildPatientExport', () => {
       reports: [],
       records: [],
       medicines: [],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [{ id: 'energy-1' }],
       energySources: [
         {
@@ -137,6 +149,9 @@ describe('buildPatientExport', () => {
       reports: [],
       records: [],
       medicines: [],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [],
       energySources: [{ id: 'source-1', sourceUrl: 'https://other.example/source' }],
       dataImports: [],
@@ -156,6 +171,9 @@ describe('buildPatientExport', () => {
       reports: [],
       records: [],
       medicines: [],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [],
       energySources: [
         {

@@ -21,6 +21,9 @@ export interface HealthTrackerExport {
   reports: unknown[];
   records: unknown[];
   medicines: unknown[];
+  medicineCourses: unknown[];
+  doseRegimens: unknown[];
+  doseOccurrences: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
   dataImports: unknown[];
@@ -167,6 +170,9 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     reports: data.reports,
     records: data.records,
     medicines: arrayOrEmpty(data.medicines),
+    medicineCourses: arrayOrEmpty(data.medicineCourses),
+    doseRegimens: arrayOrEmpty(data.doseRegimens),
+    doseOccurrences: arrayOrEmpty(data.doseOccurrences),
     energyEntries: arrayOrEmpty(data.energyEntries),
     energySources: arrayOrEmpty(data.energySources),
     dataImports: arrayOrEmpty(data.dataImports),

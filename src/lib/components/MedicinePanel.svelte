@@ -7,18 +7,90 @@
   import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
   import type { MedicineCaptureProposal } from '$lib/health-capture';
   import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
+  import {
+    addDays,
+    buildDoseChecklist,
+    countAdherence,
+    localDateOf,
+    planDoses,
+    type DoseOccurrenceRecord,
+    type DoseRegimenRecord,
+    type MedicineCourseRecord,
+  } from '$lib/medicine-plan';
+  import { toDateTimeLocal } from '$lib/time-zone';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
+  import DoseChecklist from './DoseChecklist.svelte';
   import HealthCapture from './HealthCapture.svelte';
+  import MedicineDosePlan from './MedicineDosePlan.svelte';
 
   let {
     patientId,
     medicines = [],
     revisions = [],
+    courses = [],
+    regimens = [],
+    occurrences = [],
+    patientTimeZone = 'UTC',
   }: {
     patientId: string;
     medicines: MedicineClaimRecord[];
     revisions: MedicineClaimRevisionRecord[];
+    courses: MedicineCourseRecord[];
+    regimens: DoseRegimenRecord[];
+    occurrences: DoseOccurrenceRecord[];
+    patientTimeZone?: string;
   } = $props();
+
+  const today = $derived(toDateTimeLocal(new Date().toISOString(), patientTimeZone).slice(0, 10));
+  const coursesById = $derived(new Map(courses.map((course) => [course.id, course])));
+  const regimensById = $derived(new Map(regimens.map((regimen) => [regimen.id, regimen])));
+  const medicinesByCourse = $derived.by(() => {
+    const byId = new Map(medicines.map((medicine) => [medicine.id, medicine]));
+    const map = new Map<string, MedicineClaimRecord>();
+    for (const course of courses) {
+      const medicine = byId.get(course.medicineClaimId);
+      if (medicine) map.set(course.id, medicine);
+    }
+    return map;
+  });
+
+  // One expansion covers both surfaces: the last 30 days feed the adherence
+  // counts and today's slice feeds the checklist.
+  const doseEntries = $derived.by(() => {
+    const from = addDays(today, -30);
+    const planned = regimens.flatMap((regimen) => {
+      const course = coursesById.get(regimen.courseId);
+      return course ? planDoses(course, regimen, from, today) : [];
+    });
+    return buildDoseChecklist(
+      planned,
+      occurrences.filter((occurrence) => occurrence.localDate >= from),
+    );
+  });
+  const todayDoseEntries = $derived.by(() => {
+    const now = new Date().toISOString();
+    const todayByZone = new Map<string, string>();
+    return doseEntries.filter((entry) => {
+      let zoneToday = todayByZone.get(entry.timezone);
+      if (!zoneToday) {
+        zoneToday = localDateOf(now, entry.timezone);
+        todayByZone.set(entry.timezone, zoneToday);
+      }
+      return entry.localDate === zoneToday;
+    });
+  });
+  const adherenceByMedicine = $derived.by(() => {
+    const now = new Date().toISOString();
+    const map = new Map<string, ReturnType<typeof countAdherence>>();
+    for (const medicine of medicines) {
+      const courseIds = new Set(
+        courses.filter((course) => course.medicineClaimId === medicine.id).map((course) => course.id),
+      );
+      const entries = doseEntries.filter((entry) => courseIds.has(entry.courseId));
+      if (entries.length > 0) map.set(medicine.id, countAdherence(entries, now));
+    }
+    return map;
+  });
 
   type Draft = {
     id: string;
@@ -297,6 +369,17 @@
     </button>
   </header>
 
+  {#if todayDoseEntries.length > 0}
+    <div class="border-b border-slate-100 p-4 sm:p-6">
+      <DoseChecklist
+        entries={todayDoseEntries}
+        {medicinesByCourse}
+        {regimensById}
+        {today}
+      />
+    </div>
+  {/if}
+
   <div class="border-b border-slate-100 p-4 sm:p-6">
     <HealthCapture
       kind="medicine"
@@ -436,6 +519,14 @@
         </button>
       </form>
     </div>
+    <MedicineDosePlan
+      medicineClaimId={medicine.id}
+      courses={courses.filter((course) => course.medicineClaimId === medicine.id)}
+      regimens={regimens.filter((regimen) => medicinesByCourse.get(regimen.courseId)?.id === medicine.id)}
+      adherence={adherenceByMedicine.get(medicine.id) || null}
+      {patientTimeZone}
+      {today}
+    />
     </div>
     <ClaimRevisionTimeline items={medicineRevisionItems(medicine)} />
   </article>

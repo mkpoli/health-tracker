@@ -2,10 +2,13 @@ import { db } from '$lib/server/db';
 import {
   claimRevision,
   dataImport,
+  doseOccurrence,
+  doseRegimen,
   energyClaim,
   energySource,
   exerciseDefinition,
   medicineClaim,
+  medicineCourse,
   patient,
   report,
   record,
@@ -28,8 +31,11 @@ import { isMeasurementKind } from '$lib/report-kind';
 import { deleteImportedSessions, importMeasurementSessions } from '$lib/server/measurement-import';
 import {
   getOwnedLabReport,
+  getOwnedDoseOccurrence,
+  getOwnedDoseRegimen,
   getOwnedEnergyClaim,
   getOwnedMedicineClaim,
+  getOwnedMedicineCourse,
   getOwnedPatient,
   getOwnedRecord,
   getOwnedReport,
@@ -37,7 +43,27 @@ import {
   requireUserId,
 } from '$lib/server/ownership';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
-import { isValidTimeZone, normalizeTimeZone } from '$lib/time-zone';
+import {
+  InvalidMedicinePlanInputError,
+  parseDoseActionInput,
+  parseDoseRegimenInput,
+  parseMedicineCourseInput,
+} from '$lib/server/medicine-plan';
+import {
+  createDoseRegimen,
+  createMedicineCourse,
+  RegimenOverlapError,
+  normalizeDoseOccurrence,
+  normalizeDoseRegimen,
+  normalizeMedicineCourse,
+  recordPlannedDose,
+  recordUnplannedDose,
+  UnknownDoseSlotError,
+  updateDoseOccurrence,
+  updateDoseRegimen,
+  updateMedicineCourse,
+} from '$lib/server/medicine-plan-mutations';
+import { isValidTimeZone, normalizeTimeZone, toDateTimeLocal } from '$lib/time-zone';
 import { InvalidReportTimeError, resolveReportTime } from '$lib/server/report-time';
 import { InvalidEnergyInputError, parseEnergyInput, validateEnergyEntry } from '$lib/server/energy';
 import {
@@ -47,10 +73,14 @@ import {
   validateEnergyPhoto,
 } from '$lib/server/energy-source-storage';
 import {
+  claimRevisionValues,
   parseExpectedClaimRevision,
   StaleClaimRevisionError,
+  toDoseOccurrenceRevision,
+  toDoseRegimenRevision,
   toEnergyClaimRevision,
   toMedicineClaimRevision,
+  toMedicineCourseRevision,
   toWorkoutClaimRevision,
 } from '$lib/server/claim-revisions';
 import {
@@ -137,6 +167,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       records: [],
       reports: [],
       medicines: [],
+      medicineCourses: [],
+      doseRegimens: [],
+      doseOccurrences: [],
       energyEntries: [],
       energySources: [],
       dataImports: [],
@@ -159,6 +192,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let recordsList: typeof record.$inferSelect[] = [];
   let reportsList: typeof report.$inferSelect[] = [];
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
+  let medicineCoursesList: typeof medicineCourse.$inferSelect[] = [];
+  let doseRegimensList: typeof doseRegimen.$inferSelect[] = [];
+  let doseOccurrencesList: typeof doseOccurrence.$inferSelect[] = [];
   let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
   let energySourcesList: typeof energySource.$inferSelect[] = [];
   let dataImportsList: typeof dataImport.$inferSelect[] = [];
@@ -176,6 +212,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       recordsList,
       reportsList,
       medicinesList,
+      medicineCoursesList,
+      doseRegimensList,
+      doseOccurrencesList,
       energyEntriesList,
       energySourcesList,
       dataImportsList,
@@ -200,6 +239,21 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(medicineClaim)
         .where(eq(medicineClaim.patientId, currentPatient.id))
         .orderBy(desc(medicineClaim.updatedAt)),
+      db
+        .select()
+        .from(medicineCourse)
+        .where(eq(medicineCourse.patientId, currentPatient.id))
+        .orderBy(desc(medicineCourse.startDate)),
+      db
+        .select()
+        .from(doseRegimen)
+        .where(eq(doseRegimen.patientId, currentPatient.id))
+        .orderBy(desc(doseRegimen.effectiveFrom)),
+      db
+        .select()
+        .from(doseOccurrence)
+        .where(eq(doseOccurrence.patientId, currentPatient.id))
+        .orderBy(desc(doseOccurrence.localDate)),
       db
         .select()
         .from(energyClaim)
@@ -248,7 +302,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       ? toMedicineClaimRevision(revision)
       : revision.claimKind === 'energy'
         ? toEnergyClaimRevision(revision)
-        : toWorkoutClaimRevision(revision);
+        : revision.claimKind === 'medicine_course'
+          ? toMedicineCourseRevision(revision)
+          : revision.claimKind === 'dose_regimen'
+            ? toDoseRegimenRevision(revision)
+            : revision.claimKind === 'dose_occurrence'
+              ? toDoseOccurrenceRevision(revision)
+              : toWorkoutClaimRevision(revision);
 
     return normalized ? [normalized] : [];
   });
@@ -261,6 +321,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     records: recordsList,
     reports: reportsList,
     medicines: medicinesList.map(normalizeMedicineClaim),
+    medicineCourses: medicineCoursesList.map(normalizeMedicineCourse),
+    doseRegimens: doseRegimensList.map(normalizeDoseRegimen),
+    doseOccurrences: doseOccurrencesList.map(normalizeDoseOccurrence),
     energyEntries: energyEntriesList.map(normalizeEnergyClaim),
     energySources: energySourcesList.map(toEnergySourceRecord),
     dataImports: dataImportsList.map(normalizeDataImport),
@@ -369,20 +432,386 @@ export const actions: Actions = {
     if (!current) return fail(404, { code: 'medicine_not_found' });
 
     await db.transaction(async (tx) => {
-      await tx
-        .delete(claimRevision)
-        .where(
-          and(
-            eq(claimRevision.patientId, current.patientId),
-            eq(claimRevision.claimKind, 'medicine'),
-            eq(claimRevision.claimId, current.id),
-          ),
-        );
+      const courseIds = (
+        await tx
+          .select({ id: medicineCourse.id })
+          .from(medicineCourse)
+          .where(eq(medicineCourse.medicineClaimId, current.id))
+      ).map((row) => row.id);
+      const regimenIds = courseIds.length
+        ? (
+            await tx
+              .select({ id: doseRegimen.id })
+              .from(doseRegimen)
+              .where(inArray(doseRegimen.courseId, courseIds))
+          ).map((row) => row.id)
+        : [];
+      const occurrenceIds = courseIds.length
+        ? (
+            await tx
+              .select({ id: doseOccurrence.id })
+              .from(doseOccurrence)
+              .where(inArray(doseOccurrence.courseId, courseIds))
+          ).map((row) => row.id)
+        : [];
+
+      const revisionTargets = [
+        { kind: 'medicine', ids: [current.id] },
+        { kind: 'medicine_course', ids: courseIds },
+        { kind: 'dose_regimen', ids: regimenIds },
+        { kind: 'dose_occurrence', ids: occurrenceIds },
+      ];
+
+      for (const target of revisionTargets) {
+        if (target.ids.length === 0) continue;
+        await tx
+          .delete(claimRevision)
+          .where(
+            and(
+              eq(claimRevision.patientId, current.patientId),
+              eq(claimRevision.claimKind, target.kind),
+              inArray(claimRevision.claimId, target.ids),
+            ),
+          );
+      }
+
       await tx
         .delete(medicineClaim)
         .where(and(eq(medicineClaim.id, current.id), eq(medicineClaim.patientId, current.patientId)));
     });
     return { success: true };
+  },
+
+
+  createMedicineCourse: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const medicineClaimId = data.get('medicineClaimId')?.toString();
+
+    if (!medicineClaimId) return fail(400, { code: 'plan_missing_medicine' });
+
+    const ownedMedicine = await getOwnedMedicineClaim(userId, medicineClaimId);
+    if (!ownedMedicine) return fail(404, { code: 'plan_medicine_not_found' });
+
+    try {
+      const input = parseMedicineCourseInput(data);
+      if (input.previousCourseId) {
+        const previous = await getOwnedMedicineCourse(userId, input.previousCourseId);
+        if (!previous || previous.medicineClaimId !== ownedMedicine.id) {
+          return fail(400, { code: 'plan_invalid_previous_course' });
+        }
+      }
+
+      const course = await createMedicineCourse({
+        patientId: ownedMedicine.patientId,
+        medicineClaimId: ownedMedicine.id,
+        input,
+        origin: manualClaimSource,
+      });
+
+      return { success: true, course };
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
+      }
+
+      throw error;
+    }
+  },
+
+  updateMedicineCourse: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+
+    if (!id) return fail(400, { code: 'plan_missing_id' });
+    if (expectedRevision === null) return fail(400, { code: 'plan_invalid_revision' });
+
+    const current = await getOwnedMedicineCourse(userId, id);
+    if (!current) return fail(404, { code: 'plan_not_found' });
+    if (current.revision !== expectedRevision) return fail(409, { code: 'plan_stale_revision' });
+
+    try {
+      const input = parseMedicineCourseInput(data);
+      if (input.previousCourseId) {
+        const previous = await getOwnedMedicineCourse(userId, input.previousCourseId);
+        if (!previous || previous.id === current.id || previous.medicineClaimId !== current.medicineClaimId) {
+          return fail(400, { code: 'plan_invalid_previous_course' });
+        }
+      }
+
+      const course = await updateMedicineCourse({
+        current,
+        input,
+        expectedRevision,
+        source: manualClaimSource,
+      });
+
+      return { success: true, course };
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'plan_stale_revision' });
+      }
+
+      throw error;
+    }
+  },
+
+  deleteMedicineCourse: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+
+    if (!id) return fail(400, { code: 'plan_missing_id' });
+
+    const current = await getOwnedMedicineCourse(userId, id);
+    if (!current) return fail(404, { code: 'plan_not_found' });
+
+    await db.transaction(async (tx) => {
+      const regimenIds = (
+        await tx
+          .select({ id: doseRegimen.id })
+          .from(doseRegimen)
+          .where(eq(doseRegimen.courseId, current.id))
+      ).map((row) => row.id);
+      const occurrenceIds = (
+        await tx
+          .select({ id: doseOccurrence.id })
+          .from(doseOccurrence)
+          .where(eq(doseOccurrence.courseId, current.id))
+      ).map((row) => row.id);
+
+      // A course that continued from this one keeps existing; its link goes
+      // null through the ledger like any other course change.
+      const successors = await tx
+        .select()
+        .from(medicineCourse)
+        .where(
+          and(
+            eq(medicineCourse.previousCourseId, current.id),
+            eq(medicineCourse.patientId, current.patientId),
+          ),
+        );
+      for (const successor of successors) {
+        await tx
+          .insert(claimRevision)
+          .values(
+            claimRevisionValues('medicine_course', normalizeMedicineCourse(successor), manualClaimSource),
+          )
+          .onConflictDoNothing();
+        const detached = await tx
+          .update(medicineCourse)
+          .set({
+            previousCourseId: null,
+            revision: successor.revision + 1,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(and(eq(medicineCourse.id, successor.id), eq(medicineCourse.revision, successor.revision)))
+          .returning();
+        if (detached[0]) {
+          await tx
+            .insert(claimRevision)
+            .values(
+              claimRevisionValues('medicine_course', normalizeMedicineCourse(detached[0]), manualClaimSource),
+            );
+        }
+      }
+
+      const revisionTargets = [
+        { kind: 'medicine_course', ids: [current.id] },
+        { kind: 'dose_regimen', ids: regimenIds },
+        { kind: 'dose_occurrence', ids: occurrenceIds },
+      ];
+
+      for (const target of revisionTargets) {
+        if (target.ids.length === 0) continue;
+        await tx
+          .delete(claimRevision)
+          .where(
+            and(
+              eq(claimRevision.patientId, current.patientId),
+              eq(claimRevision.claimKind, target.kind),
+              inArray(claimRevision.claimId, target.ids),
+            ),
+          );
+      }
+
+      await tx
+        .delete(medicineCourse)
+        .where(and(eq(medicineCourse.id, current.id), eq(medicineCourse.patientId, current.patientId)));
+    });
+
+    return { success: true };
+  },
+
+  createDoseRegimen: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const courseId = data.get('courseId')?.toString();
+
+    if (!courseId) return fail(400, { code: 'plan_missing_id' });
+
+    const ownedCourse = await getOwnedMedicineCourse(userId, courseId);
+    if (!ownedCourse) return fail(404, { code: 'plan_not_found' });
+
+    try {
+      const input = parseDoseRegimenInput(data);
+      const regimen = await createDoseRegimen({
+        patientId: ownedCourse.patientId,
+        courseId: ownedCourse.id,
+        input,
+        origin: manualClaimSource,
+      });
+
+      return { success: true, regimen };
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'plan_stale_revision' });
+      }
+
+      throw error;
+    }
+  },
+
+  updateDoseRegimen: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+
+    if (!id) return fail(400, { code: 'plan_missing_id' });
+    if (expectedRevision === null) return fail(400, { code: 'plan_invalid_revision' });
+
+    const current = await getOwnedDoseRegimen(userId, id);
+    if (!current) return fail(404, { code: 'plan_not_found' });
+    if (current.revision !== expectedRevision) return fail(409, { code: 'plan_stale_revision' });
+
+    try {
+      const input = parseDoseRegimenInput(data);
+      const regimen = await updateDoseRegimen({
+        current,
+        input,
+        expectedRevision,
+        source: manualClaimSource,
+      });
+
+      return { success: true, regimen };
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
+      }
+
+      if (error instanceof RegimenOverlapError) {
+        return fail(400, { code: 'plan_invalid_window' });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'plan_stale_revision' });
+      }
+
+      throw error;
+    }
+  },
+
+  recordDose: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const occurrenceId = data.get('occurrenceId')?.toString();
+
+    try {
+      if (occurrenceId) {
+        const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+        if (expectedRevision === null) return fail(400, { code: 'plan_invalid_revision' });
+
+        const current = await getOwnedDoseOccurrence(userId, occurrenceId);
+        if (!current) return fail(404, { code: 'plan_not_found' });
+        if (current.revision !== expectedRevision) {
+          return fail(409, { code: 'plan_stale_revision' });
+        }
+
+        const input = parseDoseActionInput(data, current.timezone);
+        const occurrence = await updateDoseOccurrence({
+          current,
+          input,
+          expectedRevision,
+          source: manualClaimSource,
+        });
+
+        return { success: true, occurrence };
+      }
+
+      const regimenId = data.get('regimenId')?.toString();
+      const localDate = data.get('localDate')?.toString();
+
+      if (regimenId && localDate) {
+        const slotKey = Number(data.get('slotKey')?.toString());
+        if (!Number.isInteger(slotKey) || slotKey < 0) {
+          return fail(400, { code: 'plan_invalid_slot' });
+        }
+
+        const regimen = await getOwnedDoseRegimen(userId, regimenId);
+        if (!regimen) return fail(404, { code: 'plan_not_found' });
+
+        const course = await getOwnedMedicineCourse(userId, regimen.courseId);
+        if (!course) return fail(404, { code: 'plan_not_found' });
+
+        const input = parseDoseActionInput(data, regimen.timezone);
+        const occurrence = await recordPlannedDose({
+          course,
+          regimen,
+          localDate,
+          slotKey,
+          input,
+          origin: manualClaimSource,
+        });
+
+        return { success: true, occurrence };
+      }
+
+      const courseId = data.get('courseId')?.toString();
+      if (!courseId) return fail(400, { code: 'plan_missing_id' });
+
+      const course = await getOwnedMedicineCourse(userId, courseId);
+      if (!course) return fail(404, { code: 'plan_not_found' });
+
+      const timezone = normalizeTimeZone(data.get('timezone')?.toString());
+      const input = parseDoseActionInput(data, timezone);
+      const actualAt = input.actualAt || new Date().toISOString();
+      const actionDate = toDateTimeLocal(actualAt, timezone).slice(0, 10);
+      const occurrence = await recordUnplannedDose({
+        course,
+        regimenId: null,
+        localDate: actionDate,
+        timezone,
+        input: { ...input, actualAt },
+        origin: manualClaimSource,
+      });
+
+      return { success: true, occurrence };
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
+      }
+
+      if (error instanceof UnknownDoseSlotError) {
+        return fail(400, { code: 'plan_invalid_slot' });
+      }
+
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'plan_stale_revision' });
+      }
+
+      throw error;
+    }
   },
 
   createEnergyEntry: async ({ request, locals, platform }) => {

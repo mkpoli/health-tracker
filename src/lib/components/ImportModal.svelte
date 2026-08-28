@@ -77,6 +77,9 @@
       ? healthArchive.data.reports.length +
           healthArchive.data.records.length +
           healthArchive.data.medicines.length +
+          healthArchive.data.medicineCourses.length +
+          healthArchive.data.doseRegimens.length +
+          healthArchive.data.doseOccurrences.length +
           healthArchive.data.energyEntries.length +
           healthArchive.data.dataImports.length +
           healthArchive.data.exerciseDefinitions.length +
@@ -268,6 +271,9 @@
       | 'reports'
       | 'records'
       | 'medicines'
+      | 'medicineCourses'
+      | 'doseRegimens'
+      | 'doseOccurrences'
       | 'energy'
       | 'dataImports'
       | 'exerciseDefinitions'
@@ -288,6 +294,23 @@
     add('reports', healthArchive.data.reports, 100);
     add('records', healthArchive.data.records, 200);
     add('medicines', healthArchive.data.medicines, 100);
+    add(
+      'medicineCourses',
+      // A restart chain references earlier courses, so predecessors go into
+      // earlier batches.
+      [...healthArchive.data.medicineCourses].sort((left, right) => {
+        const leftDate = left && typeof left === 'object' && !Array.isArray(left) && 'startDate' in left
+          ? String(left.startDate)
+          : '';
+        const rightDate = right && typeof right === 'object' && !Array.isArray(right) && 'startDate' in right
+          ? String(right.startDate)
+          : '';
+        return leftDate < rightDate ? -1 : leftDate > rightDate ? 1 : 0;
+      }),
+      100,
+    );
+    add('doseRegimens', healthArchive.data.doseRegimens, 100);
+    add('doseOccurrences', healthArchive.data.doseOccurrences, 200);
     add('energy', healthArchive.data.energyEntries, 100);
     add('dataImports', healthArchive.data.dataImports, 100);
     add('exerciseDefinitions', healthArchive.data.exerciseDefinitions, 20);
