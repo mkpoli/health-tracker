@@ -182,11 +182,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   const userId = requireUserId(locals);
   const selectedPatientId = url.searchParams.get('patientId');
 
-  const patients = await db
-    .select()
-    .from(patient)
-    .where(eq(patient.ownerUserId, userId))
-    .orderBy(desc(patient.id));
+  const patients = await withReadRetry(() =>
+    readDb
+      .select()
+      .from(patient)
+      .where(eq(patient.ownerUserId, userId))
+      .orderBy(desc(patient.id)),
+  );
 
   let currentPatient = null;
   let recordsList: typeof record.$inferSelect[] = [];
