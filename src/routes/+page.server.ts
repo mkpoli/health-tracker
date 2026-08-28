@@ -1,4 +1,4 @@
-import { db } from '$lib/server/db';
+import { db, readDb, withReadRetry } from '$lib/server/db';
 import {
   claimRevision,
   dataImport,
@@ -182,11 +182,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   const userId = requireUserId(locals);
   const selectedPatientId = url.searchParams.get('patientId');
 
-  const patients = await db
-    .select()
-    .from(patient)
-    .where(eq(patient.ownerUserId, userId))
-    .orderBy(desc(patient.id));
+  const patients = await withReadRetry(() =>
+    readDb
+      .select()
+      .from(patient)
+      .where(eq(patient.ownerUserId, userId))
+      .orderBy(desc(patient.id)),
+  );
 
   let currentPatient = null;
   let recordsList: typeof record.$inferSelect[] = [];
@@ -207,6 +209,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   if (patients.length > 0) {
     const targetId = selectedPatientId || patients[0].id;
     currentPatient = patients.find(p => p.id === targetId) || patients[0];
+    const patientId = currentPatient.id;
 
     [
       recordsList,
@@ -223,78 +226,78 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       workoutExercisesList,
       workoutSetsList,
       claimRevisionsList,
-    ] = await Promise.all([
-      db
+    ] = await withReadRetry(() => Promise.all([
+      readDb
         .select()
         .from(record)
-        .where(eq(record.patientId, currentPatient.id))
+        .where(eq(record.patientId, patientId))
         .orderBy(desc(record.id)),
-      db
+      readDb
         .select()
         .from(report)
-        .where(eq(report.patientId, currentPatient.id))
+        .where(eq(report.patientId, patientId))
         .orderBy(desc(report.testDate)),
-      db
+      readDb
         .select()
         .from(medicineClaim)
-        .where(eq(medicineClaim.patientId, currentPatient.id))
+        .where(eq(medicineClaim.patientId, patientId))
         .orderBy(desc(medicineClaim.updatedAt)),
-      db
+      readDb
         .select()
         .from(medicineCourse)
-        .where(eq(medicineCourse.patientId, currentPatient.id))
+        .where(eq(medicineCourse.patientId, patientId))
         .orderBy(desc(medicineCourse.startDate)),
-      db
+      readDb
         .select()
         .from(doseRegimen)
-        .where(eq(doseRegimen.patientId, currentPatient.id))
+        .where(eq(doseRegimen.patientId, patientId))
         .orderBy(desc(doseRegimen.effectiveFrom)),
-      db
+      readDb
         .select()
         .from(doseOccurrence)
-        .where(eq(doseOccurrence.patientId, currentPatient.id))
+        .where(eq(doseOccurrence.patientId, patientId))
         .orderBy(desc(doseOccurrence.localDate)),
-      db
+      readDb
         .select()
         .from(energyClaim)
-        .where(eq(energyClaim.patientId, currentPatient.id))
+        .where(eq(energyClaim.patientId, patientId))
         .orderBy(desc(energyClaim.occurredAt)),
-      db
+      readDb
         .select()
         .from(energySource)
-        .where(eq(energySource.patientId, currentPatient.id))
+        .where(eq(energySource.patientId, patientId))
         .orderBy(desc(energySource.createdAt)),
-      db
+      readDb
         .select()
         .from(dataImport)
-        .where(eq(dataImport.patientId, currentPatient.id))
+        .where(eq(dataImport.patientId, patientId))
         .orderBy(desc(dataImport.createdAt)),
-      db
+      readDb
         .select()
         .from(exerciseDefinition)
-        .where(eq(exerciseDefinition.patientId, currentPatient.id))
+        .where(eq(exerciseDefinition.patientId, patientId))
         .orderBy(exerciseDefinition.name),
-      db
+      readDb
         .select()
         .from(workoutClaim)
-        .where(eq(workoutClaim.patientId, currentPatient.id))
+        .where(eq(workoutClaim.patientId, patientId))
         .orderBy(desc(workoutClaim.updatedAt)),
-      db
+      readDb
         .select()
         .from(workoutExercise)
-        .where(eq(workoutExercise.patientId, currentPatient.id))
+        .where(eq(workoutExercise.patientId, patientId))
         .orderBy(workoutExercise.orderIndex),
-      db
+      readDb
         .select()
         .from(workoutSet)
-        .where(eq(workoutSet.patientId, currentPatient.id))
+        .where(eq(workoutSet.patientId, patientId))
         .orderBy(workoutSet.orderIndex),
-      db
+      readDb
         .select()
         .from(claimRevision)
-        .where(eq(claimRevision.patientId, currentPatient.id))
+        .where(eq(claimRevision.patientId, patientId))
         .orderBy(desc(claimRevision.changedAt)),
-    ]);
+    ]));
   }
 
   const claimRevisions = claimRevisionsList.flatMap((revision) => {
