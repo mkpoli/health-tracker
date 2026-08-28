@@ -67,10 +67,14 @@ export const db = new Proxy({} as Db, {
  * the first attempt resolves on the second.
  */
 export async function withReadRetry<T>(read: () => Promise<T>): Promise<T> {
-  try {
-    return await read();
-  } catch {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    return read();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError;
 }
