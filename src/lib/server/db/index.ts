@@ -16,11 +16,13 @@ function getDb(): Db {
   return _db;
 }
 
-// A database waking from idle can leave a request hanging for minutes. A
-// second client, used only for retryable read batches, bounds every transport
-// attempt so a stalled wake fails fast and the retry lands on the woken
-// database. Writes stay on the default client: an aborted commit can report
-// failure after the server applied it, so a write must never race a timeout.
+// The database server can stall on a request far longer than a person will
+// wait — observed as minutes-long hangs ending in an upstream 524 while
+// neighbouring requests answered in seconds. A second client, used only for
+// retryable read batches, bounds every transport attempt so such a stall
+// fails fast and the retry lands on a healthy path. Writes stay on the
+// default client: an aborted commit can report failure after the server
+// applied it, so a write must never race a timeout.
 const READ_TIMEOUT_MS = 15_000;
 
 function boundedFetch(input: Request | URL | string, init?: RequestInit) {
@@ -33,8 +35,9 @@ function getReadDb(): Db {
   if (_readDb) return _readDb;
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not set');
   if (!env.DATABASE_AUTH_TOKEN) throw new Error('DATABASE_AUTH_TOKEN is not set');
-  // The https scheme selects the HTTP transport, which honours the bounded
-  // fetch; the default libsql scheme would open a websocket that ignores it.
+  // On workerd the client already maps libsql: to the HTTP transport; the
+  // rewrite makes the node runtime (dev server) take the same transport, so
+  // the bounded fetch holds everywhere.
   const url = env.DATABASE_URL.replace(/^libsql:/, 'https:');
   if (!url.startsWith('https:')) return getDb();
   _readDb = drizzle(
@@ -61,15 +64,35 @@ export const db = new Proxy({} as Db, {
   },
 }) as Db;
 
+/** Walks the cause chain for the shape of a transport failure: an aborted or
+ * timed-out attempt, a network error, or a server that answered 5xx. A SQL or
+ * schema error fails the same way every time and is not worth repeating. */
+export function isTransientReadError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (current instanceof Error) {
+      if (current.name === 'AbortError' || current.name === 'TimeoutError') return true;
+      if (current.name === 'TypeError') return true;
+      if ('code' in current && (current as { code?: unknown }).code === 'SERVER_ERROR') return true;
+      if (/status 5\d\d/i.test(current.message)) return true;
+      current = current.cause;
+    } else {
+      break;
+    }
+  }
+  return false;
+}
+
 /**
- * Runs a read-only batch, retrying once after a short pause. The retry is
- * safe only because nothing in the batch writes; a wake-from-idle failure on
- * the first attempt resolves on the second.
+ * Runs a read-only batch, retrying once after a short pause when the failure
+ * looks like transport trouble. The retry is safe only because nothing in the
+ * batch writes.
  */
 export async function withReadRetry<T>(read: () => Promise<T>): Promise<T> {
   try {
     return await read();
-  } catch {
+  } catch (error) {
+    if (!isTransientReadError(error)) throw error;
     await new Promise((resolve) => setTimeout(resolve, 500));
     return read();
   }
