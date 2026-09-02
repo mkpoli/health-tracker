@@ -44,7 +44,14 @@
     patientTimeZone?: string;
   } = $props();
 
-  const today = $derived(toDateTimeLocal(new Date().toISOString(), patientTimeZone).slice(0, 10));
+  // The clock ticks so a page left open across midnight moves on to the new day.
+  let now = $state(new Date().toISOString());
+  $effect(() => {
+    const timer = setInterval(() => (now = new Date().toISOString()), 60_000);
+    return () => clearInterval(timer);
+  });
+  const today = $derived(toDateTimeLocal(now, patientTimeZone).slice(0, 10));
+  const yesterday = $derived(addDays(today, -1));
   const coursesById = $derived(new Map(courses.map((course) => [course.id, course])));
   const regimensById = $derived(new Map(regimens.map((regimen) => [regimen.id, regimen])));
   const medicinesByCourse = $derived.by(() => {
@@ -70,16 +77,18 @@
       occurrences.filter((occurrence) => occurrence.localDate >= from),
     );
   });
-  const todayDoseEntries = $derived.by(() => {
-    const now = new Date().toISOString();
-    const todayByZone = new Map<string, string>();
+  // The checklist spans yesterday and today: a bedtime dose recorded after
+  // midnight still belongs to the day before, judged in each rule's own zone.
+  const checklistDoseEntries = $derived.by(() => {
+    const byZone = new Map<string, { today: string; yesterday: string }>();
     return doseEntries.filter((entry) => {
-      let zoneToday = todayByZone.get(entry.timezone);
-      if (!zoneToday) {
-        zoneToday = localDateOf(now, entry.timezone);
-        todayByZone.set(entry.timezone, zoneToday);
+      let days = byZone.get(entry.timezone);
+      if (!days) {
+        const zoneToday = localDateOf(now, entry.timezone);
+        days = { today: zoneToday, yesterday: addDays(zoneToday, -1) };
+        byZone.set(entry.timezone, days);
       }
-      return entry.localDate === zoneToday;
+      return entry.localDate === days.today || entry.localDate === days.yesterday;
     });
   });
   const adherenceByMedicine = $derived.by(() => {
@@ -434,13 +443,15 @@
     </button>
   </header>
 
-  {#if todayDoseEntries.length > 0}
+  {#if checklistDoseEntries.length > 0}
     <div class="border-b border-slate-100 p-4 sm:p-6">
       <DoseChecklist
-        entries={todayDoseEntries}
+        entries={checklistDoseEntries}
         {medicinesByCourse}
         {regimensById}
         {today}
+        {yesterday}
+        timezone={patientTimeZone}
       />
     </div>
   {/if}

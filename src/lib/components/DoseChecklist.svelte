@@ -1,13 +1,17 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
+  import { onMount } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import {
     formatAmountWithUnit,
     formatDoseAmount,
+    doseSlotIdentity,
+    localDateOf,
     type DoseChecklistEntry,
+    type DoseOccurrenceRecord,
     type DoseRegimenRecord,
     type DoseStatus,
   } from '$lib/medicine-plan';
@@ -19,12 +23,84 @@
     medicinesByCourse,
     regimensById,
     today,
+    yesterday,
+    timezone,
   }: {
     entries: DoseChecklistEntry[];
     medicinesByCourse: Map<string, MedicineClaimRecord>;
     regimensById: Map<string, DoseRegimenRecord>;
     today: string;
+    yesterday: string;
+    timezone: string;
   } = $props();
+
+  function identityOf(entry: DoseChecklistEntry) {
+    return entry.regimenId && entry.slotKey !== null
+      ? doseSlotIdentity(entry.regimenId, entry.localDate, entry.slotKey)
+      : `record:${entry.record?.id}`;
+  }
+
+  // A tap shows its result at once and the server round trip settles behind
+  // it. The saved row replaces the tapped state until the page data catches
+  // up, and a failed save falls back to the open slot with a message.
+  let pending = $state(new Set<string>());
+  let saved = $state(new Map<string, DoseOccurrenceRecord>());
+
+  const shownEntries = $derived(
+    entries.map((entry) => {
+      const identity = identityOf(entry);
+      const record = saved.get(identity);
+      if (!record || (entry.record && entry.record.revision >= record.revision)) return entry;
+      return { ...entry, record, plannedAt: record.plannedAt ?? entry.plannedAt, status: record.status };
+    }),
+  );
+
+  const yesterdayEntries = $derived(shownEntries.filter((entry) => entry.localDate === yesterday));
+  const todayEntries = $derived(shownEntries.filter((entry) => entry.localDate === today));
+
+  // Yesterday matters while its slots are still being settled: a bedtime dose
+  // recorded after midnight belongs to the day before, and an open slot from
+  // yesterday is still worth a tap. Early in the morning the whole day stays
+  // in view; later it folds away unless something in it is still open.
+  const earlyHours = $derived(
+    Number(toDateTimeLocal(new Date().toISOString(), timezone).slice(11, 13)) < 6,
+  );
+  let yesterdayExpanded = $state<boolean | null>(null);
+  const showYesterday = $derived(
+    yesterdayExpanded ??
+      (earlyHours || yesterdayEntries.some((entry) => entry.status === 'planned')),
+  );
+
+  function countLine(list: DoseChecklistEntry[]) {
+    return m.dose_today_count({
+      done: list.filter((entry) => entry.status !== 'planned').length,
+      total: list.length,
+    });
+  }
+
+  function dayLabel(date: string) {
+    return new Intl.DateTimeFormat(getLocale(), { month: 'numeric', day: 'numeric', weekday: 'short' })
+      .format(new Date(`${date}T12:00:00Z`));
+  }
+
+  // Doses recorded elsewhere (a reminder reply, another device) only reach
+  // this page through a reload, so returning to the tab refreshes it.
+  let lastRefresh = 0;
+  onMount(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastRefresh < 30_000) return;
+      lastRefresh = Date.now();
+      void invalidateAll();
+    };
+    lastRefresh = Date.now();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  });
 
   let saving = $state(false);
   let saveError = $state('');
@@ -82,6 +158,16 @@
     return formatDoseAmount(entry.slot, regimenFor(entry)?.doseText ?? null) || '';
   }
 
+  function takenTime(entry: DoseChecklistEntry) {
+    const at = entry.record?.actualAt;
+    if (!at || entry.status === 'planned') return '';
+    return new Intl.DateTimeFormat(getLocale(), {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: entry.timezone,
+    }).format(new Date(at));
+  }
+
   function statusLabel(status: DoseStatus) {
     if (status === 'planned') return m.dose_status_planned();
     if (status === 'taken') return m.dose_status_taken();
@@ -130,6 +216,32 @@
     editing = null;
   }
 
+  const markTaken = (entry: DoseChecklistEntry): SubmitFunction => {
+    const identity = identityOf(entry);
+    return () => {
+      pending = new Set(pending).add(identity);
+      saveError = '';
+
+      return async ({ result }) => {
+        const next = new Set(pending);
+        next.delete(identity);
+        pending = next;
+
+        if (result.type === 'success' && result.data?.occurrence) {
+          saved = new Map(saved).set(identity, result.data.occurrence as DoseOccurrenceRecord);
+          void invalidateAll();
+          return;
+        }
+        if (result.type === 'failure' && result.status === 409) {
+          void invalidateAll();
+          saveError = m.claim_revision_stale();
+        } else {
+          saveError = m.dose_save_failed();
+        }
+      };
+    };
+  };
+
   const submitDose: SubmitFunction = () => {
     saving = true;
     saveError = '';
@@ -160,85 +272,118 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if entries.length > 0}
-  <section class="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
-    <div class="flex items-center justify-between gap-3">
-      <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
-        {m.dose_today_title()}
-      </h4>
-      <p class="text-xs text-blue-600">
-        {m.dose_today_count({
-          done: entries.filter((entry) => entry.status !== 'planned').length,
-          total: entries.length,
-        })}
+{#snippet doseRow(entry: DoseChecklistEntry)}
+  {@const identity = identityOf(entry)}
+  {@const busy = pending.has(identity)}
+  <li class="flex items-center gap-3 rounded-xl border border-white/80 bg-white px-3.5 py-3 shadow-sm">
+    {#if entry.status === 'planned' && entry.regimenId && entry.slotKey !== null}
+      <form method="POST" action="?/recordDose" use:enhance={markTaken(entry)}>
+        <input type="hidden" name="regimenId" value={entry.regimenId} />
+        <input type="hidden" name="localDate" value={entry.localDate} />
+        <input type="hidden" name="slotKey" value={entry.slotKey} />
+        <input type="hidden" name="status" value="taken" />
+        <button
+          type="submit"
+          disabled={busy}
+          class={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors active:scale-95 ${busy ? 'border-emerald-300 bg-emerald-50 text-emerald-500' : 'border-blue-300 bg-white text-transparent hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
+          aria-label={m.dose_mark_taken()}
+          title={m.dose_mark_taken()}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class={`h-5 w-5 ${busy ? 'animate-pulse' : ''}`} aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        </button>
+      </form>
+    {:else}
+      <button
+        type="button"
+        onclick={() => openEditor(entry)}
+        class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`}
+        title={statusLabel(entry.status)}
+        aria-label={`${statusLabel(entry.status)} · ${m.dose_edit_record()}`}
+      >
+        {#if entry.status === 'taken'}
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        {:else}
+          <span class="text-xs font-bold">{statusGlyph(entry.status)}</span>
+        {/if}
+      </button>
+    {/if}
+
+    <div class="min-w-0 flex-1">
+      <p class="truncate text-sm font-semibold text-slate-800">
+        {medicineFor(entry)?.name || m.dose_unknown_medicine()}
+      </p>
+      <p class="truncate text-xs text-slate-500">
+        {[slotHeading(entry), amountLine(entry), takenTime(entry)].filter(Boolean).join(' · ')}
       </p>
     </div>
 
+    <button
+      type="button"
+      onclick={() => openEditor(entry)}
+      class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+    >
+      {entry.record ? m.dose_edit_record() : m.dose_record_details()}
+    </button>
+  </li>
+{/snippet}
+
+{#if entries.length > 0}
+  <section class="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
     {#if saveError && !editorOpen}
-      <p class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+      <p class="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
         {saveError}
       </p>
     {/if}
 
-    <ul class="mt-3 space-y-2">
-      {#each entries as entry (`${entry.regimenId || entry.record?.id}:${entry.localDate}:${entry.slotKey}`)}
-        <li class="flex items-center gap-3 rounded-xl border border-white/80 bg-white px-3.5 py-3 shadow-sm">
-          {#if entry.status === 'planned' && entry.regimenId && entry.slotKey !== null}
-            <form method="POST" action="?/recordDose" use:enhance={submitDose}>
-              <input type="hidden" name="regimenId" value={entry.regimenId} />
-              <input type="hidden" name="localDate" value={entry.localDate} />
-              <input type="hidden" name="slotKey" value={entry.slotKey} />
-              <input type="hidden" name="status" value="taken" />
-              <button
-                type="submit"
-                disabled={saving}
-                class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-blue-300 bg-white text-transparent transition-colors hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500 disabled:opacity-40"
-                aria-label={m.dose_mark_taken()}
-                title={m.dose_mark_taken()}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-4.5 w-4.5" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              </button>
-            </form>
-          {:else}
-            <span class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`} title={statusLabel(entry.status)}>
-              {#if entry.status === 'taken'}
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              {:else}
-                <span class="text-xs font-bold">{statusGlyph(entry.status)}</span>
-              {/if}
-            </span>
-          {/if}
+    {#if yesterdayEntries.length > 0}
+      <button
+        type="button"
+        onclick={() => (yesterdayExpanded = !showYesterday)}
+        aria-expanded={showYesterday}
+        class="flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left"
+      >
+        <span class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
+          {m.dose_day_yesterday()} · {dayLabel(yesterday)}
+        </span>
+        <span class="flex items-center gap-1.5 text-xs text-blue-600">
+          {countLine(yesterdayEntries)}
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`h-3.5 w-3.5 transition-transform ${showYesterday ? 'rotate-180' : ''}`} aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </span>
+      </button>
+      {#if showYesterday}
+        <ul class="mt-2 mb-4 space-y-2">
+          {#each yesterdayEntries as entry (identityOf(entry))}
+            {@render doseRow(entry)}
+          {/each}
+        </ul>
+      {:else}
+        <div class="mb-3"></div>
+      {/if}
+    {/if}
 
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-slate-800">
-              {medicineFor(entry)?.name || m.dose_unknown_medicine()}
-            </p>
-            <p class="truncate text-xs text-slate-500">
-              {[slotHeading(entry), amountLine(entry)].filter(Boolean).join(' · ')}
-            </p>
-          </div>
+    <div class="flex items-center justify-between gap-3 py-1">
+      <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
+        {m.dose_day_today()} · {dayLabel(today)}
+      </h4>
+      <p class="text-xs text-blue-600">{countLine(todayEntries)}</p>
+    </div>
 
-          {#if entry.status !== 'planned'}
-            <span class={`rounded-full border px-2 py-0.5 text-[0.7rem] font-semibold ${statusTone(entry.status)}`}>
-              {statusLabel(entry.status)}
-            </span>
-          {/if}
-
-          <button
-            type="button"
-            onclick={() => openEditor(entry)}
-            class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-          >
-            {entry.record ? m.dose_edit_record() : m.dose_record_details()}
-          </button>
-        </li>
-      {/each}
-    </ul>
-    <p class="mt-3 text-xs leading-relaxed text-blue-700/80">{m.dose_today_hint({ date: today })}</p>
+    {#if todayEntries.length > 0}
+      <ul class="mt-2 space-y-2">
+        {#each todayEntries as entry (identityOf(entry))}
+          {@render doseRow(entry)}
+        {/each}
+      </ul>
+    {:else}
+      <p class="mt-2 text-sm text-slate-500">{m.dose_today_empty()}</p>
+    {/if}
+    <p class="mt-3 text-xs leading-relaxed text-blue-700/80">{m.dose_today_hint()}</p>
   </section>
 {/if}
 
