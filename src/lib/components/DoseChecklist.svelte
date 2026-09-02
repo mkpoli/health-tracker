@@ -8,6 +8,7 @@
   import {
     formatAmountWithUnit,
     formatDoseAmount,
+    addDays,
     doseSlotIdentity,
     localDateOf,
     type DoseChecklistEntry,
@@ -25,13 +26,17 @@
     today,
     yesterday,
     timezone,
+    now,
   }: {
     entries: DoseChecklistEntry[];
     medicinesByCourse: Map<string, MedicineClaimRecord>;
     regimensById: Map<string, DoseRegimenRecord>;
+    /** Calendar dates in the patient's zone; they name the two groups. */
     today: string;
     yesterday: string;
     timezone: string;
+    /** The current instant, ticking from the parent so the groups follow the clock. */
+    now: string;
   } = $props();
 
   function identityOf(entry: DoseChecklistEntry) {
@@ -55,16 +60,22 @@
     }),
   );
 
-  const yesterdayEntries = $derived(shownEntries.filter((entry) => entry.localDate === yesterday));
-  const todayEntries = $derived(shownEntries.filter((entry) => entry.localDate === today));
+  // Each rule keeps its own zone, so an entry is judged against that zone's
+  // calendar rather than the patient's.
+  function dayOf(entry: DoseChecklistEntry) {
+    const zoneToday = localDateOf(now, entry.timezone);
+    if (entry.localDate === zoneToday) return 'today';
+    if (entry.localDate === addDays(zoneToday, -1)) return 'yesterday';
+    return null;
+  }
+  const yesterdayEntries = $derived(shownEntries.filter((entry) => dayOf(entry) === 'yesterday'));
+  const todayEntries = $derived(shownEntries.filter((entry) => dayOf(entry) === 'today'));
 
   // Yesterday matters while its slots are still being settled: a bedtime dose
   // recorded after midnight belongs to the day before, and an open slot from
   // yesterday is still worth a tap. Early in the morning the whole day stays
   // in view; later it folds away unless something in it is still open.
-  const earlyHours = $derived(
-    Number(toDateTimeLocal(new Date().toISOString(), timezone).slice(11, 13)) < 6,
-  );
+  const earlyHours = $derived(Number(toDateTimeLocal(now, timezone).slice(11, 13)) < 6);
   let yesterdayExpanded = $state<boolean | null>(null);
   const showYesterday = $derived(
     yesterdayExpanded ??

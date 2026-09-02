@@ -68,9 +68,12 @@
   // and today's slice feeds the checklist.
   const doseEntries = $derived.by(() => {
     const from = addDays(today, 1 - adherenceWindowDays);
+    // A rule's zone can already be a day ahead of the patient's, so the plan
+    // reaches one day past today and each surface picks its own dates.
+    const to = addDays(today, 1);
     const planned = regimens.flatMap((regimen) => {
       const course = coursesById.get(regimen.courseId);
-      return course ? planDoses(course, regimen, from, today) : [];
+      return course ? planDoses(course, regimen, from, to) : [];
     });
     return buildDoseChecklist(
       planned,
@@ -92,7 +95,6 @@
     });
   });
   const adherenceByMedicine = $derived.by(() => {
-    const now = new Date().toISOString();
     const map = new Map<string, ReturnType<typeof countAdherence>>();
     for (const medicine of medicines) {
       const courseIds = new Set((coursesByMedicine.get(medicine.id) || []).map((course) => course.id));
@@ -452,6 +454,7 @@
         {today}
         {yesterday}
         timezone={patientTimeZone}
+        {now}
       />
     </div>
   {/if}
