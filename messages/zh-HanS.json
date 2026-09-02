@@ -790,7 +790,7 @@
   "no_medicines": "还没有药物记录",
   "no_medicines_hint": "可添加片剂、液体、注射剂、乳膏、补充剂等。",
   "medicine_current": "当前用药",
-  "medicine_recent_window": "30天",
+  "medicine_taken_in_window": "{days}天内服用{taken}/{due}次",
   "medicine_past": "历史",
   "medicine_editor_hint": "所有字段以后都可以修改。",
   "medicine_details": "药物信息",

@@ -790,7 +790,7 @@
   "no_medicines": "No medicines recorded yet",
   "no_medicines_hint": "Add tablets, liquids, injections, creams, supplements, or any other medicine you use.",
   "medicine_current": "Current",
-  "medicine_recent_window": "30 days",
+  "medicine_taken_in_window": "{taken}/{due} taken in {days} days",
   "medicine_past": "History",
   "medicine_editor_hint": "Every field can be changed later.",
   "medicine_details": "Medicine details",

@@ -790,7 +790,7 @@
   "no_medicines": "薬の記録はありません",
   "no_medicines_hint": "錠剤、液剤、注射、塗り薬、サプリメントなどを追加できます。",
   "medicine_current": "現在の薬",
-  "medicine_recent_window": "30日間",
+  "medicine_taken_in_window": "{days}日間で{taken}/{due}回服用",
   "medicine_past": "履歴",
   "medicine_editor_hint": "すべての項目は後から変更できます。",
   "medicine_details": "薬の情報",
