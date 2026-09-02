@@ -20,11 +20,29 @@ export function anchorMealLabel(meal: DoseAnchorMeal) {
   return m.anchor_meal_dinner();
 }
 
+const weekdayCache = new Map<string, string[]>();
+
 /** Short weekday names in the active locale, index 0 = Sunday. */
 export function weekdayLabels() {
-  const formatter = new Intl.DateTimeFormat(getLocale(), { weekday: 'short', timeZone: 'UTC' });
-  // 2023-01-01 is a Sunday; index i renders weekday i.
-  return [0, 1, 2, 3, 4, 5, 6].map((day) => formatter.format(new Date(Date.UTC(2023, 0, 1 + day))));
+  const locale = getLocale();
+  let labels = weekdayCache.get(locale);
+  if (!labels) {
+    const formatter = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' });
+    // 2023-01-01 is a Sunday; index i renders weekday i.
+    labels = [0, 1, 2, 3, 4, 5, 6].map((day) =>
+      formatter.format(new Date(Date.UTC(2023, 0, 1 + day))),
+    );
+    weekdayCache.set(locale, labels);
+  }
+  return labels;
+}
+
+const cjk = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/;
+
+/** Two fragments with a space between them, unless the boundary touches CJK text. */
+function joinWords(a: string, b: string) {
+  if (!a || !b) return a || b;
+  return cjk.test(a.slice(-1)) || cjk.test(b[0]) ? `${a}${b}` : `${a} ${b}`;
 }
 
 /** One line for when and how much: `08:00 1 tablet · 20:00 1 tablet · Mon Thu`. */
@@ -47,9 +65,12 @@ export function regimenSummary(regimen: DoseRegimenRecord) {
         : slot.anchorKind
           ? anchorKindLabel(slot.anchorKind)
           : '');
-    return [place, formatDoseAmount(slot, regimen.doseText)].filter(Boolean).join(' ');
+    return joinWords(place, formatDoseAmount(slot, null) || '');
   });
-  const labels = weekdayLabels();
-  const days = regimen.daysOfWeek ? regimen.daysOfWeek.map((day) => labels[day]).join(' ') : '';
-  return [...slots, days].filter(Boolean).join(' · ');
+  // The dose wording stands in once when no slot carries its own amount.
+  const counted = regimen.slots.some((slot) => slot.amountValue !== null);
+  const days = regimen.daysOfWeek
+    ? regimen.daysOfWeek.map((day) => weekdayLabels()[day]).join(' ')
+    : '';
+  return [...slots, counted ? '' : regimen.doseText, days].filter(Boolean).join(' · ');
 }
