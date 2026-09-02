@@ -585,3 +585,37 @@ export function formatDoseAmount(slot: DoseSlot | null, doseText: string | null)
   }
   return doseText;
 }
+
+/** Descending by date, then by creation time, so records sharing a date keep one order. */
+function latestFirst(aDate: string, bDate: string, aCreated: string, bCreated: string) {
+  if (aDate !== bDate) return aDate < bDate ? 1 : -1;
+  if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
+  return 0;
+}
+
+/** The course a medicine is on: the ongoing one, else the most recently started. */
+export function activeCourseOf(courses: MedicineCourseRecord[]): MedicineCourseRecord | null {
+  const sorted = [...courses].sort((a, b) =>
+    latestFirst(a.startDate, b.startDate, a.createdAt, b.createdAt),
+  );
+  return sorted.find((course) => course.status === 'active') || sorted[0] || null;
+}
+
+/** The dose rule in force for a course on a local date; the latest start wins. */
+export function currentRegimenOf(
+  course: MedicineCourseRecord,
+  regimens: DoseRegimenRecord[],
+  today: string,
+): DoseRegimenRecord | null {
+  return (
+    regimens
+      .filter(
+        (regimen) =>
+          regimen.courseId === course.id &&
+          regimen.effectiveFrom <= today &&
+          (!regimen.effectiveTo || regimen.effectiveTo >= today),
+      )
+      .sort((a, b) => latestFirst(a.effectiveFrom, b.effectiveFrom, a.createdAt, b.createdAt))[0] ||
+    null
+  );
+}

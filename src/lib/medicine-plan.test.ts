@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activeCourseOf,
   addDays,
   assignDoseSlotKeys,
   buildDoseChecklist,
   countAdherence,
+  currentRegimenOf,
   normalizeDaysOfWeek,
   normalizeDoseSlots,
   planDoses,
@@ -331,5 +333,51 @@ describe('addDays', () => {
   it('crosses month boundaries', () => {
     expect(addDays('2026-08-01', -1)).toBe('2026-07-31');
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+  });
+});
+
+describe('activeCourseOf', () => {
+  it('prefers the ongoing course over a later planned one', () => {
+    const ongoing = course({ id: 'ongoing', status: 'active', startDate: '2026-01-01' });
+    const planned = course({ id: 'planned', status: 'planned', startDate: '2026-09-01' });
+    expect(activeCourseOf([planned, ongoing])?.id).toBe('ongoing');
+  });
+
+  it('falls back to the most recently started course', () => {
+    const first = course({ id: 'first', status: 'ended', startDate: '2025-01-01' });
+    const second = course({ id: 'second', status: 'ended', startDate: '2026-01-01' });
+    expect(activeCourseOf([first, second])?.id).toBe('second');
+    expect(activeCourseOf([])).toBeNull();
+  });
+
+  it('breaks a shared start date by creation time', () => {
+    const earlier = course({ id: 'earlier', status: 'ended', createdAt: '2026-08-01T08:00:00.000Z' });
+    const later = course({ id: 'later', status: 'ended', createdAt: '2026-08-01T09:00:00.000Z' });
+    expect(activeCourseOf([earlier, later])?.id).toBe('later');
+    expect(activeCourseOf([later, earlier])?.id).toBe('later');
+  });
+});
+
+describe('currentRegimenOf', () => {
+  const today = '2026-08-20';
+
+  it('picks the rule in force and lets the latest start win', () => {
+    const old = regimen({ id: 'old', effectiveFrom: '2026-08-01' });
+    const revised = regimen({ id: 'revised', effectiveFrom: '2026-08-15' });
+    expect(currentRegimenOf(course(), [old, revised], today)?.id).toBe('revised');
+  });
+
+  it('ignores rules that have ended, not yet begun, or belong elsewhere', () => {
+    const ended = regimen({ id: 'ended', effectiveFrom: '2026-08-01', effectiveTo: '2026-08-10' });
+    const future = regimen({ id: 'future', effectiveFrom: '2026-09-01' });
+    const other = regimen({ id: 'other', courseId: 'course-2' });
+    expect(currentRegimenOf(course(), [ended, future, other], today)).toBeNull();
+  });
+
+  it('breaks a shared start date by creation time', () => {
+    const earlier = regimen({ id: 'earlier', createdAt: '2026-08-01T08:00:00.000Z' });
+    const later = regimen({ id: 'later', createdAt: '2026-08-01T09:00:00.000Z' });
+    expect(currentRegimenOf(course(), [earlier, later], today)?.id).toBe('later');
+    expect(currentRegimenOf(course(), [later, earlier], today)?.id).toBe('later');
   });
 });

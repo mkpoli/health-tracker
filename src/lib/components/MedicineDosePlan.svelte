@@ -5,9 +5,10 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import {
+    activeCourseOf,
+    currentRegimenOf,
     doseAnchorKinds,
     doseAnchorMeals,
-    formatDoseAmount,
     type AdherenceCounts,
     type CourseStatus,
     type DoseAnchorKind,
@@ -16,6 +17,7 @@
     type MedicineCourseRecord,
     type RegimenRuleKind,
   } from '$lib/medicine-plan';
+  import { anchorKindLabel, anchorMealLabel, regimenSummary, weekdayLabels } from '$lib/regimen-format';
   import { toDateTimeLocal } from '$lib/time-zone';
 
   let {
@@ -55,21 +57,10 @@
   const sortedCourses = $derived(
     [...courses].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)),
   );
-  const activeCourse = $derived(
-    sortedCourses.find((course) => course.status === 'active') || sortedCourses[0] || null,
+  const activeCourse = $derived(activeCourseOf(courses));
+  const activeRegimen = $derived(
+    activeCourse ? currentRegimenOf(activeCourse, regimens, today) : null,
   );
-  const activeRegimen = $derived.by(() => {
-    if (!activeCourse) return null;
-    const candidates = regimens
-      .filter(
-        (regimen) =>
-          regimen.courseId === activeCourse.id &&
-          regimen.effectiveFrom <= today &&
-          (!regimen.effectiveTo || regimen.effectiveTo >= today),
-      )
-      .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : -1));
-    return candidates[0] || null;
-  });
 
   function emptyCourseDraft() {
     return {
@@ -286,45 +277,7 @@
       : m.medicine_period_from({ date: formatDateOnly(course.startDate) });
   }
 
-  const weekdayLabels = $derived.by(() => {
-    const formatter = new Intl.DateTimeFormat(getLocale(), { weekday: 'short', timeZone: 'UTC' });
-    // 2023-01-01 is a Sunday; index i renders weekday i.
-    return [0, 1, 2, 3, 4, 5, 6].map((day) =>
-      formatter.format(new Date(Date.UTC(2023, 0, 1 + day))),
-    );
-  });
-
-  function anchorKindLabel(kind: DoseAnchorKind) {
-    if (kind === 'clock') return m.anchor_clock();
-    if (kind === 'wake') return m.anchor_wake();
-    if (kind === 'meal') return m.anchor_meal();
-    return m.anchor_bedtime();
-  }
-
-  function anchorMealLabel(meal: DoseAnchorMeal) {
-    if (meal === 'breakfast') return m.anchor_meal_breakfast();
-    if (meal === 'lunch') return m.anchor_meal_lunch();
-    return m.anchor_meal_dinner();
-  }
-
-  function slotSummary(regimen: DoseRegimenRecord) {
-    if (regimen.ruleKind === 'as_needed') return m.regimen_as_needed();
-    if (regimen.ruleKind === 'interval') {
-      return m.regimen_every_hours({ hours: regimen.intervalHours ?? 0 });
-    }
-
-    const parts = regimen.slots.map((slot) => {
-      const place = slot.time || slot.label ||
-        (slot.anchorKind === 'meal' && slot.anchorMeal
-          ? anchorMealLabel(slot.anchorMeal)
-          : slot.anchorKind
-            ? anchorKindLabel(slot.anchorKind)
-            : '');
-      const amount = formatDoseAmount(slot, null);
-      return [place, amount].filter(Boolean).join(' ');
-    });
-    return parts.filter(Boolean).join(' · ');
-  }
+  const weekdays = $derived(weekdayLabels());
 
   function adherenceLine(counts: AdherenceCounts) {
     return m.adherence_summary({
@@ -337,7 +290,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="mt-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
+<div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
   <div class="flex items-center justify-between gap-2">
     <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
       {m.dose_plan_title()}
@@ -390,12 +343,7 @@
           {#each regimens.filter((regimen) => regimen.courseId === course.id) as regimen (regimen.id)}
             <div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-100 bg-blue-50/60 px-2.5 py-2">
               <div class="min-w-0 text-xs text-blue-900">
-                <p class="font-semibold">
-                  {slotSummary(regimen)}
-                  {#if regimen.daysOfWeek}
-                    · {regimen.daysOfWeek.map((day) => weekdayLabels[day]).join(' ')}
-                  {/if}
-                </p>
+                <p class="font-semibold">{regimenSummary(regimen)}</p>
                 <p class="mt-0.5 text-blue-700/80">
                   {regimen.effectiveTo
                     ? m.medicine_period_between({
@@ -694,7 +642,7 @@
               <legend class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{m.regimen_days()}</legend>
               <p class="mt-1 text-xs text-slate-500">{m.regimen_days_hint()}</p>
               <div class="mt-2 flex flex-wrap gap-2">
-                {#each weekdayLabels as label, day}
+                {#each weekdays as label, day}
                   <label class={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${regimenDraft.daysOfWeek.includes(day) ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}>
                     <input
                       type="checkbox"
