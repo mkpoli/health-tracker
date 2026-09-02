@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
+  import { applyAction, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import { onMount } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
@@ -8,7 +8,7 @@
   import {
     formatAmountWithUnit,
     formatDoseAmount,
-    addDays,
+    checklistDayOf,
     doseSlotIdentity,
     localDateOf,
     type DoseChecklistEntry,
@@ -60,38 +60,57 @@
     }),
   );
 
-  // Each rule keeps its own zone, so an entry is judged against that zone's
-  // calendar rather than the patient's.
-  function dayOf(entry: DoseChecklistEntry) {
-    const zoneToday = localDateOf(now, entry.timezone);
-    if (entry.localDate === zoneToday) return 'today';
-    if (entry.localDate === addDays(zoneToday, -1)) return 'yesterday';
-    return null;
-  }
-  const yesterdayEntries = $derived(shownEntries.filter((entry) => dayOf(entry) === 'yesterday'));
-  const todayEntries = $derived(shownEntries.filter((entry) => dayOf(entry) === 'today'));
+  const yesterdayEntries = $derived(
+    shownEntries.filter((entry) => checklistDayOf(entry, now) === 'yesterday'),
+  );
+  const todayEntries = $derived(shownEntries.filter((entry) => checklistDayOf(entry, now) === 'today'));
+
+  // Once the page data carries a row at least as new as the tapped one, the
+  // stand-in has done its job.
+  $effect(() => {
+    let changed = false;
+    const next = new Map(saved);
+    for (const entry of entries) {
+      const record = next.get(identityOf(entry));
+      if (record && entry.record && entry.record.revision >= record.revision) {
+        next.delete(identityOf(entry));
+        changed = true;
+      }
+    }
+    if (changed) saved = next;
+  });
 
   // Yesterday matters while its slots are still being settled: a bedtime dose
   // recorded after midnight belongs to the day before, and an open slot from
   // yesterday is still worth a tap. Early in the morning the whole day stays
   // in view; later it folds away unless something in it is still open.
-  const earlyHours = $derived(Number(toDateTimeLocal(now, timezone).slice(11, 13)) < 6);
+  const localHour = $derived(Number(toDateTimeLocal(now, timezone).slice(11, 13)));
+  const earlyHours = $derived(!Number.isNaN(localHour) && localHour < 6);
   let yesterdayExpanded = $state<boolean | null>(null);
+  // A fold chosen yesterday says nothing about the new day.
+  $effect(() => {
+    void today;
+    yesterdayExpanded = null;
+  });
   const showYesterday = $derived(
     yesterdayExpanded ??
       (earlyHours || yesterdayEntries.some((entry) => entry.status === 'planned')),
   );
 
   function countLine(list: DoseChecklistEntry[]) {
-    return m.dose_today_count({
+    return m.dose_day_count({
       done: list.filter((entry) => entry.status !== 'planned').length,
       total: list.length,
     });
   }
 
   function dayLabel(date: string) {
-    return new Intl.DateTimeFormat(getLocale(), { month: 'numeric', day: 'numeric', weekday: 'short' })
-      .format(new Date(`${date}T12:00:00Z`));
+    return new Intl.DateTimeFormat(getLocale(), {
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(`${date}T00:00:00Z`));
   }
 
   // Doses recorded elsewhere (a reminder reply, another device) only reach
@@ -100,7 +119,7 @@
   onMount(() => {
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() - lastRefresh < 30_000) return;
+      if (Date.now() - lastRefresh < 180_000) return;
       lastRefresh = Date.now();
       void invalidateAll();
     };
@@ -169,14 +188,23 @@
     return formatDoseAmount(entry.slot, regimenFor(entry)?.doseText ?? null) || '';
   }
 
+  // A record stamped on a different calendar day than its slot (yesterday's
+  // bedtime dose tapped this morning) shows its date, so the row never claims
+  // a time that belongs to another day.
   function takenTime(entry: DoseChecklistEntry) {
     const at = entry.record?.actualAt;
     if (!at || entry.status === 'planned') return '';
+    const sameDay = localDateOf(at, entry.timezone) === entry.localDate;
     return new Intl.DateTimeFormat(getLocale(), {
+      ...(sameDay ? {} : { month: 'numeric', day: 'numeric' }),
       hour: '2-digit',
       minute: '2-digit',
       timeZone: entry.timezone,
     }).format(new Date(at));
+  }
+
+  function rowName(entry: DoseChecklistEntry) {
+    return `${medicineFor(entry)?.name || m.dose_unknown_medicine()} · ${slotHeading(entry)}`;
   }
 
   function statusLabel(status: DoseStatus) {
@@ -244,10 +272,14 @@
           return;
         }
         if (result.type === 'failure' && result.status === 409) {
-          void invalidateAll();
-          saveError = m.claim_revision_stale();
-        } else {
+          // The slot already carries a row, most often one recorded from the
+          // reminder reply; the reload brings it in.
+          await invalidateAll();
+          saveError = m.dose_already_recorded();
+        } else if (result.type === 'failure' || result.type === 'error') {
           saveError = m.dose_save_failed();
+        } else {
+          await applyAction(result);
         }
       };
     };
@@ -269,8 +301,10 @@
       if (result.type === 'failure' && result.status === 409) {
         await invalidateAll();
         saveError = m.claim_revision_stale();
-      } else {
+      } else if (result.type === 'failure' || result.type === 'error') {
         saveError = m.dose_save_failed();
+      } else {
+        await applyAction(result);
       }
       saving = false;
     };
@@ -297,7 +331,7 @@
           type="submit"
           disabled={busy}
           class={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors active:scale-95 ${busy ? 'border-emerald-300 bg-emerald-50 text-emerald-500' : 'border-blue-300 bg-white text-transparent hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
-          aria-label={m.dose_mark_taken()}
+          aria-label={`${m.dose_mark_taken()} · ${rowName(entry)}`}
           title={m.dose_mark_taken()}
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class={`h-5 w-5 ${busy ? 'animate-pulse' : ''}`} aria-hidden="true">
@@ -311,7 +345,7 @@
         onclick={() => openEditor(entry)}
         class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`}
         title={statusLabel(entry.status)}
-        aria-label={`${statusLabel(entry.status)} · ${m.dose_edit_record()}`}
+        aria-label={`${statusLabel(entry.status)} · ${rowName(entry)} · ${m.dose_edit_record()}`}
       >
         {#if entry.status === 'taken'}
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
@@ -328,6 +362,11 @@
         {medicineFor(entry)?.name || m.dose_unknown_medicine()}
       </p>
       <p class="truncate text-xs text-slate-500">
+        {#if entry.status !== 'planned' && entry.status !== 'taken'}
+          <span class={`mr-1 inline-block rounded-full border px-1.5 py-px text-[0.65rem] font-semibold ${statusTone(entry.status)}`}>
+            {statusLabel(entry.status)}
+          </span>
+        {/if}
         {[slotHeading(entry), amountLine(entry), takenTime(entry)].filter(Boolean).join(' · ')}
       </p>
     </div>
@@ -336,6 +375,7 @@
       type="button"
       onclick={() => openEditor(entry)}
       class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+      aria-label={`${entry.record ? m.dose_edit_record() : m.dose_record_details()} · ${rowName(entry)}`}
     >
       {entry.record ? m.dose_edit_record() : m.dose_record_details()}
     </button>
@@ -355,7 +395,7 @@
         type="button"
         onclick={() => (yesterdayExpanded = !showYesterday)}
         aria-expanded={showYesterday}
-        class="flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left"
+        class={`flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left ${showYesterday ? '' : 'mb-3'}`}
       >
         <span class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
           {m.dose_day_yesterday()} · {dayLabel(yesterday)}
@@ -373,8 +413,6 @@
             {@render doseRow(entry)}
           {/each}
         </ul>
-      {:else}
-        <div class="mb-3"></div>
       {/if}
     {/if}
 

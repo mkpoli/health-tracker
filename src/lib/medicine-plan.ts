@@ -429,6 +429,23 @@ export function localDateOf(instant: string, timezone: string) {
   return toDateTimeLocal(instant, timezone).slice(0, 10);
 }
 
+export type ChecklistDay = 'today' | 'yesterday';
+
+/**
+ * Which checklist day a dose slot belongs to, judged on its own zone's
+ * calendar at `now`. A slot outside those two days belongs to neither.
+ */
+export function checklistDayOf(
+  entry: Pick<DoseChecklistEntry, 'localDate' | 'timezone'>,
+  now: string,
+): ChecklistDay | null {
+  const zoneToday = localDateOf(now, entry.timezone);
+  if (!zoneToday) return null;
+  if (entry.localDate === zoneToday) return 'today';
+  if (entry.localDate === addDays(zoneToday, -1)) return 'yesterday';
+  return null;
+}
+
 /**
  * Counts dose slots whose planned moment has passed, judging label-only slots
  * against their own regimen's calendar day. `unrecorded` slots have no saved

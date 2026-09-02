@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeCourseOf,
+  checklistDayOf,
   addDays,
   assignDoseSlotKeys,
   buildDoseChecklist,
@@ -379,5 +380,17 @@ describe('currentRegimenOf', () => {
     const later = regimen({ id: 'later', createdAt: '2026-08-01T09:00:00.000Z' });
     expect(currentRegimenOf(course(), [earlier, later], today)?.id).toBe('later');
     expect(currentRegimenOf(course(), [later, earlier], today)?.id).toBe('later');
+  });
+});
+
+describe('checklistDayOf', () => {
+  it('judges the day on the slot\'s own zone', () => {
+    const now = '2026-09-02T15:30:00Z'; // 00:30 on 2026-09-03 in Tokyo, 08:30 on 09-02 in Los Angeles
+    expect(checklistDayOf({ localDate: '2026-09-03', timezone: 'Asia/Tokyo' }, now)).toBe('today');
+    expect(checklistDayOf({ localDate: '2026-09-02', timezone: 'Asia/Tokyo' }, now)).toBe('yesterday');
+    expect(checklistDayOf({ localDate: '2026-09-02', timezone: 'America/Los_Angeles' }, now)).toBe('today');
+    expect(checklistDayOf({ localDate: '2026-09-01', timezone: 'America/Los_Angeles' }, now)).toBe('yesterday');
+    expect(checklistDayOf({ localDate: '2026-09-03', timezone: 'America/Los_Angeles' }, now)).toBeNull();
+    expect(checklistDayOf({ localDate: '2026-09-01', timezone: 'Asia/Tokyo' }, now)).toBeNull();
   });
 });
