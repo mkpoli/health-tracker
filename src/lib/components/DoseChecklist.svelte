@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
+  import { applyAction, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
@@ -7,7 +7,9 @@
   import {
     formatAmountWithUnit,
     formatDoseAmount,
+    doseSlotIdentity,
     type DoseChecklistEntry,
+    type DoseOccurrenceRecord,
     type DoseRegimenRecord,
     type DoseStatus,
   } from '$lib/medicine-plan';
@@ -25,6 +27,46 @@
     regimensById: Map<string, DoseRegimenRecord>;
     today: string;
   } = $props();
+
+  function identityOf(entry: DoseChecklistEntry) {
+    return entry.regimenId && entry.slotKey !== null
+      ? doseSlotIdentity(entry.regimenId, entry.localDate, entry.slotKey)
+      : `record:${entry.record?.id}`;
+  }
+
+  // A tap shows its result at once and the server round trip settles behind
+  // it. The saved row replaces the tapped state until the page data catches
+  // up, and a failed save falls back to the open slot with a message.
+  let pending = $state(new Set<string>());
+  let saved = $state(new Map<string, DoseOccurrenceRecord>());
+
+  const shownEntries = $derived(
+    entries.map((entry) => {
+      const identity = identityOf(entry);
+      const record = saved.get(identity);
+      if (!record || (entry.record && entry.record.revision >= record.revision)) return entry;
+      return { ...entry, record, plannedAt: record.plannedAt ?? entry.plannedAt, status: record.status };
+    }),
+  );
+
+  // Once the page data carries a row at least as new as the tapped one, the
+  // stand-in has done its job.
+  $effect(() => {
+    let changed = false;
+    const next = new Map(saved);
+    for (const entry of entries) {
+      const record = next.get(identityOf(entry));
+      if (record && entry.record && entry.record.revision >= record.revision) {
+        next.delete(identityOf(entry));
+        changed = true;
+      }
+    }
+    if (changed) saved = next;
+  });
+
+  function rowName(entry: DoseChecklistEntry) {
+    return `${medicineFor(entry)?.name || m.dose_unknown_medicine()} · ${slotHeading(entry)}`;
+  }
 
   let saving = $state(false);
   let saveError = $state('');
@@ -130,6 +172,36 @@
     editing = null;
   }
 
+  const markTaken = (entry: DoseChecklistEntry): SubmitFunction => {
+    const identity = identityOf(entry);
+    return () => {
+      pending = new Set(pending).add(identity);
+      saveError = '';
+
+      return async ({ result }) => {
+        const next = new Set(pending);
+        next.delete(identity);
+        pending = next;
+
+        if (result.type === 'success' && result.data?.occurrence) {
+          saved = new Map(saved).set(identity, result.data.occurrence as DoseOccurrenceRecord);
+          void invalidateAll();
+          return;
+        }
+        if (result.type === 'failure' && result.status === 409) {
+          // The slot already carries a row, most often one recorded from the
+          // reminder reply; the reload brings it in.
+          await invalidateAll();
+          saveError = m.dose_already_recorded();
+        } else if (result.type === 'failure' || result.type === 'error') {
+          saveError = m.dose_save_failed();
+        } else {
+          await applyAction(result);
+        }
+      };
+    };
+  };
+
   const submitDose: SubmitFunction = () => {
     saving = true;
     saveError = '';
@@ -146,8 +218,10 @@
       if (result.type === 'failure' && result.status === 409) {
         await invalidateAll();
         saveError = m.claim_revision_stale();
-      } else {
+      } else if (result.type === 'failure' || result.type === 'error') {
         saveError = m.dose_save_failed();
+      } else {
+        await applyAction(result);
       }
       saving = false;
     };
@@ -168,8 +242,8 @@
       </h4>
       <p class="text-xs text-blue-600">
         {m.dose_today_count({
-          done: entries.filter((entry) => entry.status !== 'planned').length,
-          total: entries.length,
+          done: shownEntries.filter((entry) => entry.status !== 'planned').length,
+          total: shownEntries.length,
         })}
       </p>
     </div>
@@ -181,36 +255,43 @@
     {/if}
 
     <ul class="mt-3 space-y-2">
-      {#each entries as entry (`${entry.regimenId || entry.record?.id}:${entry.localDate}:${entry.slotKey}`)}
+      {#each shownEntries as entry (identityOf(entry))}
+        {@const busy = pending.has(identityOf(entry))}
         <li class="flex items-center gap-3 rounded-xl border border-white/80 bg-white px-3.5 py-3 shadow-sm">
           {#if entry.status === 'planned' && entry.regimenId && entry.slotKey !== null}
-            <form method="POST" action="?/recordDose" use:enhance={submitDose}>
+            <form method="POST" action="?/recordDose" use:enhance={markTaken(entry)}>
               <input type="hidden" name="regimenId" value={entry.regimenId} />
               <input type="hidden" name="localDate" value={entry.localDate} />
               <input type="hidden" name="slotKey" value={entry.slotKey} />
               <input type="hidden" name="status" value="taken" />
               <button
                 type="submit"
-                disabled={saving}
-                class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-blue-300 bg-white text-transparent transition-colors hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500 disabled:opacity-40"
-                aria-label={m.dose_mark_taken()}
+                disabled={busy}
+                class={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors active:scale-95 ${busy ? 'border-emerald-300 bg-emerald-50 text-emerald-500' : 'border-blue-300 bg-white text-transparent hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
+                aria-label={`${m.dose_mark_taken()} · ${rowName(entry)}`}
                 title={m.dose_mark_taken()}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-4.5 w-4.5" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class={`h-5 w-5 ${busy ? 'animate-pulse' : ''}`} aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
               </button>
             </form>
           {:else}
-            <span class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`} title={statusLabel(entry.status)}>
+            <button
+              type="button"
+              onclick={() => openEditor(entry)}
+              class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`}
+              title={statusLabel(entry.status)}
+              aria-label={`${statusLabel(entry.status)} · ${rowName(entry)} · ${m.dose_edit_record()}`}
+            >
               {#if entry.status === 'taken'}
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
               {:else}
                 <span class="text-xs font-bold">{statusGlyph(entry.status)}</span>
               {/if}
-            </span>
+            </button>
           {/if}
 
           <div class="min-w-0 flex-1">
@@ -232,6 +313,7 @@
             type="button"
             onclick={() => openEditor(entry)}
             class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            aria-label={`${entry.record ? m.dose_edit_record() : m.dose_record_details()} · ${rowName(entry)}`}
           >
             {entry.record ? m.dose_edit_record() : m.dose_record_details()}
           </button>
