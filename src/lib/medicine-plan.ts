@@ -586,14 +586,19 @@ export function formatDoseAmount(slot: DoseSlot | null, doseText: string | null)
   return doseText;
 }
 
-/** The course a medicine is on: the ongoing one, else the most recently started. */
-export function activeCourseOf(courses: MedicineCourseRecord[]): MedicineCourseRecord | null {
-  const sorted = [...courses].sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
-  return sorted.find((course) => course.status === 'active') || sorted[0] || null;
+/** Descending by date, then by creation time, so records sharing a date keep one order. */
+function latestFirst(aDate: string, bDate: string, aCreated: string, bCreated: string) {
+  if (aDate !== bDate) return aDate < bDate ? 1 : -1;
+  if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
+  return 0;
 }
 
-function byLatestStart(a: DoseRegimenRecord, b: DoseRegimenRecord) {
-  return a.effectiveFrom < b.effectiveFrom ? 1 : -1;
+/** The course a medicine is on: the ongoing one, else the most recently started. */
+export function activeCourseOf(courses: MedicineCourseRecord[]): MedicineCourseRecord | null {
+  const sorted = [...courses].sort((a, b) =>
+    latestFirst(a.startDate, b.startDate, a.createdAt, b.createdAt),
+  );
+  return sorted.find((course) => course.status === 'active') || sorted[0] || null;
 }
 
 /** The dose rule in force for a course on a local date; the latest start wins. */
@@ -610,14 +615,7 @@ export function currentRegimenOf(
           regimen.effectiveFrom <= today &&
           (!regimen.effectiveTo || regimen.effectiveTo >= today),
       )
-      .sort(byLatestStart)[0] || null
+      .sort((a, b) => latestFirst(a.effectiveFrom, b.effectiveFrom, a.createdAt, b.createdAt))[0] ||
+    null
   );
-}
-
-/** The most recently started dose rule of a course, whether or not it is in force. */
-export function latestRegimenOf(
-  course: MedicineCourseRecord,
-  regimens: DoseRegimenRecord[],
-): DoseRegimenRecord | null {
-  return regimens.filter((regimen) => regimen.courseId === course.id).sort(byLatestStart)[0] || null;
 }
