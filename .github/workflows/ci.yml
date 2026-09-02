@@ -42,7 +42,17 @@ jobs:
           # every pull request. The suite reads Intl output, which moves with it.
           bun-version-file: .bun-version
 
-      - run: bun install --frozen-lockfile
+      # A registry tarball that fails to download or extract fails the whole
+      # run, and nothing in the repository caused it. Three attempts are enough
+      # for a transient registry fault; a wrong lockfile fails all three.
+      - name: Install
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            echo "bun install failed (attempt $attempt of 3)"
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 10))
+          done
+          exit 1
 
       - name: Types
         run: bun run check
