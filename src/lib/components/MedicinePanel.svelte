@@ -8,15 +8,19 @@
   import type { MedicineCaptureProposal } from '$lib/health-capture';
   import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
   import {
+    activeCourseOf,
     addDays,
     buildDoseChecklist,
     countAdherence,
+    currentRegimenOf,
+    latestRegimenOf,
     localDateOf,
     planDoses,
     type DoseOccurrenceRecord,
     type DoseRegimenRecord,
     type MedicineCourseRecord,
   } from '$lib/medicine-plan';
+  import { regimenSummary } from '$lib/regimen-format';
   import { toDateTimeLocal } from '$lib/time-zone';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
   import DoseChecklist from './DoseChecklist.svelte';
@@ -118,11 +122,19 @@
   let captureReview = $state(false);
   let draft = $state<Draft>(emptyDraft());
 
+  // A row's detail body mounts only while the row is open.
+  let expanded = $state<Record<string, boolean>>({});
+
+  const statusOrder: MedicineStatus[] = [...currentStatuses, ...pastStatuses];
+  function byStatusThenName(a: MedicineClaimRecord, b: MedicineClaimRecord) {
+    const order = statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status);
+    return order !== 0 ? order : a.name.localeCompare(b.name, getLocale());
+  }
   const currentMedicines = $derived(
-    medicines.filter((medicine) => currentStatuses.includes(medicine.status)),
+    medicines.filter((medicine) => currentStatuses.includes(medicine.status)).sort(byStatusThenName),
   );
   const pastMedicines = $derived(
-    medicines.filter((medicine) => pastStatuses.includes(medicine.status)),
+    medicines.filter((medicine) => pastStatuses.includes(medicine.status)).sort(byStatusThenName),
   );
   const revisionsByMedicine = $derived.by(() => {
     const grouped = new Map<string, MedicineClaimRevisionRecord[]>();
@@ -262,6 +274,23 @@
     return [medicine.strength, medicine.form].filter(Boolean).join(' · ');
   }
 
+  /** The dose rule in force, else the latest rule, else the free-text plan. */
+  function doseLine(medicine: MedicineClaimRecord) {
+    const course = activeCourseOf(courses.filter((course) => course.medicineClaimId === medicine.id));
+    const regimen = course
+      ? currentRegimenOf(course, regimens, today) || latestRegimenOf(course, regimens)
+      : null;
+    return regimen ? regimenSummary(regimen) : medicine.schedule || '';
+  }
+
+  function statusBreakdown(list: MedicineClaimRecord[], statuses: MedicineStatus[]) {
+    return statuses
+      .map((status) => ({ status, count: list.filter((medicine) => medicine.status === status).length }))
+      .filter(({ count }) => count > 0)
+      .map(({ status, count }) => `${statusLabel(status)} ${count}`)
+      .join(' · ');
+  }
+
   function formatDateOnly(value: string) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     if (!match) return value;
@@ -345,15 +374,6 @@
       <div>
         <h3 class="text-lg font-semibold tracking-tight text-slate-900">{m.medicine_title()}</h3>
         <p class="mt-1 text-sm text-slate-500">{m.medicine_subtitle()}</p>
-        {#if medicines.length > 0}
-          <div class="mt-3 flex flex-wrap gap-2">
-            {#each currentStatuses as status}
-              <span class={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(status)}`}>
-                {statusLabel(status)} {medicines.filter((medicine) => medicine.status === status).length}
-              </span>
-            {/each}
-          </div>
-        {/if}
       </div>
     </div>
 
@@ -404,132 +424,166 @@
       </button>
     </div>
   {:else}
-    <div class="space-y-8 p-4 sm:p-6">
-      {#if currentMedicines.length > 0}
-        <div>
-          <h4 class="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            {m.medicine_current_plans()}
-          </h4>
-          <div class="grid gap-4 lg:grid-cols-2">
-            {#each currentMedicines as medicine (medicine.id)}
-              {@render medicineCard(medicine)}
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#if pastMedicines.length > 0}
-        <div>
-          <h4 class="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            {m.medicine_past()}
-          </h4>
-          <div class="grid gap-4 lg:grid-cols-2">
-            {#each pastMedicines as medicine (medicine.id)}
-              {@render medicineCard(medicine)}
-            {/each}
-          </div>
-        </div>
-      {/if}
+    <div class="space-y-6 p-4 sm:p-6">
+      {@render medicineSection(m.medicine_current(), currentMedicines, currentStatuses, true)}
+      {@render medicineSection(m.medicine_past(), pastMedicines, pastStatuses, false)}
     </div>
   {/if}
 </section>
 
-{#snippet medicineCard(medicine: MedicineClaimRecord)}
-  <article class="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors hover:border-blue-200">
-    <div class="p-4 sm:p-5">
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <h5 class="text-base font-semibold text-slate-900">{medicine.name}</h5>
-          <span class={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusTone(medicine.status)}`}>
-            {statusLabel(medicine.status)}
-          </span>
+{#snippet medicineSection(title: string, list: MedicineClaimRecord[], statuses: MedicineStatus[], open: boolean)}
+  {#if list.length > 0}
+    <details class="group/section" {open}>
+      <summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 py-1.5 [&::-webkit-details-marker]:hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/section:rotate-90" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <h4 class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{title}</h4>
+        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-700">{list.length}</span>
+        <span class="basis-full pl-6 text-xs text-slate-400 sm:ml-auto sm:basis-auto sm:pl-0">
+          {statusBreakdown(list, statuses)}
+        </span>
+      </summary>
+      <div class="mt-3 space-y-2">
+        {#each list as medicine (medicine.id)}
+          {@render medicineRow(medicine)}
+        {/each}
+      </div>
+    </details>
+  {/if}
+{/snippet}
+
+{#snippet medicineRow(medicine: MedicineClaimRecord)}
+  {@const subtitle = [medicine.genericName, medicine.strength, medicine.form].filter(Boolean).join(' · ')}
+  {@const plan = doseLine(medicine)}
+  {@const adherence = adherenceByMedicine.get(medicine.id) || null}
+  <details
+    class="group/med overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-colors open:border-blue-200"
+    bind:open={expanded[medicine.id]}
+  >
+    <summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition-colors hover:bg-slate-50/70 [&::-webkit-details-marker]:hidden">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span class="font-semibold text-slate-900">{medicine.name}</span>
+          {#if medicine.status !== 'active'}
+            <span class={`rounded-full border px-2 py-0.5 text-[0.7rem] font-semibold ${statusTone(medicine.status)}`}>
+              {statusLabel(medicine.status)}
+            </span>
+          {/if}
         </div>
-        {#if medicine.genericName}
-          <p class="mt-1 text-sm text-slate-500">{medicine.genericName}</p>
+        {#if subtitle}
+          <p class="mt-0.5 truncate text-sm text-slate-500">{subtitle}</p>
         {/if}
-        {#if medicineSummary(medicine)}
-          <p class="mt-2 text-sm font-medium text-slate-700">{medicineSummary(medicine)}</p>
+        {#if plan}
+          <p class="mt-1 line-clamp-2 text-sm text-slate-700">{plan}</p>
         {/if}
       </div>
+      {#if adherence && adherence.due > 0}
+        <span
+          class="shrink-0 text-right leading-tight"
+          title={m.adherence_summary({
+            taken: adherence.taken + adherence.partial,
+            due: adherence.due,
+            unrecorded: adherence.unrecorded,
+          })}
+        >
+          <span class="block text-sm font-semibold tabular-nums text-slate-700">
+            {adherence.taken + adherence.partial}/{adherence.due}
+          </span>
+          <span class="block text-[0.65rem] text-slate-400">{m.medicine_recent_window()}</span>
+        </span>
+      {/if}
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/med:rotate-180" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25L12 15.75 4.5 8.25" />
+      </svg>
+    </summary>
 
-      <button
-        type="button"
-        onclick={() => openEdit(medicine)}
-        class="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-      >
-        {m.edit_medicine()}
-      </button>
-    </div>
+    {#if expanded[medicine.id]}
+      <div class="border-t border-slate-100">
+        <div class="grid gap-5 p-4 lg:grid-cols-2 lg:gap-6">
+          <div class="space-y-4">
+            {#if medicine.schedule}
+              <div class="rounded-xl border border-blue-100 bg-blue-50/70 px-3.5 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">{m.medicine_schedule()}</p>
+                <p class="mt-1 text-sm font-medium leading-relaxed text-blue-950">{medicine.schedule}</p>
+              </div>
+            {/if}
 
-    {#if medicine.schedule}
-      <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 px-3.5 py-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">{m.medicine_schedule()}</p>
-        <p class="mt-1 text-sm font-medium leading-relaxed text-blue-950">{medicine.schedule}</p>
+            {#if medicine.route || dateSummary(medicine) || medicine.purpose || medicine.prescriber}
+              <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                {#if medicine.route}
+                  <div>
+                    <dt class="text-xs font-medium text-slate-400">{m.medicine_route()}</dt>
+                    <dd class="mt-0.5 text-slate-700">{medicine.route}</dd>
+                  </div>
+                {/if}
+                {#if dateSummary(medicine)}
+                  <div>
+                    <dt class="text-xs font-medium text-slate-400">{m.medicine_period()}</dt>
+                    <dd class="mt-0.5 text-slate-700">{dateSummary(medicine)}</dd>
+                  </div>
+                {/if}
+                {#if medicine.purpose}
+                  <div>
+                    <dt class="text-xs font-medium text-slate-400">{m.medicine_purpose()}</dt>
+                    <dd class="mt-0.5 text-slate-700">{medicine.purpose}</dd>
+                  </div>
+                {/if}
+                {#if medicine.prescriber}
+                  <div>
+                    <dt class="text-xs font-medium text-slate-400">{m.medicine_prescriber()}</dt>
+                    <dd class="mt-0.5 text-slate-700">{medicine.prescriber}</dd>
+                  </div>
+                {/if}
+              </dl>
+            {/if}
+
+            {#if medicine.notes}
+              <p class="text-sm leading-relaxed text-slate-600">{medicine.notes}</p>
+            {/if}
+          </div>
+
+          <MedicineDosePlan
+            medicineClaimId={medicine.id}
+            courses={courses.filter((course) => course.medicineClaimId === medicine.id)}
+            regimens={regimens.filter((regimen) => medicinesByCourse.get(regimen.courseId)?.id === medicine.id)}
+            adherence={adherence}
+            {patientTimeZone}
+            {today}
+          />
+        </div>
+
+        <ClaimRevisionTimeline items={medicineRevisionItems(medicine)} />
+
+        <footer class="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+          <p class="min-w-0 truncate text-xs text-slate-400">
+            {m.medicine_updated({ date: formatDateOnly(medicine.updatedAt.slice(0, 10)) })}
+          </p>
+          <div class="flex shrink-0 items-center gap-4">
+            <form
+              method="POST"
+              action="?/deleteMedicine"
+              use:enhance={(submission) => {
+                if (!confirm(m.medicine_delete_confirm({ name: medicine.name }))) submission.cancel();
+              }}
+            >
+              <input type="hidden" name="id" value={medicine.id} />
+              <button type="submit" class="text-xs font-semibold text-rose-600 transition-colors hover:text-rose-700">
+                {m.medicine_delete()}
+              </button>
+            </form>
+            <button
+              type="button"
+              onclick={() => openEdit(medicine)}
+              class="whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            >
+              {m.edit()}
+            </button>
+          </div>
+        </footer>
       </div>
     {/if}
-
-    {#if medicine.route || dateSummary(medicine) || medicine.purpose || medicine.prescriber}
-      <dl class="mt-4 grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
-        {#if medicine.route}
-          <div>
-            <dt class="text-xs font-medium text-slate-400">{m.medicine_route()}</dt>
-            <dd class="mt-0.5 text-slate-700">{medicine.route}</dd>
-          </div>
-        {/if}
-        {#if dateSummary(medicine)}
-          <div>
-            <dt class="text-xs font-medium text-slate-400">{m.medicine_period()}</dt>
-            <dd class="mt-0.5 text-slate-700">{dateSummary(medicine)}</dd>
-          </div>
-        {/if}
-        {#if medicine.purpose}
-          <div>
-            <dt class="text-xs font-medium text-slate-400">{m.medicine_purpose()}</dt>
-            <dd class="mt-0.5 text-slate-700">{medicine.purpose}</dd>
-          </div>
-        {/if}
-        {#if medicine.prescriber}
-          <div>
-            <dt class="text-xs font-medium text-slate-400">{m.medicine_prescriber()}</dt>
-            <dd class="mt-0.5 text-slate-700">{medicine.prescriber}</dd>
-          </div>
-        {/if}
-      </dl>
-    {/if}
-
-    {#if medicine.notes}
-      <p class="mt-4 border-t border-slate-100 pt-3 text-sm leading-relaxed text-slate-600">{medicine.notes}</p>
-    {/if}
-
-    <div class="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-      <p class="text-xs text-slate-400">
-        {m.medicine_updated({ date: formatDateOnly(medicine.updatedAt.slice(0, 10)) })}
-      </p>
-      <form
-        method="POST"
-        action="?/deleteMedicine"
-        use:enhance={(submission) => {
-          if (!confirm(m.medicine_delete_confirm({ name: medicine.name }))) submission.cancel();
-        }}
-      >
-        <input type="hidden" name="id" value={medicine.id} />
-        <button type="submit" class="text-xs font-semibold text-rose-600 transition-colors hover:text-rose-700">
-          {m.medicine_delete()}
-        </button>
-      </form>
-    </div>
-    <MedicineDosePlan
-      medicineClaimId={medicine.id}
-      courses={courses.filter((course) => course.medicineClaimId === medicine.id)}
-      regimens={regimens.filter((regimen) => medicinesByCourse.get(regimen.courseId)?.id === medicine.id)}
-      adherence={adherenceByMedicine.get(medicine.id) || null}
-      {patientTimeZone}
-      {today}
-    />
-    </div>
-    <ClaimRevisionTimeline items={medicineRevisionItems(medicine)} />
-  </article>
+  </details>
 {/snippet}
 
 {#if editorOpen}

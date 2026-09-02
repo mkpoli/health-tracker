@@ -585,3 +585,39 @@ export function formatDoseAmount(slot: DoseSlot | null, doseText: string | null)
   }
   return doseText;
 }
+
+/** The course a medicine is on: the ongoing one, else the most recently started. */
+export function activeCourseOf(courses: MedicineCourseRecord[]): MedicineCourseRecord | null {
+  const sorted = [...courses].sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
+  return sorted.find((course) => course.status === 'active') || sorted[0] || null;
+}
+
+function byLatestStart(a: DoseRegimenRecord, b: DoseRegimenRecord) {
+  return a.effectiveFrom < b.effectiveFrom ? 1 : -1;
+}
+
+/** The dose rule in force for a course on a local date; the latest start wins. */
+export function currentRegimenOf(
+  course: MedicineCourseRecord,
+  regimens: DoseRegimenRecord[],
+  today: string,
+): DoseRegimenRecord | null {
+  return (
+    regimens
+      .filter(
+        (regimen) =>
+          regimen.courseId === course.id &&
+          regimen.effectiveFrom <= today &&
+          (!regimen.effectiveTo || regimen.effectiveTo >= today),
+      )
+      .sort(byLatestStart)[0] || null
+  );
+}
+
+/** The most recently started dose rule of a course, whether or not it is in force. */
+export function latestRegimenOf(
+  course: MedicineCourseRecord,
+  regimens: DoseRegimenRecord[],
+): DoseRegimenRecord | null {
+  return regimens.filter((regimen) => regimen.courseId === course.id).sort(byLatestStart)[0] || null;
+}
