@@ -7,7 +7,9 @@
   import {
     formatAmountWithUnit,
     formatDoseAmount,
+    checklistDayOf,
     doseSlotIdentity,
+    localDateOf,
     type DoseChecklistEntry,
     type DoseOccurrenceRecord,
     type DoseRegimenRecord,
@@ -21,11 +23,19 @@
     medicinesByCourse,
     regimensById,
     today,
+    yesterday,
+    timezone,
+    now,
   }: {
     entries: DoseChecklistEntry[];
     medicinesByCourse: Map<string, MedicineClaimRecord>;
     regimensById: Map<string, DoseRegimenRecord>;
+    /** Calendar dates in the patient's zone; they name the two groups. */
     today: string;
+    yesterday: string;
+    timezone: string;
+    /** The current instant, ticking from the parent so the groups follow the clock. */
+    now: string;
   } = $props();
 
   function identityOf(entry: DoseChecklistEntry) {
@@ -49,6 +59,11 @@
     }),
   );
 
+  const yesterdayEntries = $derived(
+    shownEntries.filter((entry) => checklistDayOf(entry, now) === 'yesterday'),
+  );
+  const todayEntries = $derived(shownEntries.filter((entry) => checklistDayOf(entry, now) === 'today'));
+
   // Once the page data carries a row at least as new as the tapped one, the
   // stand-in has done its job.
   $effect(() => {
@@ -64,8 +79,37 @@
     if (changed) saved = next;
   });
 
-  function rowName(entry: DoseChecklistEntry) {
-    return `${medicineFor(entry)?.name || m.dose_unknown_medicine()} · ${slotHeading(entry)}`;
+  // Yesterday matters while its slots are still being settled: a bedtime dose
+  // recorded after midnight belongs to the day before, and an open slot from
+  // yesterday is still worth a tap. Early in the morning the whole day stays
+  // in view; later it folds away unless something in it is still open.
+  const localHour = $derived(Number(toDateTimeLocal(now, timezone).slice(11, 13)));
+  const earlyHours = $derived(!Number.isNaN(localHour) && localHour < 6);
+  let yesterdayExpanded = $state<boolean | null>(null);
+  // A fold chosen yesterday says nothing about the new day.
+  $effect(() => {
+    void today;
+    yesterdayExpanded = null;
+  });
+  const showYesterday = $derived(
+    yesterdayExpanded ??
+      (earlyHours || yesterdayEntries.some((entry) => entry.status === 'planned')),
+  );
+
+  function countLine(list: DoseChecklistEntry[]) {
+    return m.dose_day_count({
+      done: list.filter((entry) => entry.status !== 'planned').length,
+      total: list.length,
+    });
+  }
+
+  function dayLabel(date: string) {
+    return new Intl.DateTimeFormat(getLocale(), {
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(`${date}T00:00:00Z`));
   }
 
   let saving = $state(false);
@@ -122,6 +166,25 @@
     }
     if (record?.actualText) return record.actualText;
     return formatDoseAmount(entry.slot, regimenFor(entry)?.doseText ?? null) || '';
+  }
+
+  // A record stamped on a different calendar day than its slot (yesterday's
+  // bedtime dose tapped this morning) shows its date, so the row never claims
+  // a time that belongs to another day.
+  function takenTime(entry: DoseChecklistEntry) {
+    const at = entry.record?.actualAt;
+    if (!at || entry.status === 'planned') return '';
+    const sameDay = localDateOf(at, entry.timezone) === entry.localDate;
+    return new Intl.DateTimeFormat(getLocale(), {
+      ...(sameDay ? {} : { month: 'numeric', day: 'numeric' }),
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: entry.timezone,
+    }).format(new Date(at));
+  }
+
+  function rowName(entry: DoseChecklistEntry) {
+    return `${medicineFor(entry)?.name || m.dose_unknown_medicine()} · ${slotHeading(entry)}`;
   }
 
   function statusLabel(status: DoseStatus) {
@@ -234,93 +297,122 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if entries.length > 0}
-  <section class="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
-    <div class="flex items-center justify-between gap-3">
-      <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
-        {m.dose_today_title()}
-      </h4>
-      <p class="text-xs text-blue-600">
-        {m.dose_today_count({
-          done: shownEntries.filter((entry) => entry.status !== 'planned').length,
-          total: shownEntries.length,
-        })}
+{#snippet doseRow(entry: DoseChecklistEntry)}
+  {@const identity = identityOf(entry)}
+  {@const busy = pending.has(identity)}
+  <li class="flex items-center gap-3 rounded-xl border border-white/80 bg-white px-3.5 py-3 shadow-sm">
+    {#if entry.status === 'planned' && entry.regimenId && entry.slotKey !== null}
+      <form method="POST" action="?/recordDose" use:enhance={markTaken(entry)}>
+        <input type="hidden" name="regimenId" value={entry.regimenId} />
+        <input type="hidden" name="localDate" value={entry.localDate} />
+        <input type="hidden" name="slotKey" value={entry.slotKey} />
+        <input type="hidden" name="status" value="taken" />
+        <button
+          type="submit"
+          disabled={busy}
+          class={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors active:scale-95 ${busy ? 'border-emerald-300 bg-emerald-50 text-emerald-500' : 'border-blue-300 bg-white text-transparent hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
+          aria-label={`${m.dose_mark_taken()} · ${rowName(entry)}`}
+          title={m.dose_mark_taken()}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class={`h-5 w-5 ${busy ? 'animate-pulse' : ''}`} aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        </button>
+      </form>
+    {:else}
+      <button
+        type="button"
+        onclick={() => openEditor(entry)}
+        class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`}
+        title={statusLabel(entry.status)}
+        aria-label={`${statusLabel(entry.status)} · ${rowName(entry)} · ${m.dose_edit_record()}`}
+      >
+        {#if entry.status === 'taken'}
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        {:else}
+          <span class="text-xs font-bold">{statusGlyph(entry.status)}</span>
+        {/if}
+      </button>
+    {/if}
+
+    <div class="min-w-0 flex-1">
+      <p class="truncate text-sm font-semibold text-slate-800">
+        {medicineFor(entry)?.name || m.dose_unknown_medicine()}
+      </p>
+      <p class="truncate text-xs text-slate-500">
+        {#if entry.status !== 'planned' && entry.status !== 'taken'}
+          <span class={`mr-1 inline-block rounded-full border px-1.5 py-px text-[0.65rem] font-semibold ${statusTone(entry.status)}`}>
+            {statusLabel(entry.status)}
+          </span>
+        {/if}
+        {[slotHeading(entry), amountLine(entry), takenTime(entry)].filter(Boolean).join(' · ')}
       </p>
     </div>
 
+    <button
+      type="button"
+      onclick={() => openEditor(entry)}
+      class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+      aria-label={`${entry.record ? m.dose_edit_record() : m.dose_record_details()} · ${rowName(entry)}`}
+    >
+      {entry.record ? m.dose_edit_record() : m.dose_record_details()}
+    </button>
+  </li>
+{/snippet}
+
+{#if entries.length > 0}
+  <section class="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
     {#if saveError && !editorOpen}
-      <p class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+      <p class="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
         {saveError}
       </p>
     {/if}
 
-    <ul class="mt-3 space-y-2">
-      {#each shownEntries as entry (identityOf(entry))}
-        {@const busy = pending.has(identityOf(entry))}
-        <li class="flex items-center gap-3 rounded-xl border border-white/80 bg-white px-3.5 py-3 shadow-sm">
-          {#if entry.status === 'planned' && entry.regimenId && entry.slotKey !== null}
-            <form method="POST" action="?/recordDose" use:enhance={markTaken(entry)}>
-              <input type="hidden" name="regimenId" value={entry.regimenId} />
-              <input type="hidden" name="localDate" value={entry.localDate} />
-              <input type="hidden" name="slotKey" value={entry.slotKey} />
-              <input type="hidden" name="status" value="taken" />
-              <button
-                type="submit"
-                disabled={busy}
-                class={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors active:scale-95 ${busy ? 'border-emerald-300 bg-emerald-50 text-emerald-500' : 'border-blue-300 bg-white text-transparent hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
-                aria-label={`${m.dose_mark_taken()} · ${rowName(entry)}`}
-                title={m.dose_mark_taken()}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class={`h-5 w-5 ${busy ? 'animate-pulse' : ''}`} aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              </button>
-            </form>
-          {:else}
-            <button
-              type="button"
-              onclick={() => openEditor(entry)}
-              class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${statusTone(entry.status)}`}
-              title={statusLabel(entry.status)}
-              aria-label={`${statusLabel(entry.status)} · ${rowName(entry)} · ${m.dose_edit_record()}`}
-            >
-              {#if entry.status === 'taken'}
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              {:else}
-                <span class="text-xs font-bold">{statusGlyph(entry.status)}</span>
-              {/if}
-            </button>
-          {/if}
+    {#if yesterdayEntries.length > 0}
+      <button
+        type="button"
+        onclick={() => (yesterdayExpanded = !showYesterday)}
+        aria-expanded={showYesterday}
+        class={`flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left ${showYesterday ? '' : 'mb-3'}`}
+      >
+        <span class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
+          {m.dose_day_yesterday()} · {dayLabel(yesterday)}
+        </span>
+        <span class="flex items-center gap-1.5 text-xs text-blue-600">
+          {countLine(yesterdayEntries)}
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`h-3.5 w-3.5 transition-transform ${showYesterday ? 'rotate-180' : ''}`} aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </span>
+      </button>
+      {#if showYesterday}
+        <ul class="mt-2 mb-4 space-y-2">
+          {#each yesterdayEntries as entry (identityOf(entry))}
+            {@render doseRow(entry)}
+          {/each}
+        </ul>
+      {/if}
+    {/if}
 
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-slate-800">
-              {medicineFor(entry)?.name || m.dose_unknown_medicine()}
-            </p>
-            <p class="truncate text-xs text-slate-500">
-              {[slotHeading(entry), amountLine(entry)].filter(Boolean).join(' · ')}
-            </p>
-          </div>
+    <div class="flex items-center justify-between gap-3 py-1">
+      <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">
+        {m.dose_day_today()} · {dayLabel(today)}
+      </h4>
+      <p class="text-xs text-blue-600">{countLine(todayEntries)}</p>
+    </div>
 
-          {#if entry.status !== 'planned'}
-            <span class={`rounded-full border px-2 py-0.5 text-[0.7rem] font-semibold ${statusTone(entry.status)}`}>
-              {statusLabel(entry.status)}
-            </span>
-          {/if}
-
-          <button
-            type="button"
-            onclick={() => openEditor(entry)}
-            class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            aria-label={`${entry.record ? m.dose_edit_record() : m.dose_record_details()} · ${rowName(entry)}`}
-          >
-            {entry.record ? m.dose_edit_record() : m.dose_record_details()}
-          </button>
-        </li>
-      {/each}
-    </ul>
-    <p class="mt-3 text-xs leading-relaxed text-blue-700/80">{m.dose_today_hint({ date: today })}</p>
+    {#if todayEntries.length > 0}
+      <ul class="mt-2 space-y-2">
+        {#each todayEntries as entry (identityOf(entry))}
+          {@render doseRow(entry)}
+        {/each}
+      </ul>
+    {:else}
+      <p class="mt-2 text-sm text-slate-500">{m.dose_today_empty()}</p>
+    {/if}
+    <p class="mt-3 text-xs leading-relaxed text-blue-700/80">{m.dose_today_hint()}</p>
   </section>
 {/if}
 
