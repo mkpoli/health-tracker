@@ -1,6 +1,7 @@
 <script lang="ts">
   import { applyAction, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
+  import { onMount } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
@@ -111,6 +112,25 @@
       timeZone: 'UTC',
     }).format(new Date(`${date}T00:00:00Z`));
   }
+
+  // Doses recorded elsewhere (a reminder reply, another device) only reach
+  // this page through a reload, so returning to the tab refreshes it.
+  let lastRefresh = 0;
+  onMount(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastRefresh < 180_000) return;
+      lastRefresh = Date.now();
+      void invalidateAll();
+    };
+    lastRefresh = Date.now();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  });
 
   let saving = $state(false);
   let saveError = $state('');
