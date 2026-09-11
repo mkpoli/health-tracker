@@ -293,6 +293,59 @@ describe('MCP dose tools', () => {
     expect(stored.rows[0].actual_at).toBe('2026-08-28T04:10:00.000Z');
   });
 
+  it('records a taken dose with unknown time and preserves it through retries', async () => {
+    const record = tool('record_dose_action');
+    const occurrenceId = `${REGIMEN_ID}:2026-08-29:0`;
+    const args = { patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken', actual_at: null };
+    expect(await record.handler(context, args)).toMatchObject({ status: 'taken', record_revision: 1 });
+    const later = { ...context, now: context.now + 86400_000 };
+    expect(await record.handler(later, args)).toMatchObject({ record_revision: 1 });
+    expect(await record.handler(later, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken',
+    })).toMatchObject({ record_revision: 1 });
+
+    const stored = await client.execute({
+      sql: 'SELECT status, actual_at, revision FROM dose_occurrence WHERE regimen_id = ? AND local_date = ? AND slot_key = 0',
+      args: [REGIMEN_ID, '2026-08-29'],
+    });
+    expect(stored.rows[0]).toMatchObject({ status: 'taken', actual_at: null, revision: 1 });
+    const listed = await tool('list_dose_occurrences').handler(later, {
+      patient_id: 'profile-1', from: '2026-08-28T15:00:00.000Z', to: '2026-08-29T14:59:59.000Z',
+    }) as { occurrences: { occurrence_id: string; status: string; actual_at: string | null }[] };
+    expect(listed.occurrences.find((entry) => entry.occurrence_id === occurrenceId)).toMatchObject({
+      status: 'taken', actual_at: null,
+    });
+  });
+
+  it('clears a guessed dose time and can later record a remembered time on the same row', async () => {
+    const record = tool('record_dose_action');
+    const occurrenceId = `${REGIMEN_ID}:2026-08-30:0`;
+    await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken',
+      actual_at: '2026-08-30T03:00:00.000Z', notes: 'Keep this note',
+    });
+    const stored = await client.execute({
+      sql: 'SELECT id FROM dose_occurrence WHERE regimen_id = ? AND local_date = ? AND slot_key = 0',
+      args: [REGIMEN_ID, '2026-08-30'],
+    });
+    const recordId = String(stored.rows[0].id);
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: recordId, status: 'taken', actual_at: null,
+    })).toMatchObject({ record_revision: 2 });
+    const cleared = await client.execute({ sql: 'SELECT actual_at, notes FROM dose_occurrence WHERE id = ?', args: [recordId] });
+    expect(cleared.rows[0]).toMatchObject({ actual_at: null, notes: 'Keep this note' });
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken', actual_at: '2026-08-30T04:15:00.000Z',
+    })).toMatchObject({ record_revision: 3 });
+    const ledger = await client.execute({
+      sql: "SELECT snapshot FROM claim_revision WHERE claim_kind = 'dose_occurrence' AND claim_id = ? ORDER BY revision",
+      args: [recordId],
+    });
+    expect(ledger.rows.map((row) => JSON.parse(String(row.snapshot)).actualAt)).toEqual([
+      '2026-08-30T03:00:00.000Z', null, '2026-08-30T04:15:00.000Z',
+    ]);
+  });
+
   it('rejects a receipt for a dose the profile does not have', async () => {
     const deliver = tool('record_dose_deliveries');
     await expect(

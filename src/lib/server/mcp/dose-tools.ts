@@ -221,14 +221,14 @@ const recordDoseAction: ToolDefinition = {
   name: 'record_dose_action',
   title: 'Record a dose action',
   description:
-    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state, with the actual time. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every change lands in the revision ledger.',
+    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state. Set actual_at to null when the actual time is unknown. Omitting it preserves an existing time; a new record defaults to now. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every change lands in the revision ledger.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       occurrence_id: { type: 'string', maxLength: 200 },
       status: { type: 'string', enum: recordableStatuses },
-      actual_at: { type: 'string' },
+      actual_at: { type: ['string', 'null'] },
       reason: { type: 'string', maxLength: 500 },
       notes: { type: 'string', maxLength: 4000 },
     },
@@ -243,8 +243,9 @@ const recordDoseAction: ToolDefinition = {
     const status = typeof args.status === 'string' && isDoseStatus(args.status) ? args.status : null;
     if (!status || status === 'planned') throw new ToolError('status is invalid');
 
+    const actualAtProvided = Object.prototype.hasOwnProperty.call(args, 'actual_at');
     const requestedActualAt =
-      args.actual_at === undefined ? null : isoInstant(args.actual_at, 'actual_at');
+      args.actual_at === undefined || args.actual_at === null ? null : isoInstant(args.actual_at, 'actual_at');
     const reasonProvided = Object.prototype.hasOwnProperty.call(args, 'reason');
     const notesProvided = Object.prototype.hasOwnProperty.call(args, 'notes');
     const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 500) || null : null;
@@ -260,7 +261,7 @@ const recordDoseAction: ToolDefinition = {
       responseId: string,
     ) => {
       const current = normalizeDoseOccurrence(row);
-      const nextActualAt = requestedActualAt ?? current.actualAt ?? new Date(ctx.now).toISOString();
+      const nextActualAt = actualAtProvided ? requestedActualAt : current.actualAt;
       const nextReason = reasonProvided ? reason : current.reason;
       const nextNotes = notesProvided ? notes : current.notes;
 
@@ -335,7 +336,7 @@ const recordDoseAction: ToolDefinition = {
           slotKey,
           input: {
             status,
-            actualAt: requestedActualAt ?? new Date(ctx.now).toISOString(),
+            actualAt: actualAtProvided ? requestedActualAt : new Date(ctx.now).toISOString(),
             actualValue: null,
             actualUnit: null,
             actualText: null,
