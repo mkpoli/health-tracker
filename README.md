@@ -50,6 +50,11 @@ capability. The two creation tools require a `request_id` for retry safety.
 Updates require the current revision so a newer edit cannot be overwritten.
 Laboratory results continue through the uploaded report review flow.
 
+For dose actions, `record_dose_action` accepts `actual_at: null` when a dose was
+taken at an unknown time. This also clears a previously recorded timestamp.
+Omitting the field preserves an existing record's time, including an unknown
+time; a new record without the field uses the current time.
+
 Uploaded documents, calorie photos, and the R2 bucket holding them stay outside
 the MCP grant. Energy tools report how many source files are retained.
 
