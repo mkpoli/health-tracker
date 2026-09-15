@@ -24,6 +24,7 @@ import { requirePatient, ToolError, type McpContext } from './context';
 import { capResult } from './budget';
 import { healthClaimTools } from './claim-tools';
 import { doseTools } from './dose-tools';
+import { regimenTools } from './regimen-tools';
 
 // The surface follows the questions a reader asks: which profiles are shared,
 // what is current, how has a value moved, which claims exist, and what changed.
@@ -706,6 +707,7 @@ export const tools: ToolDefinition[] = [
   getReferenceRanges,
   logMeasurement,
   ...healthClaimTools,
+  ...regimenTools,
   ...doseTools,
 ];
 

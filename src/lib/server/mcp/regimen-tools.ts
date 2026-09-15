@@ -1,5 +1,7 @@
+import { and, eq } from 'drizzle-orm';
 import type { MedicineStatus } from '$lib/medicine';
 import {
+  activeCourseOf,
   doseAnchorKinds,
   doseAnchorMeals,
   regimenRuleKinds,
@@ -13,7 +15,24 @@ import {
   parseDoseRegimenInput,
   type DoseRegimenInput,
 } from '$lib/server/medicine-plan';
-import { ToolError } from './context';
+import { db } from '$lib/server/db';
+import { doseRegimen, medicineCourse } from '$lib/server/db/schema';
+import { normalizeMedicineClaim } from '$lib/server/claim-mutations';
+import { StaleClaimRevisionError } from '$lib/server/claim-revisions';
+import {
+  createDoseRegimen,
+  createMedicineCourse,
+  normalizeDoseRegimen,
+  normalizeMedicineCourse,
+  RegimenOverlapError,
+  updateDoseRegimen,
+  updateMedicineCourse,
+} from '$lib/server/medicine-plan-mutations';
+import { getOwnedDoseRegimen, getOwnedMedicineClaim } from '$lib/server/ownership';
+import { isDateOnly } from '$lib/medicine-plan';
+import { timeZoneFromMetadata } from '$lib/time-zone';
+import { requirePatient, ToolError, type McpContext } from './context';
+import type { ToolDefinition } from './tools';
 
 const MAX_SLOTS = 12;
 
@@ -254,3 +273,302 @@ export function serializeRegimen(regimen: DoseRegimenRecord) {
     updated_at: regimen.updatedAt,
   };
 }
+
+const REQUEST_ID_LIMIT = 128;
+
+function text(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function requestId(value: unknown) {
+  const normalized = text(value);
+  if (!normalized || normalized.length > REQUEST_ID_LIMIT) {
+    throw new ToolError(`request_id must be text of at most ${REQUEST_ID_LIMIT} characters`);
+  }
+  return normalized;
+}
+
+function positiveInteger(value: unknown, field: string) {
+  if (!Number.isInteger(value) || Number(value) < 1) {
+    throw new ToolError(`${field} must be a positive integer`);
+  }
+  return Number(value);
+}
+
+function mcpProvider(ctx: McpContext) {
+  return `mcp:${ctx.clientId}`;
+}
+
+async function requireMedicine(ctx: McpContext, patientId: unknown, medicineId: unknown) {
+  const profile = await requirePatient(ctx, patientId);
+  const id = text(medicineId);
+  if (!id) throw new ToolError('medicine_id is required');
+  const stored = await getOwnedMedicineClaim(ctx.userId, id);
+  if (!stored || stored.patientId !== profile.id) throw new ToolError('No such medicine claim');
+  return { profile, medicine: normalizeMedicineClaim(stored) };
+}
+
+async function loadPlan(patientId: string, medicineId: string) {
+  const courses = (
+    await db
+      .select()
+      .from(medicineCourse)
+      .where(
+        and(eq(medicineCourse.patientId, patientId), eq(medicineCourse.medicineClaimId, medicineId)),
+      )
+  ).map(normalizeMedicineCourse);
+  const courseIds = courses.map((course) => course.id);
+  const regimens = courseIds.length
+    ? (
+        await db
+          .select()
+          .from(doseRegimen)
+          .where(eq(doseRegimen.patientId, patientId))
+      )
+        .filter((row) => courseIds.includes(row.courseId))
+        .map(normalizeDoseRegimen)
+    : [];
+  return { courses, regimens };
+}
+
+function serializePlan(plan: Awaited<ReturnType<typeof loadPlan>>) {
+  return plan.courses
+    .sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0))
+    .map((course) => ({
+      ...serializeCourse(course),
+      regimens: plan.regimens
+        .filter((regimen) => regimen.courseId === course.id)
+        .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : a.effectiveFrom > b.effectiveFrom ? -1 : 0))
+        .map(serializeRegimen),
+    }));
+}
+
+const getMedicinePlan: ToolDefinition = {
+  name: 'get_medicine_plan',
+  title: 'Read a medicine’s courses and regimens',
+  description:
+    'Every course of one medicine with the regimens that plan its doses, newest first. Read this before set_regimen, update_regimen or end_course: it carries the ids and revisions those calls need.',
+  inputSchema: {
+    type: 'object',
+    properties: { patient_id: { type: 'string' }, medicine_id: { type: 'string' } },
+    required: ['patient_id', 'medicine_id'],
+    additionalProperties: false,
+  },
+  handler: async (ctx, args) => {
+    const { profile, medicine } = await requireMedicine(ctx, args.patient_id, args.medicine_id);
+    return { medicine_id: medicine.id, courses: serializePlan(await loadPlan(profile.id, medicine.id)) };
+  },
+};
+
+const setRegimen: ToolDefinition = {
+  name: 'set_regimen',
+  title: 'Put a new dose rule on a medicine',
+  description:
+    'Start a new regimen on the medicine’s open course from regimen.effective_from; the rule in force until then keeps planning the days before it. A medicine with no course gets an initial one, and one whose course has ended gets a restart course. Use this when the dose plan changes; use update_regimen to correct a rule that was entered wrongly. request_id makes retries safe within this connection and profile.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      patient_id: { type: 'string' },
+      medicine_id: { type: 'string' },
+      request_id: { type: 'string', minLength: 1, maxLength: REQUEST_ID_LIMIT },
+      regimen: regimenSchema,
+    },
+    required: ['patient_id', 'medicine_id', 'request_id', 'regimen'],
+    additionalProperties: false,
+  },
+  writes: true,
+  writeCapability: 'claims',
+  idempotent: true,
+  handler: async (ctx, args) => {
+    const { profile, medicine } = await requireMedicine(ctx, args.patient_id, args.medicine_id);
+    const key = requestId(args.request_id);
+    const provider = mcpProvider(ctx);
+
+    const replayed = (
+      await db
+        .select()
+        .from(doseRegimen)
+        .where(
+          and(
+            eq(doseRegimen.patientId, profile.id),
+            eq(doseRegimen.originKind, 'mcp'),
+            eq(doseRegimen.originProvider, provider),
+            eq(doseRegimen.originExternalId, key),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (replayed) {
+      const plan = await loadPlan(profile.id, medicine.id);
+      const course = plan.courses.find((candidate) => candidate.id === replayed.courseId);
+      if (!course) throw new ToolError('request_id was used for another medicine');
+      return { created: false, course: serializeCourse(course), regimen: serializeRegimen(normalizeDoseRegimen(replayed)) };
+    }
+
+    const regimenArgs = args.regimen as Record<string, unknown> | null;
+    if (!regimenArgs || typeof regimenArgs !== 'object' || !text(regimenArgs.effective_from)) {
+      throw new ToolError('regimen.effective_from is required: the day the new rule takes over');
+    }
+    const input = parseRegimenArgs(regimenArgs, {
+      timezone: timeZoneFromMetadata(profile.extraData),
+      effectiveFrom: null,
+    });
+    const origin = { kind: 'mcp', provider, externalId: key };
+    const plan = await loadPlan(profile.id, medicine.id);
+    const current = activeCourseOf(plan.courses);
+    // A rule on an ended course would plan nothing; a medicine taken again
+    // after a stop gets a restart course, one never planned gets its first.
+    const course =
+      current && current.status !== 'ended'
+        ? current
+        : await createMedicineCourse({
+            patientId: profile.id,
+            medicineClaimId: medicine.id,
+            input: {
+              kind: current ? 'restart' : 'initial',
+              status:
+                medicine.status === 'planned' || medicine.status === 'paused'
+                  ? courseStatusFor(medicine.status)
+                  : 'active',
+              previousCourseId: current?.id ?? null,
+              startDate: current ? input.effectiveFrom : medicine.startDate ?? input.effectiveFrom,
+              endDate: null,
+              endReason: null,
+              notes: null,
+            },
+            origin,
+          });
+
+    try {
+      const regimen = await createDoseRegimen({ patientId: profile.id, courseId: course.id, input, origin });
+      return { created: true, course: serializeCourse(course), regimen: serializeRegimen(regimen) };
+    } catch (error) {
+      if (error instanceof RegimenOverlapError) {
+        throw new ToolError('Invalid regimen: a later rule already starts before this one would end');
+      }
+      throw error;
+    }
+  },
+};
+
+const updateRegimen: ToolDefinition = {
+  name: 'update_regimen',
+  title: 'Correct a dose rule in place',
+  description:
+    'Replace the fields of one regimen after the person confirms the correction. Send the whole rule; keep each slot’s key from get_medicine_plan so recorded doses stay attached. expected_revision prevents overwriting a newer edit.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      patient_id: { type: 'string' },
+      regimen_id: { type: 'string' },
+      expected_revision: { type: 'integer', minimum: 1 },
+      regimen: regimenSchema,
+    },
+    required: ['patient_id', 'regimen_id', 'expected_revision', 'regimen'],
+    additionalProperties: false,
+  },
+  writes: true,
+  writeCapability: 'claims',
+  idempotent: true,
+  handler: async (ctx, args) => {
+    const profile = await requirePatient(ctx, args.patient_id);
+    const id = text(args.regimen_id);
+    if (!id) throw new ToolError('regimen_id is required');
+    const expectedRevision = positiveInteger(args.expected_revision, 'expected_revision');
+    const stored = await getOwnedDoseRegimen(ctx.userId, id);
+    if (!stored || stored.patientId !== profile.id) throw new ToolError('No such regimen');
+    if (stored.revision !== expectedRevision) {
+      throw new ToolError(`Revision conflict; current_revision is ${stored.revision}`);
+    }
+
+    const input = parseRegimenArgs(args.regimen, {
+      timezone: stored.timezone,
+      effectiveFrom: stored.effectiveFrom,
+    });
+    try {
+      const regimen = await updateDoseRegimen({
+        current: stored,
+        input,
+        expectedRevision,
+        source: { kind: 'mcp', provider: mcpProvider(ctx) },
+      });
+      return { updated: true, regimen: serializeRegimen(regimen) };
+    } catch (error) {
+      if (error instanceof RegimenOverlapError) {
+        throw new ToolError('Invalid regimen: the window overlaps another rule of the same course');
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        const latest = await getOwnedDoseRegimen(ctx.userId, id);
+        throw new ToolError(`Revision conflict; current_revision is ${latest?.revision ?? 'unknown'}`);
+      }
+      throw error;
+    }
+  },
+};
+
+const endCourse: ToolDefinition = {
+  name: 'end_course',
+  title: 'End a medicine’s course',
+  description:
+    'Close the medicine’s active course on end_date after the person confirms it; no dose is planned past that day. The catalog entry keeps its own status — call update_medicine when it should read stopped or completed. expected_revision is the course revision from get_medicine_plan.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      patient_id: { type: 'string' },
+      medicine_id: { type: 'string' },
+      expected_revision: { type: 'integer', minimum: 1 },
+      end_date: { type: 'string', description: 'Last day of the course, YYYY-MM-DD.' },
+      end_reason: { type: ['string', 'null'], maxLength: 500 },
+    },
+    required: ['patient_id', 'medicine_id', 'expected_revision', 'end_date'],
+    additionalProperties: false,
+  },
+  writes: true,
+  writeCapability: 'claims',
+  idempotent: true,
+  handler: async (ctx, args) => {
+    const { profile, medicine } = await requireMedicine(ctx, args.patient_id, args.medicine_id);
+    const expectedRevision = positiveInteger(args.expected_revision, 'expected_revision');
+    const endDate = text(args.end_date);
+    if (!endDate || !isDateOnly(endDate)) throw new ToolError('end_date must be a calendar date in YYYY-MM-DD form');
+    const endReason = args.end_reason === undefined || args.end_reason === null ? null : text(args.end_reason);
+    if (endReason && endReason.length > 500) throw new ToolError('end_reason is too long');
+
+    const plan = await loadPlan(profile.id, medicine.id);
+    const course = activeCourseOf(plan.courses);
+    if (!course || course.status === 'ended') throw new ToolError('The medicine has no open course');
+    if (course.revision !== expectedRevision) {
+      throw new ToolError(`Revision conflict; current_revision is ${course.revision}`);
+    }
+    if (endDate < course.startDate) throw new ToolError('end_date falls before the course started');
+
+    const stored = (
+      await db.select().from(medicineCourse).where(eq(medicineCourse.id, course.id))
+    )[0];
+    if (!stored) throw new ToolError('The medicine has no open course');
+    try {
+      const ended = await updateMedicineCourse({
+        current: stored,
+        input: {
+          kind: course.kind,
+          status: 'ended',
+          previousCourseId: course.previousCourseId,
+          startDate: course.startDate,
+          endDate,
+          endReason,
+          notes: course.notes,
+        },
+        expectedRevision,
+        source: { kind: 'mcp', provider: mcpProvider(ctx) },
+      });
+      return { ended: true, course: serializeCourse(ended) };
+    } catch (error) {
+      if (error instanceof StaleClaimRevisionError) {
+        throw new ToolError('Revision conflict; read get_medicine_plan again');
+      }
+      throw error;
+    }
+  },
+};
+
+export const regimenTools: ToolDefinition[] = [getMedicinePlan, setRegimen, updateRegimen, endCourse];
