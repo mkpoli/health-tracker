@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   addDays,
   isCourseKind,
@@ -24,7 +24,13 @@ import {
   StaleClaimRevisionError,
   type ClaimRevisionSource,
 } from '$lib/server/claim-revisions';
-import type { ClaimOrigin } from '$lib/server/claim-mutations';
+import {
+  createMedicineClaim,
+  inTransaction,
+  type ClaimOrigin,
+  type WriteTx,
+} from '$lib/server/claim-mutations';
+import type { MedicineInput } from '$lib/server/medicines';
 
 export function normalizeMedicineCourse(
   value: typeof medicineCourse.$inferSelect,
@@ -73,8 +79,9 @@ export async function createMedicineCourse(options: {
   medicineClaimId: string;
   input: MedicineCourseInput;
   origin: ClaimOrigin;
+  tx?: WriteTx;
 }) {
-  return db.transaction(async (tx) => {
+  return inTransaction(options.tx, async (tx) => {
     const inserted = await tx
       .insert(medicineCourse)
       .values({
@@ -145,8 +152,9 @@ export async function createDoseRegimen(options: {
   courseId: string;
   input: DoseRegimenInput;
   origin: ClaimOrigin;
+  tx?: WriteTx;
 }) {
-  return db.transaction(async (tx) => {
+  return inTransaction(options.tx, async (tx) => {
     // A new rule closes the open one the day before it takes effect, so at
     // most one regimen plans any given day. A rule already scheduled to start
     // later stays scheduled; the new rule ends the day before it instead.
@@ -212,6 +220,83 @@ export async function createDoseRegimen(options: {
       .values(claimRevisionValues('dose_regimen', snapshot, options.origin));
 
     return snapshot;
+  });
+}
+
+/**
+ * A medicine enters the catalog with its dose plan: claim, course and regimen
+ * land in one transaction, so no medicine exists without a rule that says
+ * when it is taken. Replaying an idempotent creation returns the plan the
+ * first call stored; a claim that somehow has no course or regimen yet gets
+ * them on the replay instead.
+ */
+export async function createScheduledMedicine(options: {
+  patientId: string;
+  medicine: MedicineInput;
+  course: MedicineCourseInput;
+  regimen: DoseRegimenInput;
+  origin: ClaimOrigin;
+  id?: string;
+  idempotent?: boolean;
+}) {
+  return db.transaction(async (tx) => {
+    const { claim, created } = await createMedicineClaim({
+      patientId: options.patientId,
+      input: options.medicine,
+      origin: options.origin,
+      id: options.id,
+      idempotent: options.idempotent,
+      tx,
+    });
+
+    const existingCourse = created
+      ? null
+      : (
+          await tx
+            .select()
+            .from(medicineCourse)
+            .where(
+              and(
+                eq(medicineCourse.medicineClaimId, claim.id),
+                eq(medicineCourse.patientId, options.patientId),
+              ),
+            )
+            .orderBy(desc(medicineCourse.createdAt))
+            .limit(1)
+        )[0] ?? null;
+    const course = existingCourse
+      ? normalizeMedicineCourse(existingCourse)
+      : await createMedicineCourse({
+          patientId: options.patientId,
+          medicineClaimId: claim.id,
+          input: options.course,
+          origin: options.origin,
+          tx,
+        });
+
+    const existingRegimen = existingCourse
+      ? (
+          await tx
+            .select()
+            .from(doseRegimen)
+            .where(
+              and(eq(doseRegimen.courseId, course.id), eq(doseRegimen.patientId, options.patientId)),
+            )
+            .orderBy(desc(doseRegimen.effectiveFrom))
+            .limit(1)
+        )[0] ?? null
+      : null;
+    const regimen = existingRegimen
+      ? normalizeDoseRegimen(existingRegimen)
+      : await createDoseRegimen({
+          patientId: options.patientId,
+          courseId: course.id,
+          input: options.regimen,
+          origin: options.origin,
+          tx,
+        });
+
+    return { created, medicine: claim, course, regimen };
   });
 }
 

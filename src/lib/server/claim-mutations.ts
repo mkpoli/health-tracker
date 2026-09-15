@@ -20,6 +20,14 @@ export interface ClaimOrigin extends ClaimRevisionSource {
   externalId?: string | null;
 }
 
+/** The handle a transaction body writes through. */
+export type WriteTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Runs the body in the caller's transaction when one is given, else in its own. */
+export function inTransaction<T>(tx: WriteTx | undefined, body: (tx: WriteTx) => Promise<T>) {
+  return tx ? body(tx) : db.transaction(body);
+}
+
 export function normalizeMedicineClaim(
   value: typeof medicineClaim.$inferSelect,
 ): MedicineClaimRecord {
@@ -56,8 +64,9 @@ export async function createMedicineClaim(options: {
   origin: ClaimOrigin;
   id?: string;
   idempotent?: boolean;
+  tx?: WriteTx;
 }) {
-  return db.transaction(async (tx) => {
+  return inTransaction(options.tx, async (tx) => {
     const values = {
       ...(options.id ? { id: options.id } : {}),
       patientId: options.patientId,

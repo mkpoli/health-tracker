@@ -66,6 +66,48 @@ beforeAll(async () => {
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE medicine_course (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      medicine_claim_id TEXT NOT NULL REFERENCES medicine_claim(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'initial',
+      status TEXT NOT NULL DEFAULT 'active',
+      previous_course_id TEXT,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      end_reason TEXT,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE TABLE dose_regimen (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      course_id TEXT NOT NULL REFERENCES medicine_course(id) ON DELETE CASCADE,
+      rule_kind TEXT NOT NULL,
+      slots TEXT NOT NULL DEFAULT '[]',
+      days_of_week TEXT,
+      interval_hours REAL,
+      anchor_at TEXT,
+      dose_text TEXT,
+      route TEXT,
+      site TEXT,
+      timezone TEXT NOT NULL,
+      effective_from TEXT NOT NULL,
+      effective_to TEXT,
+      remind_minutes_before INTEGER,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
     CREATE TABLE energy_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -107,7 +149,7 @@ beforeAll(async () => {
     CREATE TABLE claim_revision (
       id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
-      claim_kind TEXT NOT NULL CHECK(claim_kind IN ('medicine', 'energy')),
+      claim_kind TEXT NOT NULL CHECK(claim_kind IN ('medicine', 'energy', 'medicine_course', 'dose_regimen')),
       claim_id TEXT NOT NULL,
       revision INTEGER NOT NULL,
       snapshot TEXT NOT NULL,
@@ -153,21 +195,48 @@ describe('MCP medicine claims', () => {
       form: 'capsule',
       strength: '500 mg',
       status: 'active',
+      start_date: '2026-08-15',
+      regimen: {
+        rule: 'fixed_slots',
+        slots: [
+          { label: '朝食後', anchor: 'meal', meal: 'breakfast', amount_value: 1, amount_unit: '錠' },
+          { label: '就寝前', anchor: 'bedtime', amount_value: 1, amount_unit: '錠' },
+        ],
+      },
     })) as any;
     const retry = (await create.handler(context, {
       patient_id: 'profile-1',
       request_id: 'medicine-chat-1',
       name: 'Changed retry payload',
       status: 'stopped',
+      start_date: '2026-08-16',
+      regimen: { rule: 'as_needed' },
     })) as any;
 
     expect(first.created).toBe(true);
+    expect(first.course).toMatchObject({
+      medicine_id: first.medicine.medicine_id,
+      kind: 'initial',
+      status: 'active',
+      start_date: '2026-08-15',
+    });
+    expect(first.regimen).toMatchObject({
+      course_id: first.course.course_id,
+      rule: 'fixed_slots',
+      timezone: 'Asia/Tokyo',
+      effective_from: '2026-08-15',
+      slots: [
+        { key: 0, label: '朝食後', anchor: { kind: 'meal', meal: 'breakfast', offset_minutes: null }, amount_value: 1, amount_unit: '錠' },
+        { key: 1, label: '就寝前', anchor: { kind: 'bedtime', meal: null, offset_minutes: null } },
+      ],
+    });
     expect(retry.created).toBe(false);
     expect(retry.medicine).toMatchObject({
       medicine_id: first.medicine.medicine_id,
       name: 'Amoxicillin',
       revision: 1,
     });
+    expect(retry.regimen).toMatchObject({ regimen_id: first.regimen.regimen_id, rule: 'fixed_slots' });
 
     const update = tool('update_medicine');
     const changed = (await update.handler(context, {
@@ -210,6 +279,38 @@ describe('MCP medicine claims', () => {
         (SELECT count(*) FROM claim_revision WHERE claim_kind = 'medicine') AS revisions
     `);
     expect(counts.rows[0]).toMatchObject({ medicines: 1, revisions: 2 });
+  });
+
+  it('refuses a medicine without a start date or a valid regimen', async () => {
+    const create = tool('create_medicine');
+    const base = { patient_id: 'profile-1', request_id: 'unscheduled', name: 'Loose tablet', status: 'active' };
+
+    await expect(
+      create.handler(context, { ...base, regimen: { rule: 'as_needed' } }),
+    ).rejects.toThrow('start_date is required');
+    await expect(
+      create.handler(context, { ...base, start_date: '2026-09-01', regimen: { rule: 'fixed_slots', slots: [] } }),
+    ).rejects.toThrow('Invalid regimen: fixed_slots needs one to twelve slots');
+    await expect(
+      create.handler(context, {
+        ...base,
+        start_date: '2026-09-01',
+        regimen: { rule: 'fixed_slots', slots: [{ anchor: 'meal' }] },
+      }),
+    ).rejects.toThrow('Invalid regimen');
+    await expect(
+      create.handler(context, {
+        ...base,
+        start_date: '2026-09-01',
+        regimen: { rule: 'interval', interval_hours: 48 },
+      }),
+    ).rejects.toThrow('Invalid regimen: an interval rule needs interval_hours');
+
+    const absent = await client.execute({
+      sql: 'SELECT count(*) AS count FROM medicine_claim WHERE name = ?',
+      args: ['Loose tablet'],
+    });
+    expect(absent.rows[0]?.count).toBe(0);
   });
 
   it('filters the current catalog and enforces the selected-profile grant', async () => {
