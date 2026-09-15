@@ -199,8 +199,8 @@ describe('MCP medicine claims', () => {
       regimen: {
         rule: 'fixed_slots',
         slots: [
-          { label: '朝食後', anchor: 'meal', meal: 'breakfast', amount_value: 1, amount_unit: '錠' },
-          { label: '就寝前', anchor: 'bedtime', amount_value: 1, amount_unit: '錠' },
+          { label: '朝食後', anchor: { kind: 'meal', meal: 'breakfast' }, amount_value: 1, amount_unit: '錠' },
+          { label: '就寝前', anchor: { kind: 'bedtime' }, amount_value: 1, amount_unit: '錠' },
         ],
       },
     })) as any;
@@ -210,6 +210,7 @@ describe('MCP medicine claims', () => {
       name: 'Changed retry payload',
       status: 'stopped',
       start_date: '2026-08-16',
+      end_date: '2026-08-20',
       regimen: { rule: 'as_needed' },
     })) as any;
 
@@ -289,13 +290,16 @@ describe('MCP medicine claims', () => {
       create.handler(context, { ...base, regimen: { rule: 'as_needed' } }),
     ).rejects.toThrow('start_date is required');
     await expect(
+      create.handler(context, { ...base, status: 'stopped', start_date: '2026-09-01', regimen: { rule: 'as_needed' } }),
+    ).rejects.toThrow('end_date is required');
+    await expect(
       create.handler(context, { ...base, start_date: '2026-09-01', regimen: { rule: 'fixed_slots', slots: [] } }),
     ).rejects.toThrow('Invalid regimen: fixed_slots needs one to twelve slots');
     await expect(
       create.handler(context, {
         ...base,
         start_date: '2026-09-01',
-        regimen: { rule: 'fixed_slots', slots: [{ anchor: 'meal' }] },
+        regimen: { rule: 'fixed_slots', slots: [{ anchor: { kind: 'meal' } }] },
       }),
     ).rejects.toThrow('Invalid regimen');
     await expect(

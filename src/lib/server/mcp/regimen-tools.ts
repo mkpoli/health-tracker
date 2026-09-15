@@ -18,19 +18,29 @@ import { ToolError } from './context';
 const MAX_SLOTS = 12;
 
 const slotProperties = {
+  key: {
+    type: ['integer', 'null'],
+    minimum: 0,
+    description:
+      'Identity of a slot inside its regimen, from get_medicine_plan. Keep it when correcting a rule so recorded doses stay attached; a slot without one is new.',
+  },
   label: {
     type: ['string', 'null'],
     maxLength: 120,
     description: 'How the person names the slot, e.g. 朝食後 or bedtime.',
   },
   anchor: {
-    type: 'string',
-    enum: doseAnchorKinds,
+    type: 'object',
     description:
-      'What places the dose in the day. clock needs time; meal needs meal; wake, meal and bedtime take offset_minutes and get no planned instant, because the day itself decides when they fall.',
+      'What places the dose in the day, in the shape get_medicine_plan and list_dose_occurrences return. clock needs the slot’s time; meal names its meal; wake, meal and bedtime take offset_minutes and get no planned instant, because the day itself decides when they fall.',
+    properties: {
+      kind: { type: 'string', enum: doseAnchorKinds },
+      meal: { type: ['string', 'null'], enum: [...doseAnchorMeals, null] },
+      offset_minutes: { type: ['integer', 'null'], minimum: -1440, maximum: 1440 },
+    },
+    required: ['kind'],
+    additionalProperties: false,
   },
-  meal: { type: ['string', 'null'], enum: [...doseAnchorMeals, null] },
-  offset_minutes: { type: ['integer', 'null'], minimum: -1440, maximum: 1440 },
   time: {
     type: ['string', 'null'],
     description: 'Local wall-clock time HH:MM for a clock anchor.',
@@ -104,11 +114,17 @@ function slotForm(raw: unknown) {
     throw new ToolError('Each regimen slot must be an object');
   }
   const slot = raw as Record<string, unknown>;
+  const anchor =
+    slot.anchor && typeof slot.anchor === 'object' && !Array.isArray(slot.anchor)
+      ? (slot.anchor as Record<string, unknown>)
+      : null;
+  if (!anchor) throw new ToolError('Each regimen slot needs an anchor object with its kind');
   return {
+    key: slot.key ?? null,
     label: slot.label ?? null,
-    anchorKind: slot.anchor ?? null,
-    anchorMeal: slot.meal ?? null,
-    anchorOffsetMinutes: slot.offset_minutes ?? null,
+    anchorKind: anchor.kind ?? null,
+    anchorMeal: anchor.meal ?? null,
+    anchorOffsetMinutes: anchor.offset_minutes ?? null,
     time: slot.time ?? null,
     amountValue: slot.amount_value ?? null,
     amountUnit: slot.amount_unit ?? null,

@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   addDays,
   isCourseKind,
@@ -79,12 +79,14 @@ export async function createMedicineCourse(options: {
   medicineClaimId: string;
   input: MedicineCourseInput;
   origin: ClaimOrigin;
+  id?: string;
   tx?: WriteTx;
 }) {
   return inTransaction(options.tx, async (tx) => {
     const inserted = await tx
       .insert(medicineCourse)
       .values({
+        ...(options.id ? { id: options.id } : {}),
         patientId: options.patientId,
         medicineClaimId: options.medicineClaimId,
         ...options.input,
@@ -152,6 +154,7 @@ export async function createDoseRegimen(options: {
   courseId: string;
   input: DoseRegimenInput;
   origin: ClaimOrigin;
+  id?: string;
   tx?: WriteTx;
 }) {
   return inTransaction(options.tx, async (tx) => {
@@ -205,6 +208,7 @@ export async function createDoseRegimen(options: {
     const inserted = await tx
       .insert(doseRegimen)
       .values({
+        ...(options.id ? { id: options.id } : {}),
         patientId: options.patientId,
         courseId: options.courseId,
         ...input,
@@ -226,77 +230,65 @@ export async function createDoseRegimen(options: {
 /**
  * A medicine enters the catalog with its dose plan: claim, course and regimen
  * land in one transaction, so no medicine exists without a rule that says
- * when it is taken. Replaying an idempotent creation returns the plan the
- * first call stored; a claim that somehow has no course or regimen yet gets
- * them on the replay instead.
+ * when it is taken. The caller names all three ids, so replaying an
+ * idempotent creation finds exactly the rows the first call stored and
+ * returns them, whatever the plan has become since.
  */
 export async function createScheduledMedicine(options: {
   patientId: string;
+  ids: { medicine: string; course: string; regimen: string };
   medicine: MedicineInput;
   course: MedicineCourseInput;
   regimen: DoseRegimenInput;
   origin: ClaimOrigin;
-  id?: string;
-  idempotent?: boolean;
 }) {
   return db.transaction(async (tx) => {
     const { claim, created } = await createMedicineClaim({
       patientId: options.patientId,
       input: options.medicine,
       origin: options.origin,
-      id: options.id,
-      idempotent: options.idempotent,
+      id: options.ids.medicine,
+      idempotent: true,
       tx,
     });
 
-    const existingCourse = created
-      ? null
-      : (
-          await tx
-            .select()
-            .from(medicineCourse)
-            .where(
-              and(
-                eq(medicineCourse.medicineClaimId, claim.id),
-                eq(medicineCourse.patientId, options.patientId),
-              ),
-            )
-            .orderBy(desc(medicineCourse.createdAt))
-            .limit(1)
-        )[0] ?? null;
-    const course = existingCourse
-      ? normalizeMedicineCourse(existingCourse)
-      : await createMedicineCourse({
-          patientId: options.patientId,
-          medicineClaimId: claim.id,
-          input: options.course,
-          origin: options.origin,
-          tx,
-        });
+    if (created) {
+      const course = await createMedicineCourse({
+        id: options.ids.course,
+        patientId: options.patientId,
+        medicineClaimId: claim.id,
+        input: options.course,
+        origin: options.origin,
+        tx,
+      });
+      const regimen = await createDoseRegimen({
+        id: options.ids.regimen,
+        patientId: options.patientId,
+        courseId: course.id,
+        input: options.regimen,
+        origin: options.origin,
+        tx,
+      });
+      return { created, medicine: claim, course, regimen };
+    }
 
-    const existingRegimen = existingCourse
-      ? (
-          await tx
-            .select()
-            .from(doseRegimen)
-            .where(
-              and(eq(doseRegimen.courseId, course.id), eq(doseRegimen.patientId, options.patientId)),
-            )
-            .orderBy(desc(doseRegimen.effectiveFrom))
-            .limit(1)
-        )[0] ?? null
-      : null;
-    const regimen = existingRegimen
-      ? normalizeDoseRegimen(existingRegimen)
-      : await createDoseRegimen({
-          patientId: options.patientId,
-          courseId: course.id,
-          input: options.regimen,
-          origin: options.origin,
-          tx,
-        });
-
-    return { created, medicine: claim, course, regimen };
+    const [courseRow] = await tx
+      .select()
+      .from(medicineCourse)
+      .where(and(eq(medicineCourse.id, options.ids.course), eq(medicineCourse.patientId, options.patientId)));
+    const [regimenRow] = await tx
+      .select()
+      .from(doseRegimen)
+      .where(and(eq(doseRegimen.id, options.ids.regimen), eq(doseRegimen.patientId, options.patientId)));
+    if (!courseRow || !regimenRow || courseRow.medicineClaimId !== claim.id) {
+      throw new Error('Claim identifier collision');
+    }
+    return {
+      created,
+      medicine: claim,
+      course: normalizeMedicineCourse(courseRow),
+      regimen: normalizeDoseRegimen(regimenRow),
+    };
   });
 }
 

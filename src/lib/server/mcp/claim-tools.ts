@@ -214,7 +214,7 @@ function mcpProvider(ctx: McpContext) {
 async function stableClaimId(
   ctx: McpContext,
   patientId: string,
-  kind: 'medicine' | 'energy',
+  kind: 'medicine' | 'medicine:course' | 'medicine:regimen' | 'energy',
   idempotencyKey: string,
 ) {
   const digest = new Uint8Array(
@@ -498,14 +498,21 @@ const createMedicine: ToolDefinition = {
     const key = requestId(args.request_id);
     const medicine = parseMedicine(args);
     if (!medicine.startDate) throw new ToolError('start_date is required');
+    // A course that ended without a date would plan doses forever.
+    if ((medicine.status === 'completed' || medicine.status === 'stopped') && !medicine.endDate) {
+      throw new ToolError('end_date is required when the medicine is completed or stopped');
+    }
     const regimen = parseRegimenArgs(args.regimen, {
       timezone: timeZoneFromMetadata(profile.extraData),
       effectiveFrom: medicine.startDate,
     });
     const provider = mcpProvider(ctx);
     const result = await createScheduledMedicine({
-      id: await stableClaimId(ctx, profile.id, 'medicine', key),
-      idempotent: true,
+      ids: {
+        medicine: await stableClaimId(ctx, profile.id, 'medicine', key),
+        course: await stableClaimId(ctx, profile.id, 'medicine:course', key),
+        regimen: await stableClaimId(ctx, profile.id, 'medicine:regimen', key),
+      },
       patientId: profile.id,
       medicine,
       course: {
