@@ -240,20 +240,14 @@ function parseSlots(raw: string): DoseSlot[] {
     };
   });
 
-  // Slots keep the identity they were saved with; a new slot takes the next
-  // free key. A duplicate key would fuse two dose slots into one.
+  // Slots keep the identity they were saved with; a new slot stays keyless
+  // here and is keyed where the regimen is written, which knows every key the
+  // rule has ever used. A duplicate key would fuse two dose slots into one.
   const usedKeys = parsedSlots
     .map((slot) => slot.key)
     .filter((key): key is number => key !== null);
   if (new Set(usedKeys).size !== usedKeys.length) {
     throw new InvalidMedicinePlanInputError('invalid_slots');
-  }
-  let nextKey = usedKeys.length > 0 ? Math.max(...usedKeys) + 1 : 0;
-  for (const slot of parsedSlots) {
-    if (slot.key === null) {
-      slot.key = nextKey;
-      nextKey += 1;
-    }
   }
 
   return parsedSlots;

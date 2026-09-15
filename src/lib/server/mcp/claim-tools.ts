@@ -4,9 +4,11 @@ import { medicineStatuses, type MedicineClaimRecord } from '$lib/medicine';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
+  doseRegimen,
   energyClaim,
   energySource,
   medicineClaim,
+  medicineCourse,
 } from '$lib/server/db/schema';
 import {
   createEnergyClaim,
@@ -17,8 +19,10 @@ import {
 } from '$lib/server/claim-mutations';
 import {
   StaleClaimRevisionError,
+  toDoseRegimenRevision,
   toEnergyClaimRevision,
   toMedicineClaimRevision,
+  toMedicineCourseRevision,
 } from '$lib/server/claim-revisions';
 import {
   InvalidEnergyInputError,
@@ -26,7 +30,11 @@ import {
   validateEnergyEntry,
 } from '$lib/server/energy';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
-import { createScheduledMedicine } from '$lib/server/medicine-plan-mutations';
+import {
+  createScheduledMedicine,
+  normalizeDoseRegimen,
+  normalizeMedicineCourse,
+} from '$lib/server/medicine-plan-mutations';
 import {
   getOwnedEnergyClaim,
   getOwnedMedicineClaim,
@@ -38,6 +46,7 @@ import {
   utcOffsetMinutesAt,
 } from '$lib/time-zone';
 import { capResult } from './budget';
+import { REQUEST_ID_LIMIT, stableClaimId } from './claim-ids';
 import {
   courseStatusFor,
   parseRegimenArgs,
@@ -50,7 +59,6 @@ import type { ToolDefinition } from './tools';
 
 const MAX_CLAIMS_PER_PAGE = 100;
 const MAX_HISTORY_PER_PAGE = 100;
-const REQUEST_ID_LIMIT = 128;
 
 const medicineFields = [
   'name',
@@ -209,27 +217,6 @@ function instant(value: unknown, fallback: number) {
 
 function mcpProvider(ctx: McpContext) {
   return `mcp:${ctx.clientId}`;
-}
-
-async function stableClaimId(
-  ctx: McpContext,
-  patientId: string,
-  kind: 'medicine' | 'medicine:course' | 'medicine:regimen' | 'energy',
-  idempotencyKey: string,
-) {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(
-        ['health-tracker-mcp-claim', patientId, ctx.clientId, kind, idempotencyKey].join('\u001f'),
-      ),
-    ),
-  );
-  const bytes = digest.slice(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x80;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function medicineForm(args: Record<string, unknown>, current?: MedicineClaimRecord) {
@@ -778,16 +765,89 @@ const updateEnergyEntry: ToolDefinition = {
   },
 };
 
+const historyKinds = ['medicine', 'medicine_course', 'dose_regimen', 'energy'] as const;
+type HistoryKind = (typeof historyKinds)[number];
+type StoredRevisionRow = Parameters<typeof toMedicineClaimRevision>[0];
+
+/** The claim as it stands now, and how to read one of its saved versions. */
+async function currentHistoryRow(kind: HistoryKind, patientId: string, claimId: string) {
+  const revisionOf = (parsed: { revision: number; changedAt: string; changeOriginKind: string; changeOriginProvider: string | null } | null, snapshot: unknown) =>
+    parsed ? { ...parsed, snapshot } : null;
+  switch (kind) {
+    case 'medicine': {
+      const [row] = await db
+        .select()
+        .from(medicineClaim)
+        .where(and(eq(medicineClaim.id, claimId), eq(medicineClaim.patientId, patientId)))
+        .limit(1);
+      if (!row) return null;
+      return {
+        snapshot: serializeMedicine(normalizeMedicineClaim(row)),
+        revision: (stored: StoredRevisionRow) => {
+          const parsed = toMedicineClaimRevision(stored);
+          return revisionOf(parsed, parsed && serializeMedicine(parsed.snapshot));
+        },
+      };
+    }
+    case 'medicine_course': {
+      const [row] = await db
+        .select()
+        .from(medicineCourse)
+        .where(and(eq(medicineCourse.id, claimId), eq(medicineCourse.patientId, patientId)))
+        .limit(1);
+      if (!row) return null;
+      return {
+        snapshot: serializeCourse(normalizeMedicineCourse(row)),
+        revision: (stored: StoredRevisionRow) => {
+          const parsed = toMedicineCourseRevision(stored);
+          return revisionOf(parsed, parsed && serializeCourse(parsed.snapshot));
+        },
+      };
+    }
+    case 'dose_regimen': {
+      const [row] = await db
+        .select()
+        .from(doseRegimen)
+        .where(and(eq(doseRegimen.id, claimId), eq(doseRegimen.patientId, patientId)))
+        .limit(1);
+      if (!row) return null;
+      return {
+        snapshot: serializeRegimen(normalizeDoseRegimen(row)),
+        revision: (stored: StoredRevisionRow) => {
+          const parsed = toDoseRegimenRevision(stored);
+          return revisionOf(parsed, parsed && serializeRegimen(parsed.snapshot));
+        },
+      };
+    }
+    case 'energy': {
+      const [row] = await db
+        .select()
+        .from(energyClaim)
+        .where(and(eq(energyClaim.id, claimId), eq(energyClaim.patientId, patientId)))
+        .limit(1);
+      if (!row) return null;
+      const retainedFileCount = (await retainedFileCounts(patientId, [claimId])).get(claimId) ?? 0;
+      return {
+        snapshot: serializeEnergy(normalizeEnergyClaim(row), retainedFileCount),
+        revision: (stored: StoredRevisionRow) => {
+          const parsed = toEnergyClaimRevision(stored);
+          return revisionOf(parsed, parsed && serializeEnergy(parsed.snapshot, retainedFileCount));
+        },
+      };
+    }
+  }
+}
+
 const getClaimHistory: ToolDefinition = {
   name: 'get_claim_history',
   title: 'Get claim history',
   description:
-    'Saved versions of one medicine or energy claim, newest first. Each version includes the change source and the complete snapshot held at that revision.',
+    'Saved versions of one medicine, course, regimen or energy claim, newest first. Each version includes the change source and the complete snapshot held at that revision.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
-      claim_kind: { type: 'string', enum: ['medicine', 'energy'] },
+      claim_kind: { type: 'string', enum: historyKinds },
       claim_id: { type: 'string' },
       limit: { type: 'integer', minimum: 1, maximum: MAX_HISTORY_PER_PAGE },
     },
@@ -796,33 +856,16 @@ const getClaimHistory: ToolDefinition = {
   },
   handler: async (ctx, args) => {
     const profile = await requirePatient(ctx, args.patient_id);
-    const kind = text(args.claim_kind);
-    if (kind !== 'medicine' && kind !== 'energy') {
-      throw new ToolError('claim_kind must be medicine or energy');
+    const kind = text(args.claim_kind) as HistoryKind | null;
+    if (!kind || !historyKinds.includes(kind)) {
+      throw new ToolError(`claim_kind must be one of ${historyKinds.join(', ')}`);
     }
     const claimId = text(args.claim_id);
     if (!claimId) throw new ToolError('claim_id is required');
     const limit = pageLimit(args.limit, 25, MAX_HISTORY_PER_PAGE);
 
-    const currentRows =
-      kind === 'medicine'
-        ? await db
-            .select()
-            .from(medicineClaim)
-            .where(
-              and(eq(medicineClaim.id, claimId), eq(medicineClaim.patientId, profile.id)),
-            )
-            .limit(1)
-        : await db
-            .select()
-            .from(energyClaim)
-            .where(and(eq(energyClaim.id, claimId), eq(energyClaim.patientId, profile.id)))
-            .limit(1);
-    if (!currentRows[0]) throw new ToolError('No such claim');
-    const retainedFileCount =
-      kind === 'energy'
-        ? ((await retainedFileCounts(profile.id, [claimId])).get(claimId) ?? 0)
-        : 0;
+    const current = await currentHistoryRow(kind, profile.id, claimId);
+    if (!current) throw new ToolError('No such claim');
 
     const where = and(
       eq(claimRevision.patientId, profile.id),
@@ -839,10 +882,7 @@ const getClaimHistory: ToolDefinition = {
       db.select({ value: count() }).from(claimRevision).where(where),
     ]);
     const revisions = rows.flatMap((row) => {
-      const parsed =
-        kind === 'medicine'
-          ? toMedicineClaimRevision(row)
-          : toEnergyClaimRevision(row);
+      const parsed = current.revision(row);
       if (!parsed) return [];
       return [
         {
@@ -852,26 +892,16 @@ const getClaimHistory: ToolDefinition = {
             kind: parsed.changeOriginKind,
             provider: parsed.changeOriginProvider,
           },
-          snapshot:
-            kind === 'medicine'
-              ? serializeMedicine(parsed.snapshot as MedicineClaimRecord)
-              : serializeEnergy(parsed.snapshot as EnergyClaimRecord, retainedFileCount),
+          snapshot: parsed.snapshot,
         },
       ];
     });
-    const current =
-      kind === 'medicine'
-        ? serializeMedicine(normalizeMedicineClaim(currentRows[0] as typeof medicineClaim.$inferSelect))
-        : serializeEnergy(
-            normalizeEnergyClaim(currentRows[0] as typeof energyClaim.$inferSelect),
-            retainedFileCount,
-          );
 
     return capResult({
       patient_id: profile.id,
       claim_kind: kind,
       claim_id: claimId,
-      current,
+      current: current.snapshot,
       total: totals[0]?.value ?? 0,
       revisions,
       truncated: Number(totals[0]?.value ?? 0) > revisions.length,
