@@ -10,7 +10,6 @@ import {
 } from '$lib/server/db/schema';
 import {
   createEnergyClaim,
-  createMedicineClaim,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -27,6 +26,7 @@ import {
   validateEnergyEntry,
 } from '$lib/server/energy';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
+import { createScheduledMedicine } from '$lib/server/medicine-plan-mutations';
 import {
   getOwnedEnergyClaim,
   getOwnedMedicineClaim,
@@ -38,6 +38,13 @@ import {
   utcOffsetMinutesAt,
 } from '$lib/time-zone';
 import { capResult } from './budget';
+import {
+  courseStatusFor,
+  parseRegimenArgs,
+  regimenSchema,
+  serializeCourse,
+  serializeRegimen,
+} from './regimen-tools';
 import { requirePatient, ToolError, type McpContext } from './context';
 import type { ToolDefinition } from './tools';
 
@@ -207,7 +214,7 @@ function mcpProvider(ctx: McpContext) {
 async function stableClaimId(
   ctx: McpContext,
   patientId: string,
-  kind: 'medicine' | 'energy',
+  kind: 'medicine' | 'medicine:course' | 'medicine:regimen' | 'energy',
   idempotencyKey: string,
 ) {
   const digest = new Uint8Array(
@@ -469,17 +476,18 @@ const listMedicines: ToolDefinition = {
 
 const createMedicine: ToolDefinition = {
   name: 'create_medicine',
-  title: 'Create a medicine claim',
+  title: 'Create a medicine with its dose plan',
   description:
-    'Create one medicine catalog claim after the person confirms it. request_id makes retries safe within this connection and profile.',
+    'Create one medicine claim together with the course and regimen that say when it is taken, after the person confirms all of it. A medicine never exists without a regimen; list_dose_occurrences plans from it. request_id makes retries safe within this connection and profile.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       request_id: { type: 'string', minLength: 1, maxLength: REQUEST_ID_LIMIT },
       ...medicineProperties,
+      regimen: regimenSchema,
     },
-    required: ['patient_id', 'request_id', 'name'],
+    required: ['patient_id', 'request_id', 'name', 'start_date', 'regimen'],
     additionalProperties: false,
   },
   writes: true,
@@ -488,17 +496,44 @@ const createMedicine: ToolDefinition = {
   handler: async (ctx, args) => {
     const profile = await requirePatient(ctx, args.patient_id);
     const key = requestId(args.request_id);
-    const input = parseMedicine(args);
+    const medicine = parseMedicine(args);
+    if (!medicine.startDate) throw new ToolError('start_date is required');
+    // A course that ended without a date would plan doses forever.
+    if ((medicine.status === 'completed' || medicine.status === 'stopped') && !medicine.endDate) {
+      throw new ToolError('end_date is required when the medicine is completed or stopped');
+    }
+    const regimen = parseRegimenArgs(args.regimen, {
+      timezone: timeZoneFromMetadata(profile.extraData),
+      effectiveFrom: medicine.startDate,
+    });
     const provider = mcpProvider(ctx);
-    const result = await createMedicineClaim({
-      id: await stableClaimId(ctx, profile.id, 'medicine', key),
-      idempotent: true,
+    const result = await createScheduledMedicine({
+      ids: {
+        medicine: await stableClaimId(ctx, profile.id, 'medicine', key),
+        course: await stableClaimId(ctx, profile.id, 'medicine:course', key),
+        regimen: await stableClaimId(ctx, profile.id, 'medicine:regimen', key),
+      },
       patientId: profile.id,
-      input,
+      medicine,
+      course: {
+        kind: 'initial',
+        status: courseStatusFor(medicine.status),
+        previousCourseId: null,
+        startDate: medicine.startDate,
+        endDate: medicine.endDate,
+        endReason: null,
+        notes: null,
+      },
+      regimen,
       origin: { kind: 'mcp', provider, externalId: key },
     });
 
-    return { created: result.created, medicine: serializeMedicine(result.claim) };
+    return {
+      created: result.created,
+      medicine: serializeMedicine(result.medicine),
+      course: serializeCourse(result.course),
+      regimen: serializeRegimen(result.regimen),
+    };
   },
 };
 
