@@ -253,6 +253,15 @@ function parseSlots(raw: string): DoseSlot[] {
   return parsedSlots;
 }
 
+/** The fields of one nested form, their prefix stripped, as their own FormData. */
+export function prefixedForm(data: FormData, prefix: string) {
+  const nested = new FormData();
+  for (const [key, value] of data.entries()) {
+    if (key.startsWith(prefix)) nested.append(key.slice(prefix.length), value);
+  }
+  return nested;
+}
+
 export function parseDoseRegimenInput(data: FormData): DoseRegimenInput {
   const ruleKind = data.get('ruleKind')?.toString().trim() || '';
   if (!isRegimenRuleKind(ruleKind)) throw new InvalidMedicinePlanInputError('invalid_rule');

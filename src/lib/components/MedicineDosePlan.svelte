@@ -7,18 +7,14 @@
   import {
     activeCourseOf,
     currentRegimenOf,
-    doseAnchorKinds,
-    doseAnchorMeals,
     type AdherenceCounts,
     type CourseStatus,
-    type DoseAnchorKind,
-    type DoseAnchorMeal,
     type DoseRegimenRecord,
     type MedicineCourseRecord,
-    type RegimenRuleKind,
   } from '$lib/medicine-plan';
-  import { anchorKindLabel, anchorMealLabel, regimenSummary, weekdayLabels } from '$lib/regimen-format';
-  import { toDateTimeLocal } from '$lib/time-zone';
+  import { emptyRegimenDraft, regimenDraftOf } from '$lib/regimen-draft';
+  import { regimenSummary } from '$lib/regimen-format';
+  import RegimenFields from './RegimenFields.svelte';
 
   let {
     medicineClaimId,
@@ -36,23 +32,12 @@
     today: string;
   } = $props();
 
-  type SlotDraft = {
-    key: number | null;
-    label: string;
-    anchorKind: DoseAnchorKind | '';
-    anchorMeal: DoseAnchorMeal;
-    anchorOffsetMinutes: string;
-    time: string;
-    amountValue: string;
-    amountUnit: string;
-  };
-
   let saving = $state(false);
   let saveError = $state('');
   let courseEditorOpen = $state(false);
   let regimenEditorOpen = $state(false);
   let courseDraft = $state(emptyCourseDraft());
-  let regimenDraft = $state(emptyRegimenDraft());
+  let regimenDraft = $state(emptyRegimenDraft('UTC'));
 
   const sortedCourses = $derived(
     [...courses].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)),
@@ -73,40 +58,6 @@
       endDate: '',
       endReason: '',
       notes: '',
-    };
-  }
-
-  function emptyRegimenDraft() {
-    return {
-      id: '',
-      revision: 0,
-      courseId: '',
-      ruleKind: 'fixed_slots' as RegimenRuleKind,
-      slots: [emptySlot()] as SlotDraft[],
-      daysOfWeek: [] as number[],
-      intervalHours: '',
-      anchorAt: '',
-      doseText: '',
-      route: '',
-      site: '',
-      timezone: patientTimeZone,
-      effectiveFrom: '',
-      effectiveTo: '',
-      remindMinutesBefore: '',
-      notes: '',
-    };
-  }
-
-  function emptySlot(): SlotDraft {
-    return {
-      key: null,
-      label: '',
-      anchorKind: '',
-      anchorMeal: 'breakfast',
-      anchorOffsetMinutes: '',
-      time: '',
-      amountValue: '',
-      amountUnit: '',
     };
   }
 
@@ -140,7 +91,7 @@
 
   function openRegimenCreate(course: MedicineCourseRecord) {
     regimenDraft = {
-      ...emptyRegimenDraft(),
+      ...emptyRegimenDraft(patientTimeZone),
       courseId: course.id,
       effectiveFrom: today >= course.startDate ? today : course.startDate,
     };
@@ -149,38 +100,7 @@
   }
 
   function openRegimenEdit(regimen: DoseRegimenRecord) {
-    regimenDraft = {
-      id: regimen.id,
-      revision: regimen.revision,
-      courseId: regimen.courseId,
-      ruleKind: regimen.ruleKind,
-      slots:
-        regimen.slots.length > 0
-          ? regimen.slots.map((slot) => ({
-              key: slot.key,
-              label: slot.label || '',
-              anchorKind: slot.anchorKind || '',
-              anchorMeal: slot.anchorMeal || 'breakfast',
-              anchorOffsetMinutes:
-                slot.anchorOffsetMinutes === null ? '' : String(slot.anchorOffsetMinutes),
-              time: slot.time || '',
-              amountValue: slot.amountValue === null ? '' : String(slot.amountValue),
-              amountUnit: slot.amountUnit || '',
-            }))
-          : [emptySlot()],
-      daysOfWeek: regimen.daysOfWeek ? [...regimen.daysOfWeek] : [],
-      intervalHours: regimen.intervalHours === null ? '' : String(regimen.intervalHours),
-      anchorAt: regimen.anchorAt ? toDateTimeLocal(regimen.anchorAt, regimen.timezone) : '',
-      doseText: regimen.doseText || '',
-      route: regimen.route || '',
-      site: regimen.site || '',
-      timezone: regimen.timezone,
-      effectiveFrom: regimen.effectiveFrom,
-      effectiveTo: regimen.effectiveTo || '',
-      remindMinutesBefore:
-        regimen.remindMinutesBefore === null ? '' : String(regimen.remindMinutesBefore),
-      notes: regimen.notes || '',
-    };
+    regimenDraft = regimenDraftOf(regimen);
     saveError = '';
     regimenEditorOpen = true;
   }
@@ -219,29 +139,6 @@
     };
   };
 
-  const slotsJson = $derived(
-    JSON.stringify(
-      regimenDraft.slots
-        .filter(
-          (slot) =>
-            slot.label || slot.time || slot.anchorKind || slot.amountValue || slot.amountUnit,
-        )
-        .map((slot) => ({
-          key: slot.key,
-          label: slot.label || null,
-          anchorKind: slot.anchorKind || null,
-          anchorMeal: slot.anchorKind === 'meal' ? slot.anchorMeal : null,
-          anchorOffsetMinutes:
-            slot.anchorKind && slot.anchorKind !== 'clock' && slot.anchorOffsetMinutes !== ''
-              ? Number(slot.anchorOffsetMinutes)
-              : null,
-          time: slot.anchorKind === 'clock' || (!slot.anchorKind && slot.time) ? slot.time || null : null,
-          amountValue: slot.amountValue === '' ? null : Number(slot.amountValue),
-          amountUnit: slot.amountUnit || null,
-        })),
-    ),
-  );
-
   function courseKindLabel(kind: 'initial' | 'restart') {
     return kind === 'restart' ? m.course_kind_restart() : m.course_kind_initial();
   }
@@ -276,8 +173,6 @@
         })
       : m.medicine_period_from({ date: formatDateOnly(course.startDate) });
   }
-
-  const weekdays = $derived(weekdayLabels());
 
   function adherenceLine(counts: AdherenceCounts) {
     return m.adherence_summary({
@@ -541,166 +436,8 @@
           <input type="hidden" name="id" value={regimenDraft.id} />
           <input type="hidden" name="revision" value={regimenDraft.revision} />
         {/if}
-        <input type="hidden" name="slots" value={slotsJson} />
-        <input type="hidden" name="timezone" value={regimenDraft.timezone} />
-
         <div class="space-y-5 px-5 py-5">
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_rule()}</span>
-              <select name="ruleKind" bind:value={regimenDraft.ruleKind} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                <option value="fixed_slots">{m.regimen_rule_fixed()}</option>
-                <option value="interval">{m.regimen_rule_interval()}</option>
-                <option value="as_needed">{m.regimen_rule_as_needed()}</option>
-              </select>
-            </label>
-
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_dose_text()}</span>
-              <input name="doseText" type="text" bind:value={regimenDraft.doseText} maxlength="200" placeholder={m.regimen_dose_text_placeholder()} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-          </div>
-
-          {#if regimenDraft.ruleKind === 'fixed_slots'}
-            <fieldset>
-              <legend class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{m.regimen_slots()}</legend>
-              <div class="mt-3 space-y-3">
-                {#each regimenDraft.slots as slot, index (index)}
-                  <div class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-6">
-                    <label class="sm:col-span-2">
-                      <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_slot_label()}</span>
-                      <input type="text" bind:value={slot.label} maxlength="120" placeholder={m.regimen_slot_label_placeholder()} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </label>
-                    <label>
-                      <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_anchor()}</span>
-                      <select bind:value={slot.anchorKind} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="">{m.regimen_anchor_none()}</option>
-                        {#each doseAnchorKinds as kind}
-                          <option value={kind}>{anchorKindLabel(kind)}</option>
-                        {/each}
-                      </select>
-                    </label>
-                    {#if slot.anchorKind === 'clock' || (!slot.anchorKind && slot.time)}
-                      <label>
-                        <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_slot_time()}</span>
-                        <input type="time" bind:value={slot.time} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                      </label>
-                    {:else if slot.anchorKind === 'meal'}
-                      <label>
-                        <span class="mb-1 block text-xs font-medium text-slate-500">{m.anchor_meal()}</span>
-                        <select bind:value={slot.anchorMeal} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                          {#each doseAnchorMeals as meal}
-                            <option value={meal}>{anchorMealLabel(meal)}</option>
-                          {/each}
-                        </select>
-                      </label>
-                    {:else if slot.anchorKind}
-                      <label>
-                        <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_anchor_offset()}</span>
-                        <input type="number" bind:value={slot.anchorOffsetMinutes} min="-1440" max="1440" step="5" class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                      </label>
-                    {:else}
-                      <div class="hidden sm:block"></div>
-                    {/if}
-                    <label>
-                      <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_slot_amount()}</span>
-                      <input type="number" bind:value={slot.amountValue} min="0" step="any" class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </label>
-                    <div class="flex items-end gap-2">
-                      <label class="flex-1">
-                        <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_slot_unit()}</span>
-                        <input type="text" bind:value={slot.amountUnit} maxlength="40" placeholder={m.regimen_slot_unit_placeholder()} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                      </label>
-                      {#if regimenDraft.slots.length > 1}
-                        <button
-                          type="button"
-                          onclick={() => {
-                            regimenDraft.slots = regimenDraft.slots.filter((_, i) => i !== index);
-                          }}
-                          class="rounded-md border border-slate-200 px-2 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                          aria-label={m.regimen_slot_remove()}
-                        >
-                          ×
-                        </button>
-                      {/if}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-              <button
-                type="button"
-                onclick={() => {
-                  regimenDraft.slots = [...regimenDraft.slots, emptySlot()];
-                }}
-                class="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-800"
-              >
-                {m.regimen_slot_add()}
-              </button>
-            </fieldset>
-
-            <fieldset>
-              <legend class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{m.regimen_days()}</legend>
-              <p class="mt-1 text-xs text-slate-500">{m.regimen_days_hint()}</p>
-              <div class="mt-2 flex flex-wrap gap-2">
-                {#each weekdays as label, day}
-                  <label class={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${regimenDraft.daysOfWeek.includes(day) ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}>
-                    <input
-                      type="checkbox"
-                      name="daysOfWeek"
-                      value={day}
-                      checked={regimenDraft.daysOfWeek.includes(day)}
-                      onchange={(event) => {
-                        const checked = (event.currentTarget as HTMLInputElement).checked;
-                        regimenDraft.daysOfWeek = checked
-                          ? [...regimenDraft.daysOfWeek, day]
-                          : regimenDraft.daysOfWeek.filter((value) => value !== day);
-                      }}
-                      class="sr-only"
-                    />
-                    {label}
-                  </label>
-                {/each}
-              </div>
-            </fieldset>
-          {:else if regimenDraft.ruleKind === 'interval'}
-            <div class="grid gap-4 sm:grid-cols-2">
-              <label>
-                <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_interval_hours()}</span>
-                <input name="intervalHours" type="number" bind:value={regimenDraft.intervalHours} min="1" max="1080" step="any" required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-              </label>
-              <label>
-                <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_anchor_time()}</span>
-                <input name="anchorAt" type="datetime-local" bind:value={regimenDraft.anchorAt} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-              </label>
-            </div>
-          {/if}
-
-          <div class="grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_from()}</span>
-              <input name="effectiveFrom" type="date" bind:value={regimenDraft.effectiveFrom} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_to()}</span>
-              <input name="effectiveTo" type="date" bind:value={regimenDraft.effectiveTo} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_route()}</span>
-              <input name="route" type="text" bind:value={regimenDraft.route} maxlength="120" class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_site()}</span>
-              <input name="site" type="text" bind:value={regimenDraft.site} maxlength="120" placeholder={m.regimen_site_placeholder()} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_remind_before()}</span>
-              <input name="remindMinutesBefore" type="number" bind:value={regimenDraft.remindMinutesBefore} min="0" max="1440" step="5" class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-            <label>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.notes()}</span>
-              <input name="notes" type="text" bind:value={regimenDraft.notes} maxlength="4000" class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-            </label>
-          </div>
+          <RegimenFields bind:draft={regimenDraft} />
 
           {#if saveError}
             <p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>

@@ -309,6 +309,16 @@ describe('MCP medicine claims', () => {
         regimen: { rule: 'interval', interval_hours: 48 },
       }),
     ).rejects.toThrow('Invalid regimen: an interval rule needs interval_hours');
+    await expect(
+      create.handler(context, {
+        ...base,
+        start_date: '2026-09-01',
+        regimen: { rule: 'as_needed', effective_from: '2026-08-20' },
+      }),
+    ).rejects.toThrow('the rule must start inside the course');
+    await expect(
+      create.handler(context, { ...base, start_date: '2026-09-10', end_date: '2026-09-01', regimen: { rule: 'as_needed' } }),
+    ).rejects.toThrow('end_date must not fall before start_date');
 
     const absent = await client.execute({
       sql: 'SELECT count(*) AS count FROM medicine_claim WHERE name = ?',
