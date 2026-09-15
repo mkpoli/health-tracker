@@ -56,7 +56,6 @@ const medicineBackfillSql = `
       'form', form,
       'strength', strength,
       'route', route,
-      'schedule', schedule,
       'status', status,
       'startDate', start_date,
       'endDate', end_date,

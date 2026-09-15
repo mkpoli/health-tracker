@@ -40,7 +40,6 @@ beforeAll(async () => {
       form TEXT,
       strength TEXT,
       route TEXT,
-      schedule TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       start_date TEXT,
       end_date TEXT,

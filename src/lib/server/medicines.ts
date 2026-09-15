@@ -6,7 +6,6 @@ const fieldLimits = {
   form: 120,
   strength: 120,
   route: 120,
-  schedule: 1000,
   purpose: 500,
   prescriber: 200,
   notes: 4000,
@@ -18,7 +17,6 @@ export type MedicineInput = {
   form: string | null;
   strength: string | null;
   route: string | null;
-  schedule: string | null;
   status: MedicineStatus;
   startDate: string | null;
   endDate: string | null;
@@ -82,7 +80,6 @@ export function parseMedicineInput(data: FormData): MedicineInput {
     form: readText(data, 'form'),
     strength: readText(data, 'strength'),
     route: readText(data, 'route'),
-    schedule: readText(data, 'schedule'),
     status,
     startDate: readDate(data, 'startDate'),
     endDate: readDate(data, 'endDate'),
