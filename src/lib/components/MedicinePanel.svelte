@@ -25,6 +25,8 @@
   import DoseChecklist from './DoseChecklist.svelte';
   import HealthCapture from './HealthCapture.svelte';
   import MedicineDosePlan from './MedicineDosePlan.svelte';
+  import RegimenFields from './RegimenFields.svelte';
+  import { emptyRegimenDraft } from '$lib/regimen-draft';
 
   let {
     patientId,
@@ -128,6 +130,8 @@
   let editorOpen = $state(false);
   let saving = $state(false);
   let saveError = $state('');
+  /** The first dose rule, saved with a new medicine. */
+  let regimenDraft = $state(emptyRegimenDraft('UTC'));
   let captureReview = $state(false);
   let draft = $state<Draft>(emptyDraft());
 
@@ -216,6 +220,7 @@
 
   function openCreate() {
     draft = emptyDraft();
+    regimenDraft = { ...emptyRegimenDraft(patientTimeZone), effectiveFrom: today };
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -258,6 +263,10 @@
       purpose: proposal.purpose || '',
       prescriber: proposal.prescriber || '',
       notes: [proposal.notes, sourceNote].filter(Boolean).join('\n\n').slice(0, 4000),
+    };
+    regimenDraft = {
+      ...emptyRegimenDraft(patientTimeZone),
+      effectiveFrom: proposal.startDate && proposal.startDate > today ? proposal.startDate : today,
     };
     saveError = '';
     captureReview = true;
@@ -767,7 +776,7 @@
 
           <fieldset class="border-t border-slate-100 pt-6">
             <legend class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              {m.medicine_plan()}
+              {m.medicine_state_period()}
             </legend>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
               <label>
@@ -793,6 +802,7 @@
                   name="startDate"
                   type="date"
                   bind:value={draft.startDate}
+                  required={!draft.id}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
               </label>
@@ -832,6 +842,18 @@
               </label>
             </div>
           </fieldset>
+
+          {#if !draft.id}
+            <fieldset>
+              <legend class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                {m.medicine_dose_plan()}
+              </legend>
+              <p class="mt-1 text-sm text-slate-500">{m.medicine_dose_plan_hint()}</p>
+              <div class="mt-4 space-y-5">
+                <RegimenFields bind:draft={regimenDraft} prefix="regimen." />
+              </div>
+            </fieldset>
+          {/if}
 
           {#if saveError}
             <p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">

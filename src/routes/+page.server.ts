@@ -42,6 +42,7 @@ import {
   getOwnedWorkoutClaim,
   requireUserId,
 } from '$lib/server/ownership';
+import { courseStatusFor } from '$lib/medicine-plan';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
 import {
   InvalidMedicinePlanInputError,
@@ -52,6 +53,7 @@ import {
 import {
   createDoseRegimen,
   createMedicineCourse,
+  createScheduledMedicine,
   RegimenOverlapError,
   normalizeDoseOccurrence,
   normalizeDoseRegimen,
@@ -85,7 +87,6 @@ import {
 } from '$lib/server/claim-revisions';
 import {
   createEnergyClaim,
-  createMedicineClaim,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -120,6 +121,15 @@ import {
   parseArchiveMediaMetadata,
   restoreArchiveMedia,
 } from '$lib/server/archive-media';
+
+/** The fields of one nested form, their prefix stripped, as their own FormData. */
+function prefixedForm(data: FormData, prefix: string) {
+  const nested = new FormData();
+  for (const [key, value] of data.entries()) {
+    if (key.startsWith(prefix)) nested.append(key.slice(prefix.length), value);
+  }
+  return nested;
+}
 
 const manualClaimSource = { kind: 'manual', provider: 'local' } as const;
 
@@ -370,16 +380,39 @@ export const actions: Actions = {
 
     try {
       const input = parseMedicineInput(data);
-      const { claim: medicine } = await createMedicineClaim({
+      // A medicine enters the catalog with its first course and dose rule, so
+      // it never sits there with nothing to plan from.
+      if (!input.startDate) return fail(400, { code: 'medicine_invalid_date' });
+      if ((input.status === 'completed' || input.status === 'stopped') && !input.endDate) {
+        return fail(400, { code: 'medicine_invalid_date' });
+      }
+      const regimenData = prefixedForm(data, 'regimen.');
+      if (!regimenData.get('effectiveFrom')) regimenData.set('effectiveFrom', input.startDate);
+      const regimen = parseDoseRegimenInput(regimenData);
+      const { medicine, course } = await createScheduledMedicine({
         patientId: ownedPatient.id,
-        input,
+        ids: { medicine: crypto.randomUUID(), course: crypto.randomUUID(), regimen: crypto.randomUUID() },
+        medicine: input,
+        course: {
+          kind: 'initial',
+          status: courseStatusFor(input.status),
+          previousCourseId: null,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          endReason: null,
+          notes: null,
+        },
+        regimen,
         origin: manualClaimSource,
       });
 
-      return { success: true, medicine };
+      return { success: true, medicine, course, regimen };
     } catch (error) {
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
+      }
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
       }
 
       throw error;

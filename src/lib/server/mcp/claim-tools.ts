@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { energyDirections, energyStatuses, type EnergyClaimRecord } from '$lib/energy';
 import { medicineStatuses, type MedicineClaimRecord } from '$lib/medicine';
+import { courseStatusFor } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
@@ -48,7 +49,6 @@ import {
 import { capResult } from './budget';
 import { REQUEST_ID_LIMIT, stableClaimId } from './claim-ids';
 import {
-  courseStatusFor,
   parseRegimenArgs,
   regimenSchema,
   serializeCourse,

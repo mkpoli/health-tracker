@@ -1,12 +1,11 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import type { MedicineStatus } from '$lib/medicine';
 import {
   activeCourseOf,
+  courseStatusFor,
   courseStatuses,
   doseAnchorKinds,
   doseAnchorMeals,
   regimenRuleKinds,
-  type CourseStatus,
   type DoseRegimenRecord,
   type DoseSlot,
   type MedicineCourseRecord,
@@ -205,21 +204,6 @@ export function parseRegimenArgs(
       throw new ToolError(`Invalid regimen: ${planErrorText[error.code]}`);
     }
     throw error;
-  }
-}
-
-/** The course a medicine claim's own status implies. */
-export function courseStatusFor(status: MedicineStatus): CourseStatus {
-  switch (status) {
-    case 'planned':
-      return 'planned';
-    case 'paused':
-      return 'held';
-    case 'completed':
-    case 'stopped':
-      return 'ended';
-    default:
-      return 'active';
   }
 }
 
