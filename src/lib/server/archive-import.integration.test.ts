@@ -63,7 +63,6 @@ beforeAll(async () => {
       form TEXT,
       strength TEXT,
       route TEXT,
-      schedule TEXT,
       status TEXT NOT NULL,
       start_date TEXT,
       end_date TEXT,
@@ -267,7 +266,6 @@ const medicineCurrent = {
   form: 'tablet',
   strength: '10 mg',
   route: 'oral',
-  schedule: 'Every evening',
   status: 'active',
   startDate: '2026-08-01',
   endDate: null,
@@ -284,7 +282,6 @@ const medicineCurrent = {
 
 const medicineFirst = {
   ...medicineCurrent,
-  schedule: 'Every morning',
   revision: 1,
   updatedAt: '2026-08-01T00:00:00.000Z',
 };

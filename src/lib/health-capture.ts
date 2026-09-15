@@ -9,7 +9,6 @@ export const medicineCaptureFields = [
   'form',
   'strength',
   'route',
-  'schedule',
   'status',
   'startDate',
   'endDate',
@@ -39,7 +38,6 @@ export type MedicineCaptureProposal = {
   form: string | null;
   strength: string | null;
   route: string | null;
-  schedule: string | null;
   status: MedicineStatus | null;
   startDate: string | null;
   endDate: string | null;
@@ -157,7 +155,6 @@ export function normalizeMedicineCapture(value: unknown): MedicineCaptureProposa
     form: nullableText(raw.form, 120),
     strength: nullableText(raw.strength, 120),
     route: nullableText(raw.route, 120),
-    schedule: nullableText(raw.schedule, 1000),
     status: status as MedicineStatus | null,
     startDate: dateOnly(raw.start_date),
     endDate: dateOnly(raw.end_date),

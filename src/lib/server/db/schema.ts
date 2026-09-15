@@ -61,7 +61,6 @@ export const medicineClaim = sqliteTable(
 		form: text('form'),
 		strength: text('strength'),
 		route: text('route'),
-		schedule: text('schedule'),
 		status: text('status').notNull().default('active'),
 		startDate: text('start_date'),
 		endDate: text('end_date'),

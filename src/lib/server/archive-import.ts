@@ -554,7 +554,6 @@ function parseMedicine(value: unknown, patientId: string, id: string): MedicineC
     form: optionalText(row.form, 'invalid_medicine', 120),
     strength: optionalText(row.strength, 'invalid_medicine', 120),
     route: optionalText(row.route, 'invalid_medicine', 120),
-    schedule: optionalText(row.schedule, 'invalid_medicine', 1000),
     status,
     startDate: optionalIsoDateText(row.startDate, 'invalid_medicine'),
     endDate: optionalIsoDateText(row.endDate, 'invalid_medicine'),

@@ -53,7 +53,6 @@ beforeAll(async () => {
       form TEXT,
       strength TEXT,
       route TEXT,
-      schedule TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       start_date TEXT,
       end_date TEXT,
@@ -153,7 +152,6 @@ describe('MCP medicine claims', () => {
       name: 'Amoxicillin',
       form: 'capsule',
       strength: '500 mg',
-      schedule: 'Three times daily',
       status: 'active',
     })) as any;
     const retry = (await create.handler(context, {
@@ -176,12 +174,12 @@ describe('MCP medicine claims', () => {
       patient_id: 'profile-1',
       medicine_id: first.medicine.medicine_id,
       expected_revision: 1,
-      schedule: 'Every eight hours with food',
+      purpose: 'Ear infection',
       notes: 'Confirmed in chat',
     })) as any;
     expect(changed.medicine).toMatchObject({
       name: 'Amoxicillin',
-      schedule: 'Every eight hours with food',
+      purpose: 'Ear infection',
       revision: 2,
     });
 
@@ -190,7 +188,7 @@ describe('MCP medicine claims', () => {
         patient_id: 'profile-1',
         medicine_id: first.medicine.medicine_id,
         expected_revision: 1,
-        schedule: 'Stale edit',
+        purpose: 'Stale edit',
       }),
     ).rejects.toThrow('current_revision is 2');
 

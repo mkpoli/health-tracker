@@ -51,7 +51,6 @@ const medicineFields = [
   'form',
   'strength',
   'route',
-  'schedule',
   'status',
   'start_date',
   'end_date',
@@ -78,7 +77,6 @@ const medicineProperties = {
   form: { type: ['string', 'null'], maxLength: 120 },
   strength: { type: ['string', 'null'], maxLength: 120 },
   route: { type: ['string', 'null'], maxLength: 120 },
-  schedule: { type: ['string', 'null'], maxLength: 1000 },
   status: { type: 'string', enum: medicineStatuses },
   start_date: { type: ['string', 'null'], description: 'Calendar date in YYYY-MM-DD form.' },
   end_date: { type: ['string', 'null'], description: 'Calendar date in YYYY-MM-DD form.' },
@@ -234,7 +232,6 @@ function medicineForm(args: Record<string, unknown>, current?: MedicineClaimReco
   data.set('form', optionalTextField(args, 'form', current?.form ?? null));
   data.set('strength', optionalTextField(args, 'strength', current?.strength ?? null));
   data.set('route', optionalTextField(args, 'route', current?.route ?? null));
-  data.set('schedule', optionalTextField(args, 'schedule', current?.schedule ?? null));
   data.set('status', optionalTextField(args, 'status', current?.status ?? 'active'));
   data.set('startDate', optionalTextField(args, 'start_date', current?.startDate ?? null));
   data.set('endDate', optionalTextField(args, 'end_date', current?.endDate ?? null));
@@ -351,7 +348,6 @@ function serializeMedicine(claim: MedicineClaimRecord) {
     form: claim.form,
     strength: claim.strength,
     route: claim.route,
-    schedule: claim.schedule,
     status: claim.status,
     start_date: claim.startDate,
     end_date: claim.endDate,
@@ -419,7 +415,7 @@ const listMedicines: ToolDefinition = {
   name: 'list_medicines',
   title: 'List medicine claims',
   description:
-    'Current medicine catalog for one profile. These are editable claims about medicines and schedules. They do not prove that a dose was taken.',
+    'Current medicine catalog for one profile. These are editable claims about what is taken; the dose plan lives on the regimen, and neither proves that a dose was taken.',
   inputSchema: {
     type: 'object',
     properties: {

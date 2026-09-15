@@ -112,7 +112,6 @@
     form: string;
     strength: string;
     route: string;
-    schedule: string;
     status: MedicineStatus;
     startDate: string;
     endDate: string;
@@ -206,7 +205,6 @@
       form: '',
       strength: '',
       route: '',
-      schedule: '',
       status: 'active',
       startDate: '',
       endDate: '',
@@ -232,7 +230,6 @@
       form: medicine.form || '',
       strength: medicine.strength || '',
       route: medicine.route || '',
-      schedule: medicine.schedule || '',
       status: medicine.status,
       startDate: medicine.startDate || '',
       endDate: medicine.endDate || '',
@@ -255,7 +252,6 @@
       form: proposal.form || '',
       strength: proposal.strength || '',
       route: proposal.route || '',
-      schedule: proposal.schedule || '',
       status: proposal.status || 'active',
       startDate: proposal.startDate || '',
       endDate: proposal.endDate || '',
@@ -319,11 +315,11 @@
     return [medicine.strength, medicine.form].filter(Boolean).join(' · ');
   }
 
-  /** The dose rule in force, else the free-text plan. */
+  /** The dose rule in force, if any. */
   function doseLine(medicine: MedicineClaimRecord) {
     const course = activeCourseOf(coursesByMedicine.get(medicine.id) || []);
     const regimen = course ? currentRegimenOf(course, regimens, today) : null;
-    return regimen ? regimenSummary(regimen) : medicine.schedule || '';
+    return regimen ? regimenSummary(regimen) : '';
   }
 
   /** An active row carries its dose rule; any other row carries its dates. */
@@ -375,7 +371,6 @@
     if (field === 'form') return m.medicine_form();
     if (field === 'strength') return m.medicine_strength();
     if (field === 'route') return m.medicine_route();
-    if (field === 'schedule') return m.medicine_schedule();
     if (field === 'status') return m.medicine_status();
     if (field === 'startDate') return m.medicine_start_date();
     if (field === 'endDate') return m.medicine_end_date();
@@ -402,7 +397,7 @@
         current: revision.revision === medicine.revision,
         changedFields: [...new Set(fields)],
         primary: [snapshot.name, medicineSummary(snapshot)].filter(Boolean).join(' · '),
-        secondary: [statusLabel(snapshot.status), snapshot.schedule].filter(Boolean).join(' · '),
+        secondary: statusLabel(snapshot.status),
       };
     });
   }
@@ -564,13 +559,6 @@
       <div class="border-t border-slate-100">
         <div class="grid gap-5 p-4 lg:grid-cols-2 lg:gap-6">
           <div class="space-y-4">
-            {#if medicine.schedule && medicine.schedule !== detail}
-              <div class="rounded-xl border border-blue-100 bg-blue-50/70 px-3.5 py-3">
-                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">{m.medicine_schedule()}</p>
-                <p class="mt-1 text-sm font-medium leading-relaxed text-blue-950">{medicine.schedule}</p>
-              </div>
-            {/if}
-
             {#if medicine.route || dateSummary(medicine) || medicine.purpose || medicine.prescriber}
               <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 {#if medicine.route}
@@ -817,18 +805,6 @@
                   bind:value={draft.endDate}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
-              </label>
-
-              <label class="sm:col-span-2">
-                <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_schedule()}</span>
-                <textarea
-                  name="schedule"
-                  bind:value={draft.schedule}
-                  rows="3"
-                  maxlength="1000"
-                  placeholder={m.medicine_schedule_placeholder()}
-                  class="w-full resize-y rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                ></textarea>
               </label>
 
               <label class="sm:col-span-2">

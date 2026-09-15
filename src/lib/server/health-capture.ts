@@ -80,7 +80,6 @@ const medicineSchema = {
     form: nullableText(120),
     strength: nullableText(120),
     route: nullableText(120),
-    schedule: nullableText(1000),
     status: {
       type: ['string', 'null'],
       enum: ['active', 'planned', 'paused', 'completed', 'stopped', null],
@@ -104,7 +103,6 @@ const medicineSchema = {
     'form',
     'strength',
     'route',
-    'schedule',
     'status',
     'start_date',
     'end_date',
@@ -165,8 +163,8 @@ function systemPrompt(kind: 'medicine' | 'energy') {
   const domain =
     kind === 'medicine'
       ? [
-          'The target is one medicine catalog or schedule claim.',
-          'Keep medicine names, strength, route and schedule exactly as the user described them.',
+          'The target is one medicine catalog claim.',
+          'Keep medicine names, strength and route exactly as the user described them.',
           'Set status from explicit wording: current use is active, future use is planned, a break is paused, a finished course is completed, and discontinued use is stopped.',
           'Use null for status when the message gives no current state.',
         ]
@@ -189,7 +187,6 @@ function systemPrompt(kind: 'medicine' | 'energy') {
           form: null,
           strength: null,
           route: null,
-          schedule: null,
           status: null,
           start_date: null,
           end_date: null,
