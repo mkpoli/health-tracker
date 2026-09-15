@@ -26,7 +26,7 @@
   import HealthCapture from './HealthCapture.svelte';
   import MedicineDosePlan from './MedicineDosePlan.svelte';
   import RegimenFields from './RegimenFields.svelte';
-  import { emptyRegimenDraft } from '$lib/regimen-draft';
+  import { emptyRegimenDraft, REGIMEN_FORM_PREFIX } from '$lib/regimen-draft';
 
   let {
     patientId,
@@ -220,7 +220,7 @@
 
   function openCreate() {
     draft = emptyDraft();
-    regimenDraft = { ...emptyRegimenDraft(patientTimeZone), effectiveFrom: today };
+    regimenDraft = emptyRegimenDraft(patientTimeZone);
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -264,10 +264,7 @@
       prescriber: proposal.prescriber || '',
       notes: [proposal.notes, sourceNote].filter(Boolean).join('\n\n').slice(0, 4000),
     };
-    regimenDraft = {
-      ...emptyRegimenDraft(patientTimeZone),
-      effectiveFrom: proposal.startDate && proposal.startDate > today ? proposal.startDate : today,
-    };
+    regimenDraft = emptyRegimenDraft(patientTimeZone);
     saveError = '';
     captureReview = true;
     editorOpen = true;
@@ -297,6 +294,8 @@
       if (result.type === 'failure' && result.status === 409) {
         await invalidateAll();
         saveError = m.claim_revision_stale();
+      } else if (result.type === 'failure' && String(result.data?.code ?? '').startsWith('plan_')) {
+        saveError = m.plan_save_failed();
       } else {
         saveError = m.medicine_save_failed();
       }
@@ -850,7 +849,7 @@
               </legend>
               <p class="mt-1 text-sm text-slate-500">{m.medicine_dose_plan_hint()}</p>
               <div class="mt-4 space-y-5">
-                <RegimenFields bind:draft={regimenDraft} prefix="regimen." />
+                <RegimenFields bind:draft={regimenDraft} prefix={REGIMEN_FORM_PREFIX} window={false} />
               </div>
             </fieldset>
           {/if}

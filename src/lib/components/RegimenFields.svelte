@@ -12,9 +12,12 @@
   let {
     draft = $bindable(),
     prefix = '',
+    window = true,
   }: {
     draft: RegimenDraft;
     prefix?: string;
+    /** Whether the rule's own dates are edited here; a first rule takes its course's. */
+    window?: boolean;
   } = $props();
 
   const weekdays = $derived(weekdayLabels());
@@ -53,7 +56,7 @@
           </label>
           <label>
             <span class="mb-1 block text-xs font-medium text-slate-500">{m.regimen_anchor()}</span>
-            <select bind:value={slot.anchorKind} class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            <select bind:value={slot.anchorKind} required class="w-full rounded-md border-slate-300 px-2.5 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
               <option value="">{m.regimen_anchor_none()}</option>
               {#each doseAnchorKinds as kind}
                 <option value={kind}>{anchorKindLabel(kind)}</option>
@@ -156,14 +159,16 @@
 {/if}
 
 <div class="grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-  <label>
-    <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_from()}</span>
-    <input name={name('effectiveFrom')} type="date" bind:value={draft.effectiveFrom} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-  </label>
-  <label>
-    <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_to()}</span>
-    <input name={name('effectiveTo')} type="date" bind:value={draft.effectiveTo} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-  </label>
+  {#if window}
+    <label>
+      <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_from()}</span>
+      <input name={name('effectiveFrom')} type="date" bind:value={draft.effectiveFrom} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+    </label>
+    <label>
+      <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.regimen_effective_to()}</span>
+      <input name={name('effectiveTo')} type="date" bind:value={draft.effectiveTo} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
+    </label>
+  {/if}
   <label>
     <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_route()}</span>
     <input name={name('route')} type="text" bind:value={draft.route} maxlength="120" class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />

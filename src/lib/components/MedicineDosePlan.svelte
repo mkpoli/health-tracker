@@ -174,7 +174,6 @@
       : m.medicine_period_from({ date: formatDateOnly(course.startDate) });
   }
 
-
   function adherenceLine(counts: AdherenceCounts) {
     return m.adherence_summary({
       taken: counts.taken + counts.partial,

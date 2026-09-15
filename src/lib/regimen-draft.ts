@@ -6,6 +6,9 @@ import type {
 } from '$lib/medicine-plan';
 import { toDateTimeLocal } from '$lib/time-zone';
 
+/** Input-name prefix the medicine dialog gives its nested regimen fields. */
+export const REGIMEN_FORM_PREFIX = 'regimen.';
+
 /** One slot as the regimen editor holds it: strings, so the inputs bind directly. */
 export type SlotDraft = {
   key: number | null;

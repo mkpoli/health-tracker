@@ -43,11 +43,13 @@ import {
   requireUserId,
 } from '$lib/server/ownership';
 import { courseStatusFor } from '$lib/medicine-plan';
+import { REGIMEN_FORM_PREFIX } from '$lib/regimen-draft';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
 import {
   InvalidMedicinePlanInputError,
   parseDoseActionInput,
   parseDoseRegimenInput,
+  prefixedForm,
   parseMedicineCourseInput,
 } from '$lib/server/medicine-plan';
 import {
@@ -121,15 +123,6 @@ import {
   parseArchiveMediaMetadata,
   restoreArchiveMedia,
 } from '$lib/server/archive-media';
-
-/** The fields of one nested form, their prefix stripped, as their own FormData. */
-function prefixedForm(data: FormData, prefix: string) {
-  const nested = new FormData();
-  for (const [key, value] of data.entries()) {
-    if (key.startsWith(prefix)) nested.append(key.slice(prefix.length), value);
-  }
-  return nested;
-}
 
 const manualClaimSource = { kind: 'manual', provider: 'local' } as const;
 
@@ -386,10 +379,11 @@ export const actions: Actions = {
       if ((input.status === 'completed' || input.status === 'stopped') && !input.endDate) {
         return fail(400, { code: 'medicine_invalid_date' });
       }
-      const regimenData = prefixedForm(data, 'regimen.');
-      if (!regimenData.get('effectiveFrom')) regimenData.set('effectiveFrom', input.startDate);
-      const regimen = parseDoseRegimenInput(regimenData);
-      const { medicine, course } = await createScheduledMedicine({
+      // The first rule spans the course; a later rule can narrow it.
+      const regimenData = prefixedForm(data, REGIMEN_FORM_PREFIX);
+      regimenData.set('effectiveFrom', input.startDate);
+      regimenData.set('effectiveTo', input.endDate ?? '');
+      const { medicine, course, regimen } = await createScheduledMedicine({
         patientId: ownedPatient.id,
         ids: { medicine: crypto.randomUUID(), course: crypto.randomUUID(), regimen: crypto.randomUUID() },
         medicine: input,
@@ -402,7 +396,7 @@ export const actions: Actions = {
           endReason: null,
           notes: null,
         },
-        regimen,
+        regimen: parseDoseRegimenInput(regimenData),
         origin: manualClaimSource,
       });
 
