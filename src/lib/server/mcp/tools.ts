@@ -724,7 +724,7 @@ export function toolAllowed(ctx: McpContext, tool: ToolDefinition) {
 export const serverInstructions = [
   'This server reads one account holder’s health records: lab results, measurements, medicine claims, food intake and energy expenditure.',
   'Call list_patients, then get_health_summary, and only then get_metric_history for the metrics in question.',
-  'Use list_medicines and list_energy_entries for claim data. A medicine and its regimen are user-editable claims; list_dose_occurrences shows what was recorded as taken.',
+  'Use list_medicines and list_energy_entries for claim data, and get_medicine_plan for the courses and regimens behind a medicine. A medicine and its regimen are user-editable claims; list_dose_occurrences shows what was recorded as taken.',
   'Ask the person to confirm values before creating or changing a claim. Use the revision returned by a read when updating. Reuse request_id when retrying the same creation.',
   'Values arrive unit-normalized. A metric marked stale has outlived the period a reading of its kind describes; do not present it as current.',
   'A null status means no interval applied — the report carried none, no published range fits what is known about this person, or the draw conditions do not match the interval. Report the number without calling it normal or abnormal; range_notes says which.',

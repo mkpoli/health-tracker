@@ -109,6 +109,33 @@ beforeAll(async () => {
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE dose_occurrence (
+      id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      course_id TEXT NOT NULL REFERENCES medicine_course(id) ON DELETE CASCADE,
+      regimen_id TEXT REFERENCES dose_regimen(id) ON DELETE SET NULL,
+      regimen_revision INTEGER,
+      slot_key INTEGER,
+      local_date TEXT NOT NULL,
+      planned_at TEXT,
+      timezone TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'planned',
+      actual_at TEXT,
+      actual_value REAL,
+      actual_unit TEXT,
+      actual_text TEXT,
+      route TEXT,
+      site TEXT,
+      reason TEXT,
+      reaction TEXT,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
     CREATE TABLE energy_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -200,7 +227,7 @@ describe('MCP medicine plans', () => {
       start_date: '2026-09-09',
       regimen: {
         rule: 'fixed_slots',
-        slots: [{ label: '就寝前', anchor: 'bedtime', amount_value: 1, amount_unit: '錠' }],
+        slots: [{ label: '就寝前', anchor: { kind: 'bedtime' }, amount_value: 1, amount_unit: '錠' }],
       },
     })) as any;
     const medicineId = created.medicine.medicine_id;
@@ -220,7 +247,7 @@ describe('MCP medicine plans', () => {
       regimen: {
         rule: 'fixed_slots',
         effective_from: '2026-09-20',
-        slots: [{ label: '就寝前', anchor: 'bedtime', amount_value: 2, amount_unit: '錠' }],
+        slots: [{ label: '就寝前', anchor: { kind: 'bedtime' }, amount_value: 2, amount_unit: '錠' }],
       },
     })) as any;
     expect(doubled.created).toBe(true);
@@ -244,34 +271,66 @@ describe('MCP medicine plans', () => {
         regimen: { rule: 'as_needed' },
       }),
     ).rejects.toThrow('regimen.effective_from is required');
+    await expect(
+      set.handler(context, {
+        patient_id: 'profile-1',
+        medicine_id: medicineId,
+        request_id: 'same-day',
+        regimen: { rule: 'as_needed', effective_from: '2026-09-20' },
+      }),
+    ).rejects.toThrow('correct it with update_regimen');
+    // The create's request_id names other rows; reusing it here starts a new rule.
+    const reusedKey = (await set.handler(context, {
+      patient_id: 'profile-1',
+      medicine_id: medicineId,
+      request_id: 'montelukast',
+      regimen: { rule: 'fixed_slots', effective_from: '2026-09-25', slots: [{ anchor: { kind: 'wake' } }] },
+    })) as any;
+    expect(reusedKey.created).toBe(true);
+    expect(reusedKey.regimen.regimen_id).not.toBe(created.regimen.regimen_id);
 
     const after = (await tool('get_medicine_plan').handler(context, {
       patient_id: 'profile-1',
       medicine_id: medicineId,
     })) as any;
     expect(after.courses[0].regimens.map((regimen: any) => [regimen.effective_from, regimen.effective_to])).toEqual([
-      ['2026-09-20', null],
+      ['2026-09-25', null],
+      ['2026-09-20', '2026-09-24'],
       ['2026-09-09', '2026-09-19'],
     ]);
-    const first = after.courses[0].regimens[1];
+    const first = after.courses[0].regimens[2];
     expect(first.revision).toBe(2);
+    // A read of the plan can be sent back as a write.
+    const echoed = (await tool('update_regimen').handler(context, {
+      patient_id: 'profile-1',
+      regimen_id: first.regimen_id,
+      expected_revision: 2,
+      regimen: {
+        rule: first.rule,
+        slots: first.slots,
+        effective_from: first.effective_from,
+        effective_to: first.effective_to,
+      },
+    })) as any;
+    expect(echoed.regimen.slots).toEqual(first.slots);
 
     const update = tool('update_regimen');
     const corrected = (await update.handler(context, {
       patient_id: 'profile-1',
       regimen_id: doubled.regimen.regimen_id,
-      expected_revision: 1,
+      expected_revision: 2,
       regimen: {
         rule: 'fixed_slots',
         slots: [
-          { key: 0, label: '就寝前', anchor: 'bedtime', amount_value: 2, amount_unit: '錠' },
-          { label: '朝食後', anchor: 'meal', meal: 'breakfast', offset_minutes: 30 },
+          { key: 0, label: '就寝前', anchor: { kind: 'bedtime' }, amount_value: 2, amount_unit: '錠' },
+          { label: '朝食後', anchor: { kind: 'meal', meal: 'breakfast', offset_minutes: 30 } },
         ],
         dose_text: '合計3錠',
+        effective_to: '2026-09-24',
       },
     })) as any;
     expect(corrected.regimen).toMatchObject({
-      revision: 2,
+      revision: 3,
       effective_from: '2026-09-20',
       timezone: 'Asia/Tokyo',
       dose_text: '合計3錠',
@@ -284,49 +343,87 @@ describe('MCP medicine plans', () => {
       update.handler(context, {
         patient_id: 'profile-1',
         regimen_id: doubled.regimen.regimen_id,
-        expected_revision: 1,
+        expected_revision: 2,
         regimen: { rule: 'as_needed' },
       }),
-    ).rejects.toThrow('current_revision is 2');
+    ).rejects.toThrow('current_revision is 3');
     await expect(
       update.handler(context, {
         patient_id: 'profile-1',
         regimen_id: doubled.regimen.regimen_id,
-        expected_revision: 2,
+        expected_revision: 3,
         regimen: { rule: 'as_needed', effective_from: '2026-09-15' },
       }),
     ).rejects.toThrow('overlaps another rule');
 
-    const end = tool('end_course');
+    // A removed slot's key is never handed to a new slot: a dose taken under
+    // key 1 must not turn up as taken for whatever slot comes next.
+    await client.execute({
+      sql: `INSERT INTO dose_occurrence (id, patient_id, course_id, regimen_id, regimen_revision, slot_key, local_date, timezone, status)
+            VALUES ('occ-1', 'profile-1', ?, ?, 3, 1, '2026-09-21', 'Asia/Tokyo', 'taken')`,
+      args: [doubled.course.course_id, doubled.regimen.regimen_id],
+    });
+    const rekeyed = (await update.handler(context, {
+      patient_id: 'profile-1',
+      regimen_id: doubled.regimen.regimen_id,
+      expected_revision: 3,
+      regimen: {
+        rule: 'fixed_slots',
+        slots: [
+          { key: 0, label: '就寝前', anchor: { kind: 'bedtime' } },
+          { label: '昼食後', anchor: { kind: 'meal', meal: 'lunch' } },
+        ],
+        effective_to: '2026-09-24',
+      },
+    })) as any;
+    expect(rekeyed.regimen.slots.map((slot: any) => [slot.key, slot.label])).toEqual([
+      [0, '就寝前'],
+      [2, '昼食後'],
+    ]);
+
+    const courseTool = tool('update_course');
+    const courseId = doubled.course.course_id;
     await expect(
-      end.handler(context, {
+      courseTool.handler(context, {
         patient_id: 'profile-1',
-        medicine_id: medicineId,
+        course_id: courseId,
         expected_revision: 1,
+        status: 'ended',
         end_date: '2026-09-01',
       }),
-    ).rejects.toThrow('before the course started');
-    const ended = (await end.handler(context, {
+    ).rejects.toThrow('end_date must not fall before start_date');
+    await expect(
+      courseTool.handler(context, {
+        patient_id: 'profile-1',
+        course_id: courseId,
+        expected_revision: 1,
+        status: 'ended',
+      }),
+    ).rejects.toThrow('needs its end_date');
+    const ended = (await courseTool.handler(context, {
       patient_id: 'profile-1',
-      medicine_id: medicineId,
+      course_id: courseId,
       expected_revision: 1,
+      status: 'ended',
       end_date: '2026-09-16',
       end_reason: 'No longer needed',
     })) as any;
     expect(ended.course).toMatchObject({
+      course_id: courseId,
       status: 'ended',
       end_date: '2026-09-16',
       end_reason: 'No longer needed',
       revision: 2,
     });
     await expect(
-      end.handler(context, {
+      courseTool.handler(context, {
         patient_id: 'profile-1',
-        medicine_id: medicineId,
-        expected_revision: 2,
+        course_id: courseId,
+        expected_revision: 1,
+        status: 'ended',
         end_date: '2026-09-17',
       }),
-    ).rejects.toThrow('no open course');
+    ).rejects.toThrow('current_revision is 2');
 
     const restarted = (await set.handler(context, {
       patient_id: 'profile-1',
@@ -335,7 +432,7 @@ describe('MCP medicine plans', () => {
       regimen: {
         rule: 'fixed_slots',
         effective_from: '2026-10-01',
-        slots: [{ label: '就寝前', anchor: 'bedtime' }],
+        slots: [{ label: '就寝前', anchor: { kind: 'bedtime' } }],
       },
     })) as any;
     expect(restarted.course).toMatchObject({
@@ -344,13 +441,39 @@ describe('MCP medicine plans', () => {
       previous_course_id: ended.course.course_id,
       start_date: '2026-10-01',
     });
+    const activated = (await courseTool.handler(context, {
+      patient_id: 'profile-1',
+      course_id: restarted.course.course_id,
+      expected_revision: 1,
+      status: 'held',
+    })) as any;
+    expect(activated.course).toMatchObject({ status: 'held', start_date: '2026-10-01', revision: 2 });
 
-    const history = (await tool('get_claim_history').handler(context, {
+    const history = tool('get_claim_history');
+    const medicineHistory = (await history.handler(context, {
       patient_id: 'profile-1',
       claim_kind: 'medicine',
       claim_id: medicineId,
     })) as any;
-    expect(history.total).toBe(1);
+    expect(medicineHistory.total).toBe(1);
+    const courseHistory = (await history.handler(context, {
+      patient_id: 'profile-1',
+      claim_kind: 'medicine_course',
+      claim_id: courseId,
+    })) as any;
+    expect(courseHistory.current).toEqual(ended.course);
+    expect(courseHistory.revisions.map((revision: any) => [revision.revision, revision.snapshot.status])).toEqual([
+      [2, 'ended'],
+      [1, 'active'],
+    ]);
+    const regimenHistory = (await history.handler(context, {
+      patient_id: 'profile-1',
+      claim_kind: 'dose_regimen',
+      claim_id: doubled.regimen.regimen_id,
+    })) as any;
+    expect(regimenHistory.current).toEqual(rekeyed.regimen);
+    expect(regimenHistory.revisions.map((revision: any) => revision.revision)).toEqual([4, 3, 2, 1]);
+    expect(regimenHistory.revisions[0].change_source).toEqual({ kind: 'mcp', provider: 'mcp:assistant-client' });
   });
 
   it('gives a medicine that was never planned its first course', async () => {
