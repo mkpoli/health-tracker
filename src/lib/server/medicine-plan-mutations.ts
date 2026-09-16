@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, max } from 'drizzle-orm';
 import {
   addDays,
   isCourseKind,
@@ -10,6 +10,7 @@ import {
   planDoses,
   type DoseOccurrenceRecord,
   type DoseRegimenRecord,
+  type DoseSlot,
   type MedicineCourseRecord,
 } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
@@ -58,6 +59,20 @@ export function normalizeDoseOccurrence(
     ...value,
     status: isDoseStatus(value.status) ? value.status : 'unknown',
   };
+}
+
+/**
+ * Gives every slot its identity: a slot whose key the regimen already holds
+ * keeps it, any other takes the next key past everything the rule has used.
+ */
+function keySlots(slots: DoseSlot[], knownKeys: Set<number>, highestRecorded: number) {
+  let nextKey = Math.max(-1, ...knownKeys, highestRecorded, ...slots.map((slot) => slot.key ?? -1)) + 1;
+  return slots.map((slot) => {
+    if (slot.key !== null && knownKeys.has(slot.key)) return slot;
+    const keyed = { ...slot, key: nextKey };
+    nextKey += 1;
+    return keyed;
+  });
 }
 
 export class RegimenOverlapError extends Error {
@@ -172,6 +187,10 @@ export async function createDoseRegimen(options: {
     for (const existing of open) {
       if (existing.effectiveTo && existing.effectiveTo < input.effectiveFrom) continue;
 
+      // Two rules starting the same day would leave the older one with an
+      // inverted window; the day's rule is corrected in place instead.
+      if (existing.effectiveFrom === input.effectiveFrom) throw new RegimenOverlapError();
+
       if (existing.effectiveFrom > input.effectiveFrom) {
         const cappedTo = addDays(existing.effectiveFrom, -1);
         if (!input.effectiveTo || input.effectiveTo > cappedTo) input.effectiveTo = cappedTo;
@@ -212,6 +231,12 @@ export async function createDoseRegimen(options: {
         patientId: options.patientId,
         courseId: options.courseId,
         ...input,
+        // A new rule has no history: the keys it names are its own.
+        slots: keySlots(
+          input.slots,
+          new Set(input.slots.map((slot) => slot.key).filter((key): key is number => key !== null)),
+          -1,
+        ),
         originKind: options.origin.kind,
         originProvider: options.origin.provider,
         originExternalId: options.origin.externalId ?? null,
@@ -329,10 +354,23 @@ export async function updateDoseRegimen(options: {
       .values(claimRevisionValues('dose_regimen', currentSnapshot, options.source))
       .onConflictDoNothing();
 
+    // A slot key names the dose records taken under it, so a new slot must
+    // never take a key a removed slot once had: new keys start past every key
+    // this regimen has used, in its current slots or in a recorded dose.
+    const currentKeys = new Set(
+      currentSnapshot.slots.map((slot) => slot.key).filter((key): key is number => key !== null),
+    );
+    const recorded = await tx
+      .select({ key: max(doseOccurrence.slotKey) })
+      .from(doseOccurrence)
+      .where(eq(doseOccurrence.regimenId, options.current.id));
+    const slots = keySlots(options.input.slots, currentKeys, recorded[0]?.key ?? -1);
+
     const updated = await tx
       .update(doseRegimen)
       .set({
         ...options.input,
+        slots,
         revision: options.expectedRevision + 1,
         updatedAt: new Date().toISOString(),
       })

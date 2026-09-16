@@ -122,18 +122,21 @@ curl 'https://<host>/mcp' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicines`, `list_energy_entries`, and `get_claim_history`.
+Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
 
 A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
 
 - `create_medicine` creates a medicine together with its first course and dose regimen in one write; a medicine never exists without a rule that says when it is taken. `update_medicine` changes the catalog fields.
+- `set_regimen`, `update_regimen` and `update_course` change the dose plan behind a medicine; `get_medicine_plan` reads it and needs no write scope.
 - `log_energy_entry` and `update_energy_entry` manage food intake and energy expenditure. Exercise can be recorded as `direction: "expenditure"` with optional duration and kilocalories.
 
 The consent screen grants each write scope independently. Connections created before claim writes existed retain their measurement capability and require fresh consent for `health:claims:write`.
 
-`create_medicine` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
+`create_medicine`, `set_regimen` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
 
 `create_medicine` requires `start_date` and a `regimen`: `fixed_slots` with one to twelve slots anchored to a clock time, waking, a meal or bedtime; `interval` with `interval_hours` and `anchor_at`; or `as_needed`. The regimen takes the profile timezone and the course start date unless the call says otherwise. The response carries the medicine, its course and its regimen, and `list_dose_occurrences` plans from them at once.
+
+`get_medicine_plan` reads one medicine's courses and regimens with their ids and revisions; slots come back in the shape the write tools accept, so a read can be edited and sent back. `set_regimen` starts a new rule on the open course from `regimen.effective_from`, closing the previous rule the day before (a rule starting the same day is corrected with `update_regimen` instead), and gives a medicine without a course its first one, or a restart course after an ended one. `update_regimen` corrects one rule in place under `expected_revision`; a slot keeps its key, and a new slot never receives a key the rule has used before, so recorded doses stay attached to the slot they were taken under. `update_course` changes a course's status and dates under its own `expected_revision`: `ended` needs `end_date`, `active` starts a planned or held course. The catalog status changes separately through `update_medicine`. `get_claim_history` reads the saved versions of courses (`medicine_course`) and regimens (`dose_regimen`) as well as medicines and energy entries.
 
 Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the claim again before proposing another change. Every successful create and update appears in `get_claim_history` with its change source.
 
