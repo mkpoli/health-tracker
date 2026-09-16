@@ -319,7 +319,7 @@
   }
 </script>
 
-<div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+<div class="overflow-clip rounded-xl border border-slate-200 bg-white shadow-sm">
   <div class="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
     <div class="flex items-center">
       <div class="mr-3 h-6 w-1.5 rounded-full {accentBar}"></div>
