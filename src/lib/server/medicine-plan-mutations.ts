@@ -24,7 +24,13 @@ import {
   StaleClaimRevisionError,
   type ClaimRevisionSource,
 } from '$lib/server/claim-revisions';
-import type { ClaimOrigin } from '$lib/server/claim-mutations';
+import {
+  createMedicineClaim,
+  inTransaction,
+  type ClaimOrigin,
+  type WriteTx,
+} from '$lib/server/claim-mutations';
+import type { MedicineInput } from '$lib/server/medicines';
 
 export function normalizeMedicineCourse(
   value: typeof medicineCourse.$inferSelect,
@@ -73,11 +79,14 @@ export async function createMedicineCourse(options: {
   medicineClaimId: string;
   input: MedicineCourseInput;
   origin: ClaimOrigin;
+  id?: string;
+  tx?: WriteTx;
 }) {
-  return db.transaction(async (tx) => {
+  return inTransaction(options.tx, async (tx) => {
     const inserted = await tx
       .insert(medicineCourse)
       .values({
+        ...(options.id ? { id: options.id } : {}),
         patientId: options.patientId,
         medicineClaimId: options.medicineClaimId,
         ...options.input,
@@ -145,8 +154,10 @@ export async function createDoseRegimen(options: {
   courseId: string;
   input: DoseRegimenInput;
   origin: ClaimOrigin;
+  id?: string;
+  tx?: WriteTx;
 }) {
-  return db.transaction(async (tx) => {
+  return inTransaction(options.tx, async (tx) => {
     // A new rule closes the open one the day before it takes effect, so at
     // most one regimen plans any given day. A rule already scheduled to start
     // later stays scheduled; the new rule ends the day before it instead.
@@ -197,6 +208,7 @@ export async function createDoseRegimen(options: {
     const inserted = await tx
       .insert(doseRegimen)
       .values({
+        ...(options.id ? { id: options.id } : {}),
         patientId: options.patientId,
         courseId: options.courseId,
         ...input,
@@ -212,6 +224,71 @@ export async function createDoseRegimen(options: {
       .values(claimRevisionValues('dose_regimen', snapshot, options.origin));
 
     return snapshot;
+  });
+}
+
+/**
+ * A medicine enters the catalog with its dose plan: claim, course and regimen
+ * land in one transaction, so no medicine exists without a rule that says
+ * when it is taken. The caller names all three ids, so replaying an
+ * idempotent creation finds exactly the rows the first call stored and
+ * returns them, whatever the plan has become since.
+ */
+export async function createScheduledMedicine(options: {
+  patientId: string;
+  ids: { medicine: string; course: string; regimen: string };
+  medicine: MedicineInput;
+  course: MedicineCourseInput;
+  regimen: DoseRegimenInput;
+  origin: ClaimOrigin;
+}) {
+  return db.transaction(async (tx) => {
+    const { claim, created } = await createMedicineClaim({
+      patientId: options.patientId,
+      input: options.medicine,
+      origin: options.origin,
+      id: options.ids.medicine,
+      idempotent: true,
+      tx,
+    });
+
+    if (created) {
+      const course = await createMedicineCourse({
+        id: options.ids.course,
+        patientId: options.patientId,
+        medicineClaimId: claim.id,
+        input: options.course,
+        origin: options.origin,
+        tx,
+      });
+      const regimen = await createDoseRegimen({
+        id: options.ids.regimen,
+        patientId: options.patientId,
+        courseId: course.id,
+        input: options.regimen,
+        origin: options.origin,
+        tx,
+      });
+      return { created, medicine: claim, course, regimen };
+    }
+
+    const [courseRow] = await tx
+      .select()
+      .from(medicineCourse)
+      .where(and(eq(medicineCourse.id, options.ids.course), eq(medicineCourse.patientId, options.patientId)));
+    const [regimenRow] = await tx
+      .select()
+      .from(doseRegimen)
+      .where(and(eq(doseRegimen.id, options.ids.regimen), eq(doseRegimen.patientId, options.patientId)));
+    if (!courseRow || !regimenRow || courseRow.medicineClaimId !== claim.id) {
+      throw new Error('Claim identifier collision');
+    }
+    return {
+      created,
+      medicine: claim,
+      course: normalizeMedicineCourse(courseRow),
+      regimen: normalizeDoseRegimen(regimenRow),
+    };
   });
 }
 
