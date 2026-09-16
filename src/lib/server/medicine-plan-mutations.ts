@@ -15,10 +15,11 @@ import {
 } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
 import { claimRevision, doseOccurrence, doseRegimen, medicineCourse } from '$lib/server/db/schema';
-import type {
-  DoseActionInput,
-  DoseRegimenInput,
-  MedicineCourseInput,
+import {
+  InvalidMedicinePlanInputError,
+  type DoseActionInput,
+  type DoseRegimenInput,
+  type MedicineCourseInput,
 } from '$lib/server/medicine-plan';
 import {
   claimRevisionValues,
@@ -267,6 +268,18 @@ export async function createScheduledMedicine(options: {
   regimen: DoseRegimenInput;
   origin: ClaimOrigin;
 }) {
+  // The first rule lives inside its course: both windows are checked here,
+  // whichever form or tool built them.
+  if (options.course.endDate && options.course.endDate < options.course.startDate) {
+    throw new InvalidMedicinePlanInputError('invalid_window');
+  }
+  if (
+    options.regimen.effectiveFrom < options.course.startDate ||
+    (options.course.endDate && options.regimen.effectiveFrom > options.course.endDate)
+  ) {
+    throw new InvalidMedicinePlanInputError('invalid_window');
+  }
+
   return db.transaction(async (tx) => {
     const { claim, created } = await createMedicineClaim({
       patientId: options.patientId,

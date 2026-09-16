@@ -1,3 +1,4 @@
+import type { MedicineStatus } from '$lib/medicine';
 import { resolveZonedDateTime, toDateTimeLocal } from '$lib/time-zone';
 
 export const courseKinds = ['initial', 'restart'] as const;
@@ -37,6 +38,21 @@ export function isRegimenRuleKind(value: string): value is RegimenRuleKind {
 
 export function isDoseStatus(value: string): value is DoseStatus {
   return doseStatuses.includes(value as DoseStatus);
+}
+
+/** The course a medicine claim's own status implies when the two are created together. */
+export function courseStatusFor(status: MedicineStatus): CourseStatus {
+  switch (status) {
+    case 'planned':
+      return 'planned';
+    case 'paused':
+      return 'held';
+    case 'completed':
+    case 'stopped':
+      return 'ended';
+    default:
+      return 'active';
+  }
 }
 
 export const doseAnchorKinds = ['clock', 'wake', 'meal', 'bedtime'] as const;

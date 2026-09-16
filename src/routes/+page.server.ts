@@ -42,16 +42,20 @@ import {
   getOwnedWorkoutClaim,
   requireUserId,
 } from '$lib/server/ownership';
+import { courseStatusFor } from '$lib/medicine-plan';
+import { REGIMEN_FORM_PREFIX } from '$lib/regimen-draft';
 import { InvalidMedicineInputError, parseMedicineInput } from '$lib/server/medicines';
 import {
   InvalidMedicinePlanInputError,
   parseDoseActionInput,
   parseDoseRegimenInput,
+  prefixedForm,
   parseMedicineCourseInput,
 } from '$lib/server/medicine-plan';
 import {
   createDoseRegimen,
   createMedicineCourse,
+  createScheduledMedicine,
   RegimenOverlapError,
   normalizeDoseOccurrence,
   normalizeDoseRegimen,
@@ -85,7 +89,6 @@ import {
 } from '$lib/server/claim-revisions';
 import {
   createEnergyClaim,
-  createMedicineClaim,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -370,16 +373,40 @@ export const actions: Actions = {
 
     try {
       const input = parseMedicineInput(data);
-      const { claim: medicine } = await createMedicineClaim({
+      // A medicine enters the catalog with its first course and dose rule, so
+      // it never sits there with nothing to plan from.
+      if (!input.startDate) return fail(400, { code: 'medicine_invalid_date' });
+      if ((input.status === 'completed' || input.status === 'stopped') && !input.endDate) {
+        return fail(400, { code: 'medicine_invalid_date' });
+      }
+      // The first rule spans the course; a later rule can narrow it.
+      const regimenData = prefixedForm(data, REGIMEN_FORM_PREFIX);
+      regimenData.set('effectiveFrom', input.startDate);
+      regimenData.set('effectiveTo', input.endDate ?? '');
+      const { medicine, course, regimen } = await createScheduledMedicine({
         patientId: ownedPatient.id,
-        input,
+        ids: { medicine: crypto.randomUUID(), course: crypto.randomUUID(), regimen: crypto.randomUUID() },
+        medicine: input,
+        course: {
+          kind: 'initial',
+          status: courseStatusFor(input.status),
+          previousCourseId: null,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          endReason: null,
+          notes: null,
+        },
+        regimen: parseDoseRegimenInput(regimenData),
         origin: manualClaimSource,
       });
 
-      return { success: true, medicine };
+      return { success: true, medicine, course, regimen };
     } catch (error) {
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
+      }
+      if (error instanceof InvalidMedicinePlanInputError) {
+        return fail(400, { code: `plan_${error.code}` });
       }
 
       throw error;

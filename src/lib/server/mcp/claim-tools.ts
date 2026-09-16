@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { energyDirections, energyStatuses, type EnergyClaimRecord } from '$lib/energy';
 import { medicineStatuses, type MedicineClaimRecord } from '$lib/medicine';
+import { courseStatusFor } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
@@ -35,6 +36,7 @@ import {
   normalizeDoseRegimen,
   normalizeMedicineCourse,
 } from '$lib/server/medicine-plan-mutations';
+import { InvalidMedicinePlanInputError } from '$lib/server/medicine-plan';
 import {
   getOwnedEnergyClaim,
   getOwnedMedicineClaim,
@@ -48,7 +50,6 @@ import {
 import { capResult } from './budget';
 import { REQUEST_ID_LIMIT, stableClaimId } from './claim-ids';
 import {
-  courseStatusFor,
   parseRegimenArgs,
   regimenSchema,
   serializeCourse,
@@ -494,7 +495,9 @@ const createMedicine: ToolDefinition = {
       effectiveFrom: medicine.startDate,
     });
     const provider = mcpProvider(ctx);
-    const result = await createScheduledMedicine({
+    let result;
+    try {
+      result = await createScheduledMedicine({
       ids: {
         medicine: await stableClaimId(ctx, profile.id, 'medicine', key),
         course: await stableClaimId(ctx, profile.id, 'medicine:course', key),
@@ -513,7 +516,13 @@ const createMedicine: ToolDefinition = {
       },
       regimen,
       origin: { kind: 'mcp', provider, externalId: key },
-    });
+      });
+    } catch (error) {
+      if (error instanceof InvalidMedicinePlanInputError) {
+        throw new ToolError('Invalid regimen: the rule must start inside the course, and end_date must not fall before start_date');
+      }
+      throw error;
+    }
 
     return {
       created: result.created,
