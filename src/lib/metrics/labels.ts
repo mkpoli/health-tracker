@@ -41,6 +41,20 @@ export function getDefinitionDescription(definition: MetricDefinition): string {
   return getMetricMessage(getMetricMessageKey(target, 'description')) || m.custom_metric_description();
 }
 
+/**
+ * Folds text for matching a metric search: case, width and accents are
+ * levelled, and punctuation becomes a single space. Letters of any script
+ * survive, so 血糖 finds Blood Glucose's Japanese alias.
+ */
+export function normalizeSearchText(value: unknown) {
+  if (typeof value !== 'string') return '';
+  return value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
 export function getMetricLabel(label?: string | null) {
   return getDefinitionLabel(getMetricDefinition(label));
 }

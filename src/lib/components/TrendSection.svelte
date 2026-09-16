@@ -11,7 +11,7 @@
     getMetricWikipediaUrl,
     getMetricWikidataUrl,
   } from '$lib/metrics/catalog';
-  import { getCategoryLabel, getMetricDescription, getMetricLabel, getTestTypeLabel } from '$lib/metrics/labels';
+  import { getCategoryLabel, getMetricDescription, getMetricLabel, getTestTypeLabel, normalizeSearchText } from '$lib/metrics/labels';
   import {
     canonicalUnitForm,
     convertValueBetweenUnits,
@@ -28,6 +28,7 @@
   } from '$lib/metrics/trends';
   import { assessEvidence, contextsComparable, therapyRangesForValue, verdictApplies } from '$lib/health/summary';
   import RefRangePicker from './RefRangePicker.svelte';
+  import TrendTimeline from './TrendTimeline.svelte';
 
   // The diachronic view, shared by every dashboard section so lab results,
   // body measurements and vitals all read the same way over time.
@@ -46,6 +47,7 @@
     onJumpToPoint?: (point: TrendPoint) => void;
   } = $props();
 
+  let view = $state<'one' | 'all'>('one');
   let selectedTrendMetric = $state('');
   let trendSearchQuery = $state('');
   let trendComboboxOpen = $state(false);
@@ -128,16 +130,7 @@
     return count === 1 ? m.reading_count_one({ count }) : m.reading_count_other({ count });
   }
 
-  function normalizeMetricMatchKey(value: unknown) {
-    if (typeof value !== 'string') return '';
-
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
+  const normalizeMetricMatchKey = normalizeSearchText;
 
   const selectedTrend = $derived(
     trendMetrics.find(({ metricName }) => metricName === selectedTrendMetric) || trendMetrics[0],
@@ -584,6 +577,17 @@
     }
   });
 
+  let panel = $state<HTMLDivElement | null>(null);
+
+  // The grid can be several screens tall, so once it collapses into one chart
+  // the reader is brought back to where that chart is.
+  async function openMetric(metricName: string) {
+    selectedTrendMetric = metricName;
+    view = 'one';
+    await tick();
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   $effect(() => {
     if (!trendComboboxOpen) return;
 
@@ -619,15 +623,69 @@
 </script>
 
               <div
-                class="border-b border-slate-100 px-4 py-6 sm:px-6 {tone.wash}"
+                bind:this={panel}
+                class="scroll-mt-[calc(4.5rem+var(--safe-top))] border-b border-slate-100 px-4 py-6 sm:px-6 sm:scroll-mt-[calc(5rem+var(--safe-top))] {tone.wash}"
               >
                 {#if trendMetrics.length > 0 && trendChart}
+                  {#snippet viewSwitch()}
+                    <div
+                      class="inline-flex gap-0.5 rounded-lg border border-slate-200 bg-white/70 p-0.5 text-xs shadow-sm"
+                      role="group"
+                      aria-label={m.trend_view()}
+                    >
+                      <button
+                        type="button"
+                        onclick={() => (view = 'one')}
+                        aria-pressed={view === 'one'}
+                        class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                          view === 'one' ? tone.toggleActive : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {m.trend_view_one()}
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => (view = 'all')}
+                        aria-pressed={view === 'all'}
+                        class={`rounded-md px-3 py-1 font-medium transition-colors ${
+                          view === 'all' ? tone.toggleActive : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {m.trend_view_all({ count: trendMetrics.length })}
+                      </button>
+                    </div>
+                  {/snippet}
+
+                  {#if view === 'all'}
+                    <div class="flex flex-col gap-5">
+                      <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p class="text-xs font-semibold uppercase tracking-[0.22em] {tone.eyebrow}">
+                            {m.diachronic_view()}
+                          </p>
+                          <h4 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{m.trend_timeline_title()}</h4>
+                        </div>
+                        {@render viewSwitch()}
+                      </div>
+                      <TrendTimeline
+                        metrics={trendMetrics}
+                        {accent}
+                        {patient}
+                        {formatDate}
+                        rangeOverrides={trendRefRangeOverride}
+                        onOpenMetric={openMetric}
+                      />
+                    </div>
+                  {:else}
                   <div class="flex flex-col gap-6">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div class="max-w-2xl">
-                        <p class="text-xs font-semibold uppercase tracking-[0.22em] {tone.eyebrow}">
-                          {m.diachronic_view()}
-                        </p>
+                        <div class="flex flex-wrap items-center gap-3">
+                          <p class="text-xs font-semibold uppercase tracking-[0.22em] {tone.eyebrow}">
+                            {m.diachronic_view()}
+                          </p>
+                          {@render viewSwitch()}
+                        </div>
                         <div class="mt-2 flex flex-wrap items-end gap-3">
                           <h4 class="text-2xl font-semibold tracking-tight text-slate-900">{selectedTrendLabel}</h4>
                           <span
@@ -1076,6 +1134,7 @@
                       </svg>
                     </div>
                   </div>
+                  {/if}
                 {:else}
                   <div
                     class="rounded-[28px] border border-dashed border-slate-300/90 bg-white/70 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-sm"

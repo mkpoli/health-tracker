@@ -2343,7 +2343,7 @@
         <div class="mt-6" hidden={activeTab !== 'lab'}>
           <div class="space-y-6">
             <div
-              class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col"
+              class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-clip min-h-[500px] flex flex-col"
             >
               <div
                 class="px-6 py-5 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50 lg:flex-row lg:items-center lg:justify-between"
