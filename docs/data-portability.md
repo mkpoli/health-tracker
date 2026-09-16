@@ -126,7 +126,7 @@ Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`,
 
 A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
 
-- `create_medicine` and `update_medicine` manage the current medicine catalog and schedule claims.
+- `create_medicine` and `update_medicine` manage the current medicine catalog claims.
 - `log_energy_entry` and `update_energy_entry` manage food intake and energy expenditure. Exercise can be recorded as `direction: "expenditure"` with optional duration and kilocalories.
 
 The consent screen grants each write scope independently. Connections created before claim writes existed retain their measurement capability and require fresh consent for `health:claims:write`.
@@ -137,7 +137,7 @@ Update calls require `expected_revision` from a previous read. A concurrent edit
 
 Energy timestamps require ISO form with `Z` or a numeric UTC offset. The profile's IANA timezone is used when the call omits `timezone`. Day filters on `list_energy_entries` use each entry's retained local date. Totals include recorded entries with known kilocalories; drafts and excluded entries remain visible according to the selected filters.
 
-Medicine claims describe the catalog, plan, and schedule. Dose-taking events will use a separate event model. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
+Medicine claims describe the catalog; the dose plan lives on courses and regimens, and dose-taking events on occurrences. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
 
 The MCP endpoint and versioned archive are the supported external integration surfaces. Page actions and retained-file routes serve the web application and may change with its implementation.
 

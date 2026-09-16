@@ -10,7 +10,6 @@ export interface MedicineClaimRecord {
   form: string | null;
   strength: string | null;
   route: string | null;
-  schedule: string | null;
   status: MedicineStatus;
   startDate: string | null;
   endDate: string | null;

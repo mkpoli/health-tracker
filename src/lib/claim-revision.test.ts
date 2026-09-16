@@ -15,7 +15,6 @@ const original: MedicineClaimRecord = {
   form: 'tablet',
   strength: '10 mg',
   route: 'oral',
-  schedule: 'Every morning',
   status: 'active',
   startDate: '2026-08-01',
   endDate: null,
@@ -49,13 +48,13 @@ describe('claim revisions', () => {
   it('reports content changes without treating revision metadata as content', () => {
     const next = {
       ...original,
-      schedule: 'Every evening',
+      route: 'sublingual',
       status: 'paused' as const,
       revision: 2,
       updatedAt: '2026-08-02T00:00:00.000Z',
     };
 
-    expect(changedClaimFields(next, original)).toEqual(['schedule', 'status']);
+    expect(changedClaimFields(next, original)).toEqual(['route', 'status']);
   });
 
   it('uses a dedicated error for optimistic concurrency conflicts', () => {
