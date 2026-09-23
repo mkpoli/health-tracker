@@ -22,6 +22,7 @@ import {
   medicineCourse,
 } from '$lib/server/db/schema';
 import {
+  clearDoseOccurrence,
   normalizeDoseOccurrence,
   normalizeDoseRegimen,
   normalizeMedicineCourse,
@@ -39,8 +40,6 @@ import type { ToolDefinition } from './tools';
 const MAX_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_DELIVERIES = 100;
 const MAX_OCCURRENCES = 500;
-
-const recordableStatuses = doseStatuses.filter((status) => status !== 'planned');
 
 function isoInstant(value: unknown, field: string) {
   if (
@@ -221,13 +220,13 @@ const recordDoseAction: ToolDefinition = {
   name: 'record_dose_action',
   title: 'Record a dose action',
   description:
-    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state. Set actual_at to null when the actual time is unknown. Omitting it preserves an existing time; a new record defaults to now. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every change lands in the revision ledger.',
+    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state. Send status planned to take a record back — the slot returns to having no record. Set actual_at to null when the actual time is unknown. Omitting it preserves an existing time; a new record defaults to now. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every recorded state lands in the revision ledger. Taking a record back deletes the record and leaves its ledger entries in place.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       occurrence_id: { type: 'string', maxLength: 200 },
-      status: { type: 'string', enum: recordableStatuses },
+      status: { type: 'string', enum: doseStatuses },
       actual_at: { type: ['string', 'null'] },
       reason: { type: 'string', maxLength: 500 },
       notes: { type: 'string', maxLength: 4000 },
@@ -241,7 +240,7 @@ const recordDoseAction: ToolDefinition = {
   handler: async (ctx, args) => {
     const profile = await requirePatient(ctx, args.patient_id);
     const status = typeof args.status === 'string' && isDoseStatus(args.status) ? args.status : null;
-    if (!status || status === 'planned') throw new ToolError('status is invalid');
+    if (!status) throw new ToolError('status is invalid');
 
     const actualAtProvided = Object.prototype.hasOwnProperty.call(args, 'actual_at');
     const requestedActualAt =
@@ -252,6 +251,20 @@ const recordDoseAction: ToolDefinition = {
     const notes = typeof args.notes === 'string' ? args.notes.trim().slice(0, 4000) || null : null;
     const occurrenceId = typeof args.occurrence_id === 'string' ? args.occurrence_id.trim() : '';
     const origin = { kind: 'mcp', provider: `mcp:${ctx.clientId}` };
+
+    /**
+     * `planned` takes a record back: the slot becomes one nobody has answered
+     * again, so the row goes away and `list_dose_occurrences` plans it anew.
+     * A slot already holding nothing is the state a clear leaves behind, so a
+     * retry answers the same way and writes nothing.
+     */
+    const clearExistingDose = async (
+      row: typeof doseOccurrence.$inferSelect | undefined,
+      responseId: string,
+    ) => {
+      if (row) await clearDoseOccurrence({ current: row, expectedRevision: row.revision });
+      return { occurrence_id: responseId, status: 'planned' as const, record_revision: null };
+    };
 
     // A correction keeps the recorded time and free-text fields unless the
     // call names them; a call that changes nothing answers without writing,
@@ -325,6 +338,10 @@ const recordDoseAction: ToolDefinition = {
             ),
           );
 
+        if (status === 'planned') {
+          return await clearExistingDose(existing[0], occurrenceId);
+        }
+
         if (existing[0]) {
           return await correctExistingDose(existing[0], occurrenceId);
         }
@@ -355,6 +372,9 @@ const recordDoseAction: ToolDefinition = {
         .select()
         .from(doseOccurrence)
         .where(and(eq(doseOccurrence.id, occurrenceId), eq(doseOccurrence.patientId, profile.id)));
+      if (status === 'planned') {
+        return await clearExistingDose(rows[0], rows[0]?.id ?? occurrenceId);
+      }
       if (!rows[0]) throw new ToolError('No such dose record');
 
       return await correctExistingDose(rows[0], rows[0].id);

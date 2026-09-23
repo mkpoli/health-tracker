@@ -345,6 +345,49 @@ describe('MCP dose tools', () => {
     ]);
   });
 
+  it('takes a record back and leaves the slot planned again', async () => {
+    const record = tool('record_dose_action');
+    const list = tool('list_dose_occurrences');
+    const occurrenceId = `${REGIMEN_ID}:2026-08-31:0`;
+    await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken',
+      actual_at: '2026-08-31T03:00:00.000Z',
+    });
+
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
+    })).toMatchObject({ occurrence_id: occurrenceId, status: 'planned', record_revision: null });
+
+    const after = (await list.handler(context, {
+      patient_id: 'profile-1',
+      from: '2026-08-30T15:00:00.000Z',
+      to: '2026-08-31T14:59:59.000Z',
+    })) as { occurrences: { occurrence_id: string; status: string; record_revision: number | null }[] };
+    const slot = after.occurrences.find((entry) => entry.occurrence_id === occurrenceId);
+    expect(slot).toMatchObject({ status: 'planned', record_revision: null });
+
+    // A taken-back slot records again from scratch.
+    const again = (await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'skipped',
+    })) as any;
+    expect(again).toMatchObject({ status: 'skipped', record_revision: 1 });
+  });
+
+  it('takes back a record that is already gone without writing', async () => {
+    const record = tool('record_dose_action');
+    const occurrenceId = `${REGIMEN_ID}:2026-09-01:0`;
+    await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'taken',
+      actual_at: '2026-09-01T03:00:00.000Z',
+    });
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
+    })).toMatchObject({ record_revision: null });
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
+    })).toMatchObject({ record_revision: null });
+  });
+
   it('rejects a receipt for a dose the profile does not have', async () => {
     const deliver = tool('record_dose_deliveries');
     await expect(

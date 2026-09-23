@@ -368,6 +368,161 @@ describe('medicine plan mutations', () => {
     expect(await revisionRows('dose_occurrence', taken.id)).toEqual([1, 2]);
   });
 
+  it('never lets a take-back swallow a newer correction', async () => {
+    const course = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-1',
+      input: {
+        kind: 'initial',
+        status: 'active',
+        previousCourseId: null,
+        startDate: '2026-08-01',
+        endDate: null,
+        endReason: null,
+        notes: null,
+      },
+      origin,
+    });
+    const regimen = await mutations.createDoseRegimen({
+      patientId: 'profile-1',
+      courseId: course.id,
+      input: {
+        ruleKind: 'fixed_slots',
+        slots: [
+          {
+            key: 0,
+            label: '朝食後',
+            anchorKind: 'meal',
+            anchorMeal: 'breakfast',
+            anchorOffsetMinutes: null,
+            time: null,
+            amountValue: 2,
+            amountUnit: '錠',
+          },
+        ],
+        daysOfWeek: null,
+        intervalHours: null,
+        anchorAt: null,
+        doseText: null,
+        route: null,
+        site: null,
+        timezone: 'Asia/Tokyo',
+        effectiveFrom: '2026-08-01',
+        effectiveTo: null,
+        remindMinutesBefore: null,
+        notes: null,
+      },
+      origin,
+    });
+
+    const storedRegimen = await client.execute({
+      sql: 'SELECT * FROM dose_regimen WHERE id = ?',
+      args: [regimen.id],
+    });
+    const regimenRow = {
+      ...(storedRegimen.rows[0] as unknown as Record<string, unknown>),
+      id: regimen.id,
+      patientId: 'profile-1',
+      courseId: course.id,
+      ruleKind: 'fixed_slots',
+      slots: JSON.parse(String(storedRegimen.rows[0].slots)),
+      daysOfWeek: null,
+      intervalHours: null,
+      anchorAt: null,
+      doseText: null,
+      route: null,
+      site: null,
+      timezone: 'Asia/Tokyo',
+      effectiveFrom: '2026-08-01',
+      effectiveTo: null,
+      remindMinutesBefore: null,
+      notes: null,
+      originKind: 'manual',
+      originProvider: 'local',
+      originExternalId: null,
+      revision: 1,
+      createdAt: String(storedRegimen.rows[0].created_at),
+      updatedAt: String(storedRegimen.rows[0].updated_at),
+    };
+    const courseRow = {
+      id: course.id,
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-1',
+      kind: 'initial' as const,
+      status: 'active' as const,
+      previousCourseId: null,
+      startDate: '2026-08-01',
+      endDate: null,
+      endReason: null,
+      notes: null,
+      originKind: 'manual',
+      originProvider: 'local',
+      originExternalId: null,
+      revision: 1,
+      createdAt: course.createdAt,
+      updatedAt: course.updatedAt,
+    };
+
+    const answered = await mutations.recordPlannedDose({
+      course: courseRow,
+      regimen: regimenRow as never,
+      localDate: '2026-09-01',
+      slotKey: 0,
+      input: {
+        status: 'taken',
+        actualAt: '2026-09-01T04:30:00.000Z',
+        actualValue: null,
+        actualUnit: null,
+        actualText: null,
+        route: null,
+        site: null,
+        reason: null,
+        reaction: null,
+        notes: null,
+      },
+      origin,
+    });
+    // The correction lands after the take-back read its answer.
+    const corrected = await mutations.updateDoseOccurrence({
+      current: answered as never,
+      input: {
+        status: 'taken',
+        actualAt: '2026-09-01T05:10:00.000Z',
+        actualValue: null,
+        actualUnit: null,
+        actualText: null,
+        route: null,
+        site: null,
+        reason: null,
+        reaction: null,
+        notes: null,
+      },
+      expectedRevision: 1,
+      source: origin,
+    });
+    expect(corrected).toMatchObject({ revision: 2, actualAt: '2026-09-01T05:10:00.000Z' });
+
+    // A take-back aimed at the older answer must not remove the correction.
+    await expect(
+      mutations.clearDoseOccurrence({ current: answered as never, expectedRevision: 1 }),
+    ).rejects.toBeInstanceOf(revisions.StaleClaimRevisionError);
+    const standing = await client.execute({
+      sql: 'SELECT actual_at FROM dose_occurrence WHERE id = ?',
+      args: [answered.id],
+    });
+    expect(standing.rows).toHaveLength(1);
+    expect(standing.rows[0].actual_at).toBe('2026-09-01T05:10:00.000Z');
+
+    // Read again and the take-back goes through, and repeats the same way.
+    await mutations.clearDoseOccurrence({ current: corrected as never, expectedRevision: 2 });
+    await mutations.clearDoseOccurrence({ current: corrected as never, expectedRevision: 2 });
+    const gone = await client.execute({
+      sql: 'SELECT id FROM dose_occurrence WHERE id = ?',
+      args: [answered.id],
+    });
+    expect(gone.rows).toHaveLength(0);
+  });
+
   it('closes the open regimen when a new rule takes effect', async () => {
     const course = await mutations.createMedicineCourse({
       patientId: 'profile-1',
