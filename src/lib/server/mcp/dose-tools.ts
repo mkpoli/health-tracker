@@ -219,7 +219,7 @@ const recordDoseAction: ToolDefinition = {
   name: 'record_dose_action',
   title: 'Record a dose action',
   description:
-    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state. Send status planned to take a record back — the slot returns to having no record. Set actual_at to null when the actual time is unknown. Omitting it preserves an existing time; a new record defaults to now. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every recorded state lands in the revision ledger; taking a record back removes it.',
+    'Save what happened to one dose slot after the person confirms it: taken, skipped, or another recorded state. Send status planned to take a record back — the slot returns to having no record. Set actual_at to null when the actual time is unknown. Omitting it preserves an existing time; a new record defaults to now. Accepts the composite occurrence_id from list_dose_occurrences or a stored record id. Every recorded state lands in the revision ledger. Taking a record back deletes the record and leaves its ledger entries in place.',
   inputSchema: {
     type: 'object',
     properties: {
