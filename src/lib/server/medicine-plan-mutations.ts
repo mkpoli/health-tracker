@@ -540,3 +540,32 @@ export async function updateDoseOccurrence(options: {
     return snapshot;
   });
 }
+
+/**
+ * Removes the record behind one dose slot, leaving the slot planned again.
+ * The delete is pinned to `expectedRevision` like an update, so a clear aimed
+ * at an older answer cannot swallow a newer correction. A slot already holding
+ * nothing is the state a clear leaves behind, so that reads as success.
+ */
+export async function clearDoseOccurrence(options: {
+  current: typeof doseOccurrence.$inferSelect;
+  expectedRevision: number;
+}) {
+  const deleted = await db
+    .delete(doseOccurrence)
+    .where(
+      and(
+        eq(doseOccurrence.id, options.current.id),
+        eq(doseOccurrence.patientId, options.current.patientId),
+        eq(doseOccurrence.revision, options.expectedRevision),
+      ),
+    )
+    .returning({ id: doseOccurrence.id });
+  if (deleted[0]) return;
+
+  const standing = await db
+    .select({ id: doseOccurrence.id })
+    .from(doseOccurrence)
+    .where(and(eq(doseOccurrence.id, options.current.id), eq(doseOccurrence.patientId, options.current.patientId)));
+  if (standing[0]) throw new StaleClaimRevisionError();
+}

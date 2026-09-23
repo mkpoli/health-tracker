@@ -22,6 +22,7 @@ import {
   medicineCourse,
 } from '$lib/server/db/schema';
 import {
+  clearDoseOccurrence,
   normalizeDoseOccurrence,
   normalizeDoseRegimen,
   normalizeMedicineCourse,
@@ -251,20 +252,18 @@ const recordDoseAction: ToolDefinition = {
     const occurrenceId = typeof args.occurrence_id === 'string' ? args.occurrence_id.trim() : '';
     const origin = { kind: 'mcp', provider: `mcp:${ctx.clientId}` };
 
-    // `planned` takes a record back: the slot becomes one nobody has answered
-    // again, so the row goes away and `list_dose_occurrences` plans it anew.
-    // A slot already holding nothing is the state a clear leaves behind, so a
-    // retry answers the same way and writes nothing.
+    /**
+     * `planned` takes a record back: the slot becomes one nobody has answered
+     * again, so the row goes away and `list_dose_occurrences` plans it anew.
+     * A slot already holding nothing is the state a clear leaves behind, so a
+     * retry answers the same way and writes nothing.
+     */
     const clearExistingDose = async (
       row: typeof doseOccurrence.$inferSelect | undefined,
       responseId: string,
     ) => {
-      if (row) {
-        await db
-          .delete(doseOccurrence)
-          .where(and(eq(doseOccurrence.id, row.id), eq(doseOccurrence.patientId, profile.id)));
-      }
-      return { occurrence_id: responseId, status: 'planned' as const, record_revision: 0 };
+      if (row) await clearDoseOccurrence({ current: row, expectedRevision: row.revision });
+      return { occurrence_id: responseId, status: 'planned' as const, record_revision: null };
     };
 
     // A correction keeps the recorded time and free-text fields unless the

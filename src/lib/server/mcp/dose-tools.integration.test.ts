@@ -356,7 +356,7 @@ describe('MCP dose tools', () => {
 
     expect(await record.handler(context, {
       patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
-    })).toMatchObject({ occurrence_id: occurrenceId, status: 'planned', record_revision: 0 });
+    })).toMatchObject({ occurrence_id: occurrenceId, status: 'planned', record_revision: null });
 
     const after = (await list.handler(context, {
       patient_id: 'profile-1',
@@ -382,10 +382,10 @@ describe('MCP dose tools', () => {
     });
     expect(await record.handler(context, {
       patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
-    })).toMatchObject({ record_revision: 0 });
+    })).toMatchObject({ record_revision: null });
     expect(await record.handler(context, {
       patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
-    })).toMatchObject({ record_revision: 0 });
+    })).toMatchObject({ record_revision: null });
   });
 
   it('rejects a receipt for a dose the profile does not have', async () => {
