@@ -53,7 +53,10 @@ Laboratory results continue through the uploaded report review flow.
 For dose actions, `record_dose_action` accepts `actual_at: null` when a dose was
 taken at an unknown time. This also clears a previously recorded timestamp.
 Omitting the field preserves an existing record's time, including an unknown
-time; a new record without the field uses the current time.
+time; a new record without the field uses the current time. Sending
+`status: "planned"` takes a record back: the slot returns to having no record,
+so a mistaken answer stops counting toward adherence and the slot can be
+recorded afresh.
 
 Uploaded documents, calorie photos, and the R2 bucket holding them stay outside
 the MCP grant. Energy tools report how many source files are retained.
