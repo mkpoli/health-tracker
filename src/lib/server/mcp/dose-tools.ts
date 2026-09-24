@@ -312,19 +312,6 @@ const recordDoseAction: ToolDefinition = {
       if (composite) {
         const [, regimenId, localDate, slotKeyRaw] = composite;
         const slotKey = Number(slotKeyRaw);
-        const regimenRows = await db
-          .select()
-          .from(doseRegimen)
-          .where(and(eq(doseRegimen.id, regimenId), eq(doseRegimen.patientId, profile.id)));
-        const regimen = regimenRows[0];
-        if (!regimen) throw new ToolError('No such dose slot');
-
-        const courseRows = await db
-          .select()
-          .from(medicineCourse)
-          .where(and(eq(medicineCourse.id, regimen.courseId), eq(medicineCourse.patientId, profile.id)));
-        const course = courseRows[0];
-        if (!course) throw new ToolError('No such dose slot');
 
         const existing = await db
           .select()
@@ -338,9 +325,25 @@ const recordDoseAction: ToolDefinition = {
             ),
           );
 
+        // A take-back needs no regimen to stand on: a slot that has since left
+        // the plan is already the state a clear leaves behind.
         if (status === 'planned') {
           return await clearExistingDose(existing[0], occurrenceId);
         }
+
+        const regimenRows = await db
+          .select()
+          .from(doseRegimen)
+          .where(and(eq(doseRegimen.id, regimenId), eq(doseRegimen.patientId, profile.id)));
+        const regimen = regimenRows[0];
+        if (!regimen) throw new ToolError('No such dose slot');
+
+        const courseRows = await db
+          .select()
+          .from(medicineCourse)
+          .where(and(eq(medicineCourse.id, regimen.courseId), eq(medicineCourse.patientId, profile.id)));
+        const course = courseRows[0];
+        if (!course) throw new ToolError('No such dose slot');
 
         if (existing[0]) {
           return await correctExistingDose(existing[0], occurrenceId);

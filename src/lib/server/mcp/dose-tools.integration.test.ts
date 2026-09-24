@@ -388,6 +388,15 @@ describe('MCP dose tools', () => {
     })).toMatchObject({ record_revision: null });
   });
 
+  it('takes back a slot whose regimen is already gone without complaining', async () => {
+    const record = tool('record_dose_action');
+    // A regimen that never existed: the slot has left the plan entirely.
+    const occurrenceId = 'ffffffff-0000-0000-0000-000000000000:2026-09-02:0';
+    expect(await record.handler(context, {
+      patient_id: 'profile-1', occurrence_id: occurrenceId, status: 'planned',
+    })).toMatchObject({ occurrence_id: occurrenceId, status: 'planned', record_revision: null });
+  });
+
   it('rejects a receipt for a dose the profile does not have', async () => {
     const deliver = tool('record_dose_deliveries');
     await expect(
