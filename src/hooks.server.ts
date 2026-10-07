@@ -101,6 +101,7 @@ export const handle: Handle = sequence(handleFormOrigin, handleFraming, handleAu
 // SvelteKit's default logger never prints. Walk the cause chain so the actual
 // SQLite/libsql error reaches the logs.
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
+  const errorId = crypto.randomUUID();
   const causes: string[] = [];
   let current: unknown = error instanceof Error ? error.cause : undefined;
   while (current && causes.length < 8) {
@@ -109,11 +110,12 @@ export const handleError: HandleServerError = ({ error, event, status, message }
   }
 
   console.error('[handleError]', event.request.method, event.url.pathname, {
+    errorId,
     status,
     message: error instanceof Error ? error.message : String(error),
     causes,
     stack: error instanceof Error ? error.stack : undefined,
   });
 
-  return { message };
+  return { message, errorId };
 };

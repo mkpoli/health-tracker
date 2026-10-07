@@ -21,7 +21,7 @@ declare global {
 
 		interface PageData { user?: AuthUser; session?: AuthSession | null }
 
-        // interface Error {}
+        interface Error { errorId?: string }
         // interface PageData {}
         // interface PageState {}
     }
