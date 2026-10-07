@@ -1163,5 +1163,9 @@
   "import_no_changes": "All measurements are already imported. Nothing to change.",
   "import_check_again": "Check again",
   "import_checking_existing": "Checking existing measurements…",
-  "import_comparison_failed": "Couldn’t check existing measurements. Check again before importing."
+  "import_comparison_failed": "Couldn’t check existing measurements. Check again before importing.",
+  "modal_discard_confirm": "Discard your unsaved changes?",
+  "modal_save_failed": "Could not save. Your changes are still here. Please try again.",
+  "record_discard_manual_confirm": "Starting document review will discard the unsaved manual record. Continue?",
+  "modal_refresh_failed": "Done, but the page could not refresh. Please reload."
 }

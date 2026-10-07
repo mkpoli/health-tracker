@@ -1163,5 +1163,9 @@
   "import_no_changes": "所有测量值均已导入，无需更改。",
   "import_check_again": "重新核对",
   "import_checking_existing": "正在核对已有测量值…",
-  "import_comparison_failed": "无法核对已有测量值。请重新核对后再导入。"
+  "import_comparison_failed": "无法核对已有测量值。请重新核对后再导入。",
+  "modal_discard_confirm": "要放弃未保存的内容吗？",
+  "modal_save_failed": "保存失败，已保留填写的内容。请重试。",
+  "record_discard_manual_confirm": "开始审核文档将放弃尚未保存的手动记录。要继续吗？",
+  "modal_refresh_failed": "操作已完成，但页面未能刷新。请重新加载页面。"
 }

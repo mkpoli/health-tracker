@@ -1721,7 +1721,10 @@
         onExtractFileSelect={(file, list) => setHomepageExtractFile(file, list)}
         onExtractPaste={handleHomepageExtractPaste}
         onExtractSubmit={startHomepageExtractSubmit}
-        onClose={() => (showAddRecordModal = false)}
+        onClose={() => {
+          setHomepageExtractFile(null);
+          showAddRecordModal = false;
+        }}
       />
     {/if}
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { applyAction, enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import { onMount } from 'svelte';
@@ -285,37 +286,38 @@
     };
   };
 
-  const submitDose: SubmitFunction = () => {
+  const submitDose: SubmitFunction = ({ cancel }) => {
+    if (saving) { cancel(); return; }
     saving = true;
     saveError = '';
 
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        await update({ reset: true, invalidateAll: true });
-        saving = false;
-        editorOpen = false;
-        editing = null;
-        return;
-      }
+      try {
+        if (result.type === 'success') {
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+          editorOpen = false;
+          editing = null;
+          return;
+        }
 
-      if (result.type === 'failure' && result.status === 409) {
-        await invalidateAll();
-        saveError = m.claim_revision_stale();
-      } else if (result.type === 'failure' || result.type === 'error') {
+        if (result.type === 'failure' && result.status === 409) {
+          await invalidateAll();
+          saveError = m.claim_revision_stale();
+        } else if (result.type === 'failure' || result.type === 'error') {
+          saveError = m.dose_save_failed();
+        } else {
+          await applyAction(result);
+        }
+      } catch {
         saveError = m.dose_save_failed();
-      } else {
-        await applyAction(result);
+      } finally {
+        saving = false;
       }
-      saving = false;
     };
   };
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && editorOpen) closeEditor();
-  }
+  const editorModal = createModalController({ onClose: closeEditor, busy: () => saving, draft: () => ({ editorStatus, editorActualAt, editorReason, editorReaction, editorNotes }) });
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 {#snippet doseRow(entry: DoseChecklistEntry)}
   {@const identity = identityOf(entry)}
@@ -440,13 +442,10 @@
   <div
     class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6"
     role="presentation"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) closeEditor();
-    }}
   >
     <div
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
-      role="dialog"
+      use:editorModal.attach role="dialog"
       aria-modal="true"
       aria-labelledby="dose-editor-title"
     >
@@ -459,7 +458,7 @@
         </div>
         <button
           type="button"
-          onclick={closeEditor}
+          onclick={editorModal.requestClose}
           disabled={saving}
           class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700 disabled:opacity-40"
           aria-label={m.close()}
@@ -549,7 +548,7 @@
         <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur" style="padding-bottom: calc(1rem + var(--safe-bottom))">
           <button
             type="button"
-            onclick={closeEditor}
+            onclick={editorModal.requestClose}
             disabled={saving}
             class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
           >

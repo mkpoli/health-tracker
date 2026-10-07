@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
@@ -53,12 +54,15 @@
   let hasExported = $state(!hasExportableData);
   let confirmName = $state('');
   let exporting = $state(false);
+  let deleting = $state(false);
+  const modal = createModalController({ onClose: () => onClose(), busy: () => exporting || deleting, trackChanges: false, allowBackdrop: true });
   let exportError = $state('');
   let skipArchive = $state(false);
   let deleteError = $state('');
   const deletionUnlocked = $derived(hasExported || skipArchive);
 
   async function exportPatientData() {
+    if (exporting || deleting) return;
     exporting = true;
     exportError = '';
 
@@ -91,7 +95,7 @@
 </script>
 
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
-  <div class="bg-white rounded-xl shadow-2xl border border-rose-200 max-w-lg w-full overflow-hidden">
+  <div use:modal.attach role="dialog" aria-modal="true" aria-label={m.danger_zone()} class="bg-white rounded-xl shadow-2xl border border-rose-200 max-w-lg w-full overflow-hidden">
     <div class="px-6 py-4 border-b border-rose-100 bg-rose-50 flex justify-between items-center">
       <h3 class="text-lg font-bold text-rose-800 flex items-center gap-2">
         <svg
@@ -111,7 +115,8 @@
       </h3>
       <button
         type="button"
-        onclick={onClose}
+        onclick={modal.requestClose}
+          disabled={exporting || deleting}
         class="text-slate-400 hover:text-slate-600 transition-colors"
         aria-label={m.cancel()}
       >
@@ -157,7 +162,7 @@
             <button
               type="button"
               onclick={exportPatientData}
-              disabled={exporting}
+              disabled={exporting || deleting}
               class="w-full inline-flex justify-center items-center gap-2 bg-white border border-slate-300 shadow-sm px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <svg
@@ -209,14 +214,22 @@
       <form
         method="POST"
         action="?/deletePatient"
-        use:enhance={() => {
+        use:enhance={({ cancel }) => {
+          if (exporting || deleting) { cancel(); return; }
+          deleting = true;
           deleteError = '';
           return async ({ result, update }) => {
-            await update();
-            if (result.type === 'success') {
-              onClose();
-            } else {
+            try {
+              if (result.type === 'success') {
+                await refreshAfterSave(() => update());
+                onClose();
+              } else {
+                deleteError = m.delete_profile_failed();
+              }
+            } catch {
               deleteError = m.delete_profile_failed();
+            } finally {
+              deleting = false;
             }
           };
         }}
@@ -225,14 +238,15 @@
         <input type="hidden" name="patientId" value={patient.id} />
         <button
           type="button"
-          onclick={onClose}
+          onclick={modal.requestClose}
+          disabled={exporting || deleting}
           class="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 font-bold text-sm rounded-xl shadow-sm hover:bg-slate-50 transition-colors"
           >{m.cancel()}</button
         >
 
         <button
           type="submit"
-          disabled={!deletionUnlocked || confirmName !== patient.name}
+          disabled={exporting || deleting || !deletionUnlocked || confirmName !== patient.name}
           class="px-5 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-xl shadow-sm hover:bg-rose-700 transition-colors disabled:bg-rose-300 disabled:cursor-not-allowed border border-transparent"
         >
           {m.permanently_delete_data()}

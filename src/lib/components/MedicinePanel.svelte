@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
@@ -277,29 +278,34 @@
     captureReview = false;
   }
 
-  const submitMedicine: SubmitFunction = () => {
+  const submitMedicine: SubmitFunction = ({ cancel }) => {
+    if (saving) { cancel(); return; }
     saving = true;
     saveError = '';
 
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        await update({ reset: true, invalidateAll: true });
-        saving = false;
-        editorOpen = false;
-        captureReview = false;
-        draft = emptyDraft();
-        return;
-      }
+      try {
+        if (result.type === 'success') {
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+          editorOpen = false;
+          captureReview = false;
+          draft = emptyDraft();
+          return;
+        }
 
-      if (result.type === 'failure' && result.status === 409) {
-        await invalidateAll();
-        saveError = m.claim_revision_stale();
-      } else if (result.type === 'failure' && String(result.data?.code ?? '').startsWith('plan_')) {
-        saveError = m.plan_save_failed();
-      } else {
+        if (result.type === 'failure' && result.status === 409) {
+          await invalidateAll();
+          saveError = m.claim_revision_stale();
+        } else if (result.type === 'failure' && String(result.data?.code ?? '').startsWith('plan_')) {
+          saveError = m.plan_save_failed();
+        } else {
+          saveError = m.medicine_save_failed();
+        }
+      } catch {
         saveError = m.medicine_save_failed();
+      } finally {
+        saving = false;
       }
-      saving = false;
     };
   };
 
@@ -410,12 +416,9 @@
     });
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && editorOpen) closeEditor();
-  }
+  const editorModal = createModalController({ onClose: closeEditor, busy: () => saving, draft: () => ({ draft, regimenDraft }), dirty: () => captureReview });
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
 
 <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
   <header class="flex flex-col gap-4 border-b border-slate-100 bg-slate-50/60 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -643,13 +646,10 @@
   <div
     class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6"
     role="presentation"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) closeEditor();
-    }}
   >
     <div
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
-      role="dialog"
+      use:editorModal.attach role="dialog"
       aria-modal="true"
       aria-labelledby="medicine-editor-title"
     >
@@ -662,7 +662,7 @@
         </div>
         <button
           type="button"
-          onclick={closeEditor}
+          onclick={editorModal.requestClose}
           disabled={saving}
           class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700 disabled:opacity-40"
           aria-label={m.close()}
@@ -864,7 +864,7 @@
         <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-6" style="padding-bottom: calc(1rem + var(--safe-bottom))">
           <button
             type="button"
-            onclick={closeEditor}
+            onclick={editorModal.requestClose}
             disabled={saving}
             class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
           >
