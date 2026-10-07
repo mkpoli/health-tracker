@@ -1142,5 +1142,17 @@
   "window_all_time": "All",
   "window_five_years": "5 yr",
   "window_one_year": "1 yr",
-  "window_three_months": "3 mo"
+  "window_three_months": "3 mo",
+  "error_server_title": "We couldn’t load this page",
+  "error_server_description": "Please try again in a moment. If the problem continues, note the page address, time, and error reference so we can investigate.",
+  "error_not_found_title": "Page not found",
+  "error_not_found_description": "This address doesn’t match a page in Health Tracker. Check the link or return to the home page.",
+  "error_access_title": "You can’t access this page",
+  "error_access_description": "Your account may not have access to this page. Return home to check which account you’re signed in with.",
+  "error_request_title": "We couldn’t open this page",
+  "error_request_description": "The request couldn’t be completed. Return home and try opening the page again.",
+  "error_reopen": "Reopen page",
+  "error_home": "Go to home page",
+  "error_save_notice": "If this happened while saving, check your records before submitting again.",
+  "error_reference": "Error reference"
 }

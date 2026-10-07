@@ -1142,5 +1142,17 @@
   "window_all_time": "全期間",
   "window_five_years": "5年",
   "window_one_year": "1年",
-  "window_three_months": "3か月"
+  "window_three_months": "3か月",
+  "error_server_title": "ページを読み込めませんでした",
+  "error_server_description": "少し待ってから再度お試しください。問題が続く場合は、調査のためページのアドレス、発生時刻、エラーIDをお知らせください。",
+  "error_not_found_title": "ページが見つかりません",
+  "error_not_found_description": "このアドレスのページはありません。リンクを確認するか、ホームに戻ってください。",
+  "error_access_title": "このページにアクセスできません",
+  "error_access_description": "このアカウントには閲覧権限がない可能性があります。ホームに戻り、ログイン中のアカウントを確認してください。",
+  "error_request_title": "ページを開けませんでした",
+  "error_request_description": "リクエストを処理できませんでした。ホームに戻り、もう一度ページを開いてください。",
+  "error_reopen": "ページを開き直す",
+  "error_home": "ホームに戻る",
+  "error_save_notice": "保存中にこの画面が表示された場合は、再送信する前に記録を確認してください。",
+  "error_reference": "エラーID"
 }

@@ -1142,5 +1142,17 @@
   "window_all_time": "全部",
   "window_five_years": "5年",
   "window_one_year": "1年",
-  "window_three_months": "3个月"
+  "window_three_months": "3个月",
+  "error_server_title": "页面加载失败",
+  "error_server_description": "请稍后重试。如果问题仍然存在，请提供页面地址、发生时间和错误编号，以便排查。",
+  "error_not_found_title": "找不到页面",
+  "error_not_found_description": "此地址没有对应的页面。请检查链接或返回首页。",
+  "error_access_title": "无法访问此页面",
+  "error_access_description": "当前账号可能没有访问权限。请返回首页，确认登录的账号。",
+  "error_request_title": "无法打开页面",
+  "error_request_description": "未能完成请求。请返回首页后重新打开页面。",
+  "error_reopen": "重新打开页面",
+  "error_home": "返回首页",
+  "error_save_notice": "如果保存时出现此页面，请先检查记录，再决定是否重新提交。",
+  "error_reference": "错误编号"
 }
