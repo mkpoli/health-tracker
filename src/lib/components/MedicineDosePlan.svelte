@@ -63,6 +63,7 @@
   }
 
   function openCourseCreate() {
+    if (saving) return;
     courseDraft = {
       ...emptyCourseDraft(),
       kind: sortedCourses.length > 0 ? 'restart' : 'initial',
@@ -75,6 +76,7 @@
   }
 
   function openCourseEdit(course: MedicineCourseRecord) {
+    if (saving) return;
     courseDraft = {
       id: course.id,
       revision: course.revision,
@@ -91,6 +93,7 @@
   }
 
   function openRegimenCreate(course: MedicineCourseRecord) {
+    if (saving) return;
     regimenDraft = {
       ...emptyRegimenDraft(patientTimeZone),
       courseId: course.id,
@@ -101,6 +104,7 @@
   }
 
   function openRegimenEdit(regimen: DoseRegimenRecord) {
+    if (saving) return;
     regimenDraft = regimenDraftOf(regimen);
     saveError = '';
     regimenEditorOpen = true;
@@ -196,6 +200,7 @@
     <button
       type="button"
       onclick={openCourseCreate}
+      disabled={saving}
       class="text-xs font-semibold text-blue-700 transition-colors hover:text-blue-800"
     >
       {sortedCourses.length > 0 ? m.course_add_restart() : m.course_start()}
@@ -220,6 +225,7 @@
               <button
                 type="button"
                 onclick={() => openRegimenCreate(course)}
+                disabled={saving}
                 class="text-xs font-semibold text-blue-700 hover:text-blue-800"
               >
                 {m.regimen_change()}
@@ -227,6 +233,7 @@
               <button
                 type="button"
                 onclick={() => openCourseEdit(course)}
+                disabled={saving}
                 class="text-xs font-semibold text-slate-500 hover:text-slate-700"
               >
                 {m.edit()}
@@ -257,6 +264,7 @@
               <button
                 type="button"
                 onclick={() => openRegimenEdit(regimen)}
+                disabled={saving}
                 class="text-xs font-semibold text-blue-700 hover:text-blue-800"
               >
                 {m.edit()}
