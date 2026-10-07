@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { deserialize } from '$app/forms';
   import { planMeasurementImport, type ImportCounts, type ImportReport, type ImportRecord } from '$lib/import/measurement-plan';
   import type { ImportResult } from '$lib/server/measurement-import';
@@ -194,6 +195,7 @@
   }
 
   async function readFile(file: File) {
+    if (removing || stage === 'importing') return;
     fileName = file.name;
     sourceFile = file;
     errorMessage = '';
@@ -289,7 +291,7 @@
         progress = sessionsSent / all.length;
       }
 
-      await invalidateAll();
+      await refreshAfterSave(invalidateAll);
       stage = 'done';
     } catch {
       // Earlier batches may have committed; refresh before showing the retry counts.
@@ -469,7 +471,7 @@
         mediaMissing += linkedMedia.length - completedMedia.size;
       }
 
-      await invalidateAll();
+      await refreshAfterSave(invalidateAll);
       progress = 1;
       stage = 'done';
     } catch (error) {
@@ -483,44 +485,53 @@
   // Imported sessions carry the source tag used by undo. Hand-entered sessions
   // have separate provenance.
   async function removeImported() {
-    if (!confirm(m.import_undo_confirm())) return;
-
+    if (removing || !confirm(m.import_undo_confirm())) return;
     removing = true;
-
-    const body = new FormData();
-    body.set('patientId', patientId);
-    body.set('source', 'apple-health');
-
-    const response = await fetch('?/removeImportedMeasurements', { method: 'POST', body });
-    const payload = (await response.json()) as { type?: string };
-
-    removing = false;
-
-    if (payload.type === 'success') {
-      await invalidateAll();
-      onClose();
-    } else {
+    try {
+      const body = new FormData();
+      body.set('patientId', patientId);
+      body.set('source', 'apple-health');
+      const response = await fetch('?/removeImportedMeasurements', { method: 'POST', body });
+      const payload = (await response.json()) as { type?: string };
+      if (payload.type === 'success') {
+        await refreshAfterSave(invalidateAll);
+        onClose();
+      } else {
+        errorMessage = m.import_failed();
+      }
+    } catch {
       errorMessage = m.import_failed();
+    } finally {
+      removing = false;
     }
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && stage !== 'importing') onClose();
-  }
-</script>
+  const modal = createModalController({
+    onClose: () => onClose(),
+    busy: () => stage === 'importing' || removing,
+    dirty: () => stage === 'reading' || stage === 'review',
+    trackChanges: false,
+  });
 
-<svelte:window onkeydown={handleKeydown} />
+  function chooseAnotherFile() {
+    if (!modal.confirmDiscard()) return;
+    stage = 'choose';
+    sourceFile = null;
+    summary = null;
+    healthArchive = null;
+    importKind = null;
+    errorMessage = '';
+  }
+
+</script>
 
 <div
   class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm sm:items-start sm:p-8"
   role="presentation"
-  onclick={(event) => {
-    if (event.target === event.currentTarget && stage !== 'importing') onClose();
-  }}
 >
   <div
     class="sheet-enter app-scroll flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:my-auto sm:max-h-none sm:rounded-2xl"
-    role="dialog"
+    use:modal.attach role="dialog"
     aria-modal="true"
     aria-label={m.import_data()}
   >
@@ -532,7 +543,8 @@
       {#if stage !== 'importing'}
         <button
           type="button"
-          onclick={onClose}
+          onclick={modal.requestClose}
+          disabled={removing}
           class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
           aria-label={m.close()}
         >
@@ -783,7 +795,7 @@
       {#if stage === 'review'}
         <button
           type="button"
-          onclick={() => (stage = 'choose')}
+          onclick={chooseAnotherFile}
           class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           {m.cancel()}
@@ -801,7 +813,8 @@
       {:else if stage === 'done'}
         <button
           type="button"
-          onclick={onClose}
+          onclick={modal.requestClose}
+          disabled={removing}
           class="rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-700"
         >
           {m.close()}
@@ -809,7 +822,8 @@
       {:else if stage === 'choose'}
         <button
           type="button"
-          onclick={onClose}
+          onclick={modal.requestClose}
+          disabled={removing}
           class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           {m.cancel()}

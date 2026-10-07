@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
+  import { onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { getMetricLabel } from '$lib/metrics/labels';
@@ -45,23 +47,41 @@
 
   let manualTimeZone = $state(initialTimeZone());
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') onClose();
+  let manualForm: HTMLFormElement;
+  let manualBaseline = '';
+  let extractText = $state('');
+  function manualState() {
+    return manualForm ? JSON.stringify(Array.from(new FormData(manualForm).entries())) : '';
   }
-</script>
+  onMount(() => { void tick().then(() => { manualBaseline = manualState(); }); });
+  const manualDirty = () => manualState() !== manualBaseline;
 
-<svelte:window onkeydown={handleKeydown} />
+  function submitExtraction(event: SubmitEvent) {
+    if (busy || (manualDirty() && !confirm(m.record_discard_manual_confirm()))) {
+      event.preventDefault();
+      return;
+    }
+    onExtractSubmit(event);
+  }
+
+  let manualSaving = $state(false);
+  let saveError = $state('');
+  const busy = $derived(manualSaving || homepageExtractSubmitting);
+  const modal = createModalController({
+    onClose: () => onClose(),
+    busy: () => busy,
+    dirty: () => manualDirty() || Boolean(homepageExtractFile) || Boolean(extractText),
+    trackChanges: false,
+  });
+</script>
 
 <div
   class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm sm:items-start sm:p-8"
   role="presentation"
-  onclick={(event) => {
-    if (event.target === event.currentTarget) onClose();
-  }}
 >
   <div
     class="sheet-enter app-scroll flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:my-auto sm:max-h-none sm:rounded-2xl"
-    role="dialog"
+    use:modal.attach role="dialog"
     aria-modal="true"
     aria-label={m.add_clinical_record()}
   >
@@ -70,7 +90,8 @@
         <h2 class="text-xl font-semibold tracking-tight text-slate-900">{m.add_clinical_record()}</h2>
         <button
           type="button"
-          onclick={onClose}
+          onclick={modal.requestClose}
+          disabled={busy}
           class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
           aria-label={m.close()}
         >
@@ -85,6 +106,7 @@
                       ? 'bg-white text-slate-800 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'}"
                     onclick={() => (smartUploadActive = false)}
+                    disabled={busy}
                   >
                     {m.manual()}
                   </button>
@@ -93,6 +115,7 @@
                       ? 'bg-white text-slate-800 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'}"
                     onclick={() => (smartUploadActive = true)}
+                    disabled={busy}
                   >
                     {m.test_result()}
                   </button>
@@ -100,8 +123,28 @@
     </header>
 
     <div class="app-scroll flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-                {#if !smartUploadActive}
-                  <form method="POST" action="?/addManualRecord" use:enhance class="space-y-5">
+                <div hidden={smartUploadActive}>
+                  <form bind:this={manualForm} method="POST" action="?/addManualRecord" use:enhance={({ cancel }) => {
+                    if (busy) { cancel(); return; }
+                    manualSaving = true;
+                    saveError = '';
+                    return async ({ result, update }) => {
+                      try {
+                        if (result.type === 'success') {
+                          await refreshAfterSave(() => update());
+                          await tick();
+                          manualBaseline = manualState();
+                          if (!homepageExtractFile && !extractText) onClose();
+                        } else {
+                          saveError = m.modal_save_failed();
+                        }
+                      } catch {
+                        saveError = m.modal_save_failed();
+                      } finally {
+                        manualSaving = false;
+                      }
+                    };
+                  }} class="space-y-5">
                     <input type="hidden" name="patientId" value={patientId} />
                     <div>
                       <label for="manual-facility" class="block text-sm font-semibold text-slate-700 mb-1.5"
@@ -187,6 +230,7 @@
                     <div class="pt-2">
                       <button
                         type="submit"
+                        disabled={busy}
                         class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
                       >
                         <svg
@@ -201,14 +245,16 @@
                         {m.save_record()}
                       </button>
                     </div>
+                    {#if saveError}<p role="alert" class="text-sm text-rose-700">{saveError}</p>{/if}
                   </form>
-                {:else}
+                </div>
+                <div hidden={!smartUploadActive}>
                   <form
                     method="POST"
                     action={`/extract?/extract&patientId=${patientId}`}
                     enctype="multipart/form-data"
                     class="space-y-5"
-                    onsubmit={onExtractSubmit}
+                    onsubmit={submitExtraction}
                   >
                     <div>
                       <span class="block text-sm font-semibold text-slate-700 mb-1.5">{m.upload_document()}</span>
@@ -229,6 +275,7 @@
                       >
                       <textarea
                         id="homepage-extract-text"
+                        bind:value={extractText}
                         name="text"
                         rows="3"
                         placeholder={m.paste_lab_results()}
@@ -239,7 +286,7 @@
                     <div class="pt-2">
                       <button
                         type="submit"
-                        disabled={homepageExtractSubmitting}
+                        disabled={busy}
                         class="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all active:scale-[0.98]"
                       >
                         {#if homepageExtractSubmitting}
@@ -255,7 +302,7 @@
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                             ></path></svg
                           >
-                          Preparing review...
+                          {m.preparing_review()}
                         {:else}
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -276,11 +323,11 @@
                     </div>
                     {#if homepageExtractSubmitting}
                       <div class="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-                        Uploading the document and extracting metrics. This can take a little while for larger files.
+                        {m.extract_uploading_status()}
                       </div>
                     {/if}
                   </form>
-                {/if}
+                </div>
     </div>
   </div>
 </div>

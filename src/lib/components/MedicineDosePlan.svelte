@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
@@ -105,9 +106,6 @@
     regimenEditorOpen = true;
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && (courseEditorOpen || regimenEditorOpen)) closeEditors();
-  }
 
   function closeEditors() {
     if (saving) return;
@@ -116,26 +114,31 @@
     saveError = '';
   }
 
-  const submitPlan: SubmitFunction = () => {
+  const submitPlan: SubmitFunction = ({ cancel }) => {
+    if (saving) { cancel(); return; }
     saving = true;
     saveError = '';
 
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        await update({ reset: true, invalidateAll: true });
-        saving = false;
-        courseEditorOpen = false;
-        regimenEditorOpen = false;
-        return;
-      }
+      try {
+        if (result.type === 'success') {
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+          courseEditorOpen = false;
+          regimenEditorOpen = false;
+          return;
+        }
 
-      if (result.type === 'failure' && result.status === 409) {
-        await invalidateAll();
-        saveError = m.claim_revision_stale();
-      } else {
+        if (result.type === 'failure' && result.status === 409) {
+          await invalidateAll();
+          saveError = m.claim_revision_stale();
+        } else {
+          saveError = m.plan_save_failed();
+        }
+      } catch {
         saveError = m.plan_save_failed();
+      } finally {
+        saving = false;
       }
-      saving = false;
     };
   };
 
@@ -181,9 +184,9 @@
       unrecorded: counts.unrecorded,
     });
   }
+  const courseModal = createModalController({ onClose: closeEditors, busy: () => saving, draft: () => courseDraft });
+  const regimenModal = createModalController({ onClose: closeEditors, busy: () => saving, draft: () => regimenDraft });
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
   <div class="flex items-center justify-between gap-2">
@@ -297,13 +300,10 @@
   <div
     class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6"
     role="presentation"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) closeEditors();
-    }}
   >
     <div
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
-      role="dialog"
+      use:courseModal.attach role="dialog"
       aria-modal="true"
       aria-labelledby="course-editor-title"
     >
@@ -311,7 +311,7 @@
         <h2 id="course-editor-title" class="text-lg font-semibold tracking-tight text-slate-900">
           {courseDraft.id ? m.course_edit() : m.course_start()}
         </h2>
-        <button type="button" onclick={closeEditors} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-40" aria-label={m.close()}>
+        <button type="button" onclick={courseModal.requestClose} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-40" aria-label={m.close()}>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -387,7 +387,7 @@
         </div>
 
         <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur" style="padding-bottom: calc(1rem + var(--safe-bottom))">
-          <button type="button" onclick={closeEditors} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
+          <button type="button" onclick={courseModal.requestClose} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
           <button type="submit" disabled={saving} class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400">
             {saving ? m.saving() : m.save()}
           </button>
@@ -401,13 +401,10 @@
   <div
     class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6"
     role="presentation"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) closeEditors();
-    }}
   >
     <div
       class="sheet-enter app-scroll flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-2xl"
-      role="dialog"
+      use:regimenModal.attach role="dialog"
       aria-modal="true"
       aria-labelledby="regimen-editor-title"
     >
@@ -418,7 +415,7 @@
           </h2>
           <p class="mt-1 text-sm text-slate-500">{m.regimen_editor_hint()}</p>
         </div>
-        <button type="button" onclick={closeEditors} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-40" aria-label={m.close()}>
+        <button type="button" onclick={regimenModal.requestClose} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-40" aria-label={m.close()}>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -445,7 +442,7 @@
         </div>
 
         <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur" style="padding-bottom: calc(1rem + var(--safe-bottom))">
-          <button type="button" onclick={closeEditors} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
+          <button type="button" onclick={regimenModal.requestClose} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
           <button type="submit" disabled={saving} class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-400">
             {saving ? m.saving() : m.save()}
           </button>

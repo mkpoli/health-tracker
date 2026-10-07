@@ -1163,5 +1163,9 @@
   "import_no_changes": "すべて取り込み済みです。変更はありません。",
   "import_check_again": "再照合",
   "import_checking_existing": "取り込み済みの測定値を確認しています…",
-  "import_comparison_failed": "取り込み済みの測定値を確認できませんでした。取り込む前に再照合してください。"
+  "import_comparison_failed": "取り込み済みの測定値を確認できませんでした。取り込む前に再照合してください。",
+  "modal_discard_confirm": "保存していない内容を破棄しますか？",
+  "modal_save_failed": "保存できませんでした。入力内容は残っています。もう一度お試しください。",
+  "record_discard_manual_confirm": "書類の確認に進むと、手入力した未保存の記録が破棄されます。続けますか？",
+  "modal_refresh_failed": "処理は完了しましたが、画面を更新できませんでした。ページを再読み込みしてください。"
 }

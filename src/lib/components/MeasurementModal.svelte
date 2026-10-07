@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
@@ -332,25 +333,11 @@
     customRows = customRows.filter((row) => row.id !== id);
   }
 
-  // A click on the backdrop, Escape, or Cancel must not throw away a form that
-  // may hold dozens of hand-measured values. Only an untouched dialog closes
-  // without asking.
-  const currentState = $derived(JSON.stringify({ payload, notes: sessionNotes, date: sessionDate }));
-  let baselineState = $state('');
-  const dirty = $derived(baselineState !== '' && currentState !== baselineState);
-
-  $effect(() => {
-    if (!baselineState) baselineState = untrack(() => currentState);
+  const modal = createModalController({
+    onClose: () => onClose(),
+    busy: () => submitting,
+    draft: () => ({ values, units, customRows, notes: sessionNotes, date: sessionDate }),
   });
-
-  function requestClose() {
-    if (dirty && !confirm(m.discard_measurements_confirm())) return;
-    onClose();
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') requestClose();
-  }
 
   // Opening a 70-field dialog without moving focus leaves the keyboard behind
   // in the page underneath.
@@ -359,18 +346,13 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
 <div
   class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm sm:items-start sm:p-8"
   role="presentation"
-  onclick={(event) => {
-    if (event.target === event.currentTarget) requestClose();
-  }}
 >
   <div
     class="sheet-enter app-scroll flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 sm:my-auto sm:max-h-none sm:rounded-2xl"
-    role="dialog"
+    use:modal.attach role="dialog"
     aria-modal="true"
     aria-label={sessionId ? m.edit_measurement_session() : m.new_measurement_session()}
     use:focusOnOpen
@@ -378,19 +360,25 @@
     <form
       method="POST"
       action="?/saveMeasurement"
-      use:enhance={() => {
+      use:enhance={({ cancel }) => {
+        if (submitting) { cancel(); return; }
         submitting = true;
         saveError = '';
 
         return async ({ result, update }) => {
-          submitting = false;
-
           if (result.type === 'success') {
-            await update({ invalidateAll: true, reset: false });
-            onClose();
+            try {
+              await refreshAfterSave(() => update({ invalidateAll: true, reset: false }));
+              onClose();
+            } catch {
+              saveError = m.save_measurements_failed();
+            } finally {
+              submitting = false;
+            }
             return;
           }
 
+          submitting = false;
           // Keep the draft on screen rather than discarding what was typed.
           const code = result.type === 'failure' ? (result.data?.code as string | undefined) : undefined;
           saveError =
@@ -418,7 +406,8 @@
           </div>
           <button
             type="button"
-            onclick={requestClose}
+            onclick={modal.requestClose}
+            disabled={submitting}
             class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
             aria-label={m.close()}
           >
@@ -689,7 +678,8 @@
         <div class="flex items-center gap-3">
           <button
             type="button"
-            onclick={requestClose}
+            onclick={modal.requestClose}
+            disabled={submitting}
             class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
           >
             {m.cancel()}

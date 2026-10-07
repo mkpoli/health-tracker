@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController } from '$lib/modal';
   import * as m from '$lib/paraglide/messages.js';
   import BodyModel3D from './BodyModel3D.svelte';
   import type { MeasurementGuide } from '$lib/content/measurement-guides';
@@ -25,38 +26,25 @@
     rotateHint: m.guide_rotate_hint(),
   };
 
-  let dialogEl: HTMLDivElement;
-
   $effect(() => {
-    dialogEl.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose?.();
-    };
-    window.addEventListener('keydown', onKey);
 
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
     return () => {
-      window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
     };
   });
 
-  function onBackdropClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) onClose?.();
-  }
+  const modal = createModalController({ onClose: () => onClose?.(), trackChanges: false, allowBackdrop: true });
 </script>
 
 <div
   class="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/45 sm:items-center sm:p-6"
   role="presentation"
-  onclick={onBackdropClick}
 >
   <div
-    bind:this={dialogEl}
-    role="dialog"
+    use:modal.attach role="dialog"
     aria-modal="true"
     aria-labelledby="measurement-guide-title"
     tabindex="-1"
@@ -76,7 +64,7 @@
       <button
         type="button"
         aria-label={labels.close}
-        onclick={() => onClose?.()}
+        onclick={modal.requestClose}
         class="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
       >
         <svg

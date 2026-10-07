@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
@@ -351,39 +352,45 @@
     if (file) await previewHevyFile(file);
   }
 
-  const submitHevyImport: SubmitFunction = () => {
+  const submitHevyImport: SubmitFunction = ({ cancel }) => {
+    if (importSaving) { cancel(); return; }
     importSaving = true;
     importError = '';
     importComplete = null;
 
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        const payload = result.data as {
-          hevyImport?: {
-            repeated?: boolean;
-            summary?: { result?: Partial<{
-              created: number;
-              updated: number;
-              unchanged: number;
-              conflicts: number;
-            }> };
+      try {
+        if (result.type === 'success') {
+          const payload = result.data as {
+            hevyImport?: {
+              repeated?: boolean;
+              summary?: { result?: Partial<{
+                created: number;
+                updated: number;
+                unchanged: number;
+                conflicts: number;
+              }> };
+            };
           };
-        };
-        const counts = payload.hevyImport?.summary?.result;
-        importComplete = {
-          created: counts?.created || 0,
-          updated: counts?.updated || 0,
-          unchanged: counts?.unchanged || 0,
-          conflicts: counts?.conflicts || 0,
-          repeated: Boolean(payload.hevyImport?.repeated),
-        };
-        await update({ reset: false, invalidateAll: true });
-      } else {
-        importError = result.type === 'failure' && result.status === 503
-          ? m.workouts_hevy_storage_unavailable()
-          : m.workouts_hevy_import_failed();
+          const counts = payload.hevyImport?.summary?.result;
+          importComplete = {
+            created: counts?.created || 0,
+            updated: counts?.updated || 0,
+            unchanged: counts?.unchanged || 0,
+            conflicts: counts?.conflicts || 0,
+            repeated: Boolean(payload.hevyImport?.repeated),
+          };
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+        } else {
+          importError = result.type === 'failure' && result.status === 503
+            ? m.workouts_hevy_storage_unavailable()
+            : m.workouts_hevy_import_failed();
+        }
+      } catch {
+        importError = m.workouts_hevy_import_failed();
+      } finally {
+        importSaving = false;
       }
-      importSaving = false;
     };
   };
 
@@ -482,7 +489,8 @@
     }));
   }
 
-  const submitWorkout: SubmitFunction = ({ formData }) => {
+  const submitWorkout: SubmitFunction = ({ formData, cancel }) => {
+    if (saving) { cancel(); return; }
     syncOffsets();
     formData.set('timezoneOffsetMinutes', draft.timezoneOffsetMinutes);
     formData.set('endedTimezoneOffsetMinutes', draft.endedTimezoneOffsetMinutes);
@@ -491,20 +499,24 @@
     saveError = '';
 
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        await update({ reset: true, invalidateAll: true });
-        saving = false;
-        editorOpen = false;
-        return;
-      }
+      try {
+        if (result.type === 'success') {
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+          editorOpen = false;
+          return;
+        }
 
-      if (result.type === 'failure' && result.status === 409) {
-        await invalidateAll();
-        saveError = m.claim_revision_stale();
-      } else {
+        if (result.type === 'failure' && result.status === 409) {
+          await invalidateAll();
+          saveError = m.claim_revision_stale();
+        } else {
+          saveError = m.workouts_save_failed();
+        }
+      } catch {
         saveError = m.workouts_save_failed();
+      } finally {
+        saving = false;
       }
-      saving = false;
     };
   };
 
@@ -622,13 +634,10 @@
     });
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && editorOpen) closeEditor();
-    if (event.key === 'Escape' && importerOpen) closeImporter();
-  }
+  const editorModal = createModalController({ onClose: closeEditor, busy: () => saving, draft: () => draft });
+  const importModal = createModalController({ onClose: closeImporter, busy: () => importSaving, dirty: () => Boolean(importFile) && !importComplete, trackChanges: false });
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
 
 <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
   <header class="border-b border-slate-100 bg-slate-50/60 px-5 py-5 sm:px-6">
@@ -811,13 +820,13 @@
 
 {#if importerOpen}
   <div class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation">
-    <div class="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="hevy-import-title">
+    <div class="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" use:importModal.attach role="dialog" aria-modal="true" aria-labelledby="hevy-import-title">
       <header class="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
         <div>
           <h3 id="hevy-import-title" class="text-lg font-semibold text-slate-900">{m.workouts_hevy_import_title()}</h3>
           <p class="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{m.workouts_hevy_import_hint()}</p>
         </div>
-        <button type="button" onclick={closeImporter} aria-label={m.cancel()} class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+        <button type="button" onclick={importModal.requestClose} disabled={importSaving} aria-label={m.cancel()} class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
       </header>
@@ -926,7 +935,7 @@
         </div>
 
         <footer class="flex justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
-          <button type="button" onclick={closeImporter} disabled={importSaving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          <button type="button" onclick={importModal.requestClose} disabled={importSaving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             {importComplete ? m.workouts_hevy_done() : m.cancel()}
           </button>
           {#if !importComplete}
@@ -942,7 +951,7 @@
 
 {#if editorOpen}
   <div class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation">
-    <div class="flex max-h-[96vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="workout-editor-title">
+    <div class="flex max-h-[96vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" use:editorModal.attach role="dialog" aria-modal="true" aria-labelledby="workout-editor-title">
       <header class="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
         <div>
           <h3 id="workout-editor-title" class="text-lg font-semibold text-slate-900">
@@ -952,7 +961,7 @@
           </h3>
           <p class="mt-0.5 text-xs text-slate-500">{m.workouts_editor_hint()}</p>
         </div>
-        <button type="button" onclick={closeEditor} aria-label={m.cancel()} class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+        <button type="button" onclick={editorModal.requestClose} disabled={saving} aria-label={m.cancel()} class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
       </header>
@@ -1098,7 +1107,7 @@
         </div>
 
         <footer class="flex justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
-          <button type="button" onclick={closeEditor} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
+          <button type="button" onclick={editorModal.requestClose} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
           <button type="submit" disabled={saving} class="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50">
             {draft.kind === 'plan'
               ? draft.id ? m.workouts_update_plan() : m.workouts_save_plan()
