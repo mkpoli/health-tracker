@@ -679,9 +679,9 @@
   "import_days": "日数",
   "import_daily_note": "1日1件に集約し、その日の最後の測定値を採用します。",
   "import_unmapped": "このアプリが扱わないデータ種別",
-  "import_confirm": "{count}日分を取り込む",
+  "import_confirm": "{count}件の測定値を取り込む",
   "import_saving": "プロフィールに保存中…",
-  "import_done": "{sessions}日分・{values}件の測定値を取り込みました。",
+  "import_done": "{added}件を追加、{updated}件を更新し、変更のない{skipped}件をスキップしました。",
   "import_failed": "取り込みを完了できませんでした。",
   "import_nothing_found": "このアプリが扱う測定値はファイル内に見つかりませんでした。",
   "import_json_unsupported": "これはこのアプリの書き出しファイルのようです。Apple ヘルスケアのzipまたはexport.xmlを選んでください。",
@@ -1154,5 +1154,14 @@
   "error_reopen": "ページを開き直す",
   "error_home": "ホームに戻る",
   "error_save_notice": "保存中にこの画面が表示された場合は、再送信する前に記録を確認してください。",
-  "error_reference": "エラーID"
+  "error_reference": "エラーID",
+  "import_comparison_title": "このプロフィールとの照合結果",
+  "import_new_values": "新しく追加",
+  "import_updated_values": "既存の測定値を更新",
+  "import_duplicate_values": "取り込み済み・スキップ",
+  "import_duplicate_note": "Appleヘルスケアからの取り込み履歴を日付と測定項目で照合します。同じ測定値はスキップし、値や時刻が変わったものは既存の記録を更新します。取り込み時に再度照合します。",
+  "import_no_changes": "すべて取り込み済みです。変更はありません。",
+  "import_check_again": "再照合",
+  "import_checking_existing": "取り込み済みの測定値を確認しています…",
+  "import_comparison_failed": "取り込み済みの測定値を確認できませんでした。取り込む前に再照合してください。"
 }

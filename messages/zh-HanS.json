@@ -679,9 +679,9 @@
   "import_days": "天数",
   "import_daily_note": "每项测量每天保留一条，取当天最后一次读数。",
   "import_unmapped": "本应用不记录的数据类型",
-  "import_confirm": "导入{count}天",
+  "import_confirm": "导入{count}项测量值",
   "import_saving": "正在保存到档案…",
-  "import_done": "已导入{sessions}天、{values}项数值。",
+  "import_done": "新增{added}项，更新{updated}项，跳过{skipped}项未变的测量值。",
   "import_failed": "导入未能完成。",
   "import_nothing_found": "文件中没有找到本应用记录的测量值。",
   "import_json_unsupported": "这似乎是本应用自身的导出文件。请选择Apple健康的zip或export.xml。",
@@ -1154,5 +1154,14 @@
   "error_reopen": "重新打开页面",
   "error_home": "返回首页",
   "error_save_notice": "如果保存时出现此页面，请先检查记录，再决定是否重新提交。",
-  "error_reference": "错误编号"
+  "error_reference": "错误编号",
+  "import_comparison_title": "与此档案中的记录对比",
+  "import_new_values": "新增测量值",
+  "import_updated_values": "更新已有测量值",
+  "import_duplicate_values": "已导入·跳过",
+  "import_duplicate_note": "按日期和测量类型匹配Apple健康导入记录。相同读数会跳过，数值或时间有变化的记录会更新。导入时会再次核对。",
+  "import_no_changes": "所有测量值均已导入，无需更改。",
+  "import_check_again": "重新核对",
+  "import_checking_existing": "正在核对已有测量值…",
+  "import_comparison_failed": "无法核对已有测量值。请重新核对后再导入。"
 }

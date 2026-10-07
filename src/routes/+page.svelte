@@ -1728,6 +1728,8 @@
     {#if showImportModal && data.currentPatient}
       <ImportModal
         patientId={data.currentPatient.id}
+        reports={data.reports}
+        records={data.records}
         initialFile={importInitialFile}
         onClose={closeImportModal}
       />
