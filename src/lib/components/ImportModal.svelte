@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { deserialize } from '$app/forms';
+  import { planMeasurementImport, type ImportCounts, type ImportReport, type ImportRecord } from '$lib/import/measurement-plan';
+  import type { ImportResult } from '$lib/server/measurement-import';
   import { invalidateAll } from '$app/navigation';
   import * as m from '$lib/paraglide/messages.js';
   import { readAppleHealthFile, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
@@ -16,10 +19,14 @@
 
   let {
     patientId,
+    reports,
+    records,
     initialFile = null,
     onClose,
   }: {
     patientId: string;
+    reports: ImportReport[];
+    records: ImportRecord[];
     initialFile?: File | null;
     onClose: () => void;
   } = $props();
@@ -39,6 +46,14 @@
   let mediaRestored = $state(0);
   let mediaMissing = $state(0);
   let restoreProfile = $state(false);
+  let checkingPreview = $state(false);
+  let previewReady = $state(false);
+  let importCounts = $state<ImportCounts>({ newValues: 0, updatedValues: 0, duplicateValues: 0 });
+  const measurementPreview = $derived(planMeasurementImport({
+    source: 'apple-health', sessions: summary?.sessions ?? [], reports, records,
+  }).counts);
+  const changedValues = $derived(measurementPreview.newValues + measurementPreview.updatedValues);
+  const measurementDays = $derived(new Set(summary?.sessions.map((session) => session.sourceKey.split(':').at(-1))).size);
 
   // Chunked actions cap Worker request size for long histories.
   const BATCH_SIZE = 250;
@@ -162,6 +177,22 @@
     return new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
   }
 
+  async function refreshPreview() {
+    checkingPreview = true;
+    previewReady = false;
+    errorMessage = '';
+    try {
+      await invalidateAll();
+      previewReady = true;
+      return true;
+    } catch {
+      errorMessage = m.import_comparison_failed();
+      return false;
+    } finally {
+      checkingPreview = false;
+    }
+  }
+
   async function readFile(file: File) {
     fileName = file.name;
     sourceFile = file;
@@ -171,6 +202,7 @@
     healthArchive = null;
     importKind = null;
     restoreProfile = false;
+    previewReady = false;
     stage = 'reading';
 
     try {
@@ -208,6 +240,7 @@
         return;
       }
       stage = 'review';
+      if (importKind === 'apple-health') await refreshPreview();
     } catch (error) {
       errorMessage = error instanceof HealthArchiveError ? m.import_archive_invalid() : error instanceof Error ? error.message : m.import_failed();
       stage = 'choose';
@@ -226,10 +259,11 @@
       await runArchiveImport();
       return;
     }
-    if (!summary) return;
+    if (!summary || !previewReady || changedValues === 0) return;
 
     stage = 'importing';
     importedCount = 0;
+    importCounts = { newValues: 0, updatedValues: 0, duplicateValues: 0 };
     sessionsSent = 0;
     errorMessage = '';
 
@@ -244,24 +278,23 @@
         body.set('sessions', JSON.stringify(batch));
 
         const response = await fetch('?/importMeasurements', { method: 'POST', body });
-        const payload = (await response.json()) as { type?: string };
-
-        if (payload.type !== 'success') {
-          errorMessage = m.import_failed();
-          stage = 'review';
-          return;
-        }
+        const payload = deserialize<ImportResult, { error?: string }>(await response.text());
+        if (payload.type !== 'success' || !payload.data) throw new Error(m.import_failed());
 
         sessionsSent += batch.length;
-        importedCount += batch.reduce((total, session) => total + session.entries.length, 0);
+        importedCount += payload.data.writtenValues;
+        importCounts.newValues += payload.data.newValues;
+        importCounts.updatedValues += payload.data.updatedValues;
+        importCounts.duplicateValues += payload.data.duplicateValues;
         progress = sessionsSent / all.length;
       }
 
       await invalidateAll();
       stage = 'done';
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : m.import_failed();
+    } catch {
+      // Earlier batches may have committed; refresh before showing the retry counts.
       stage = 'review';
+      if (await refreshPreview()) errorMessage = m.import_failed();
     }
   }
 
@@ -549,11 +582,11 @@
           <div class="grid gap-3 sm:grid-cols-3">
           <div class="rounded-xl border border-slate-200 bg-white p-3">
             <p class="text-xs font-medium text-slate-500">{m.import_sessions()}</p>
-            <p class="mt-1 text-2xl font-semibold text-slate-900">{summary.sessions.length}</p>
+            <p class="mt-1 text-2xl font-semibold text-slate-900">{measurementDays}</p>
           </div>
           <div class="rounded-xl border border-slate-200 bg-white p-3">
             <p class="text-xs font-medium text-slate-500">{m.import_values()}</p>
-            <p class="mt-1 text-2xl font-semibold text-slate-900">{summary.mapped}</p>
+            <p class="mt-1 text-2xl font-semibold text-slate-900">{changedValues + measurementPreview.duplicateValues}</p>
           </div>
           <div class="rounded-xl border border-slate-200 bg-white p-3">
             <p class="text-xs font-medium text-slate-500">{m.import_range()}</p>
@@ -562,6 +595,26 @@
             </p>
           </div>
           </div>
+
+          <section class="mt-4 rounded-xl border border-teal-200 bg-teal-50/50 p-4" aria-label={m.import_comparison_title()}>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold text-slate-800">{m.import_comparison_title()}</h3>
+              <button type="button" onclick={() => void refreshPreview()} disabled={checkingPreview} class="min-h-11 rounded px-2 text-xs font-semibold text-teal-800 underline underline-offset-2 disabled:opacity-50">{m.import_check_again()}</button>
+            </div>
+            {#if checkingPreview}
+              <p class="mt-3 text-sm text-slate-600" role="status">{m.import_checking_existing()}</p>
+            {:else if previewReady}
+              <dl class="mt-3 grid grid-cols-3 gap-3">
+                <div><dt class="min-h-8 text-xs text-slate-600">{m.import_new_values()}</dt><dd class="mt-1 text-xl font-semibold text-teal-800">{measurementPreview.newValues}</dd></div>
+                <div><dt class="min-h-8 text-xs text-slate-600">{m.import_updated_values()}</dt><dd class="mt-1 text-xl font-semibold text-slate-800">{measurementPreview.updatedValues}</dd></div>
+                <div><dt class="min-h-8 text-xs text-slate-600">{m.import_duplicate_values()}</dt><dd class="mt-1 text-xl font-semibold text-slate-800">{measurementPreview.duplicateValues}</dd></div>
+              </dl>
+              <p class="mt-3 text-xs leading-relaxed text-slate-600">{m.import_duplicate_note()}</p>
+              {#if changedValues === 0}
+                <p class="mt-2 text-sm font-semibold text-teal-800">{m.import_no_changes()}</p>
+              {/if}
+            {/if}
+          </section>
 
           <div class="mt-4 max-h-56 overflow-y-auto rounded-xl border border-slate-200">
           <table class="min-w-full divide-y divide-slate-200">
@@ -710,7 +763,7 @@
             {/if}
           {:else}
             <p class="text-sm font-semibold text-slate-800">
-              {m.import_done({ sessions: sessionsSent, values: importedCount })}
+              {m.import_done({ added: importCounts.newValues, updated: importCounts.updatedValues, skipped: importCounts.duplicateValues })}
             </p>
             <button
               type="button"
@@ -738,12 +791,12 @@
         <button
           type="button"
           onclick={runImport}
-          disabled={importKind === 'health-archive' && archiveSelectedCount === 0}
+          disabled={importKind === 'health-archive' ? archiveSelectedCount === 0 : !previewReady || changedValues === 0}
           class="rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {importKind === 'health-archive'
             ? m.import_archive_confirm({ count: archiveSelectedCount })
-            : m.import_confirm({ count: summary?.sessions.length ?? 0 })}
+            : m.import_confirm({ count: changedValues })}
         </button>
       {:else if stage === 'done'}
         <button

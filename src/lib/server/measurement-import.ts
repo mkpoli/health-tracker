@@ -1,22 +1,24 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { record, report } from '$lib/server/db/schema';
-import { getMetricDefinitionByKey } from '$lib/metrics/catalog';
-import { normalizeComparableMeasurement, parseNumber } from '$lib/metrics/normalization';
-import { isMeasurementKind, type ReportKind } from '$lib/report-kind';
+import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
+import type { ReportKind } from '$lib/report-kind';
+
+import {
+  importMetadata as parseJsonLike,
+  planMeasurementImport,
+  type ImportedSession,
+  type ImportCounts,
+  type ResolvedImportEntry,
+} from '$lib/import/measurement-plan';
 
 // Bulk path for imported data. Unlike the interactive save, this writes many
 // sessions at once and has to survive being run twice on the same export, so
 // each session carries the source's own identity and is matched on it.
 
-export type ImportedSession = {
-  kind: ReportKind;
-  measuredAt: string;
-  sourceKey: string;
-  entries: Array<{ key?: string; label?: string; value: string | number; unit?: string | null }>;
-};
+export type { ImportedSession } from '$lib/import/measurement-plan';
 
-export type ImportResult = {
+export type ImportResult = ImportCounts & {
   createdSessions: number;
   updatedSessions: number;
   writtenValues: number;
@@ -25,32 +27,8 @@ export type ImportResult = {
 
 const MAX_SESSIONS = 5000;
 
-function resolveEntries(entries: ImportedSession['entries']) {
-  const resolved = new Map<string, { metricKey: string | null; metricName: string; value: string; unit: string | null }>();
-
-  for (const entry of entries.slice(0, 200)) {
-    if (!entry || typeof entry !== 'object') continue;
-
-    const numeric = parseNumber(typeof entry.value === 'number' ? entry.value : String(entry.value ?? ''));
-    if (numeric === null || numeric < 0) continue;
-
-    const definition = typeof entry.key === 'string' ? getMetricDefinitionByKey(entry.key) : null;
-    const label = definition?.canonicalLabel || (typeof entry.label === 'string' ? entry.label.trim() : '');
-    if (!label) continue;
-
-    resolved.set(label, {
-      metricKey: definition?.key || null,
-      metricName: label,
-      value: String(numeric),
-      unit: (typeof entry.unit === 'string' ? entry.unit.trim() : '') || definition?.unit || null,
-    });
-  }
-
-  return Array.from(resolved.values());
-}
-
 function buildExtraData(
-  entry: { metricKey: string | null; metricName: string; value: string; unit: string | null },
+  entry: ResolvedImportEntry,
   source: string,
 ) {
   const comparable = normalizeComparableMeasurement(entry.value, entry.unit, null);
@@ -66,143 +44,54 @@ function buildExtraData(
   });
 }
 
-function parseJsonLike(value: unknown) {
-  if (!value) return {} as Record<string, unknown>;
-  if (typeof value === 'object') return value as Record<string, unknown>;
-
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value) as Record<string, unknown>;
-    } catch {
-      return {} as Record<string, unknown>;
-    }
-  }
-
-  return {} as Record<string, unknown>;
-}
-
 export async function importMeasurementSessions(input: {
   patientId: string;
   source: string;
   sessions: ImportedSession[];
 }): Promise<ImportResult> {
   const sessions = input.sessions.slice(0, MAX_SESSIONS);
-
+  const existingReports = await db.select().from(report).where(eq(report.patientId, input.patientId));
+  const sourceKeys = new Set(sessions.filter(Boolean).map((session) => `${input.source}:${session.sourceKey}`));
+  const reusedReportIds = existingReports
+    .filter((item) => sourceKeys.has(String(parseJsonLike(item.extraData).importSourceKey)))
+    .map((item) => item.id);
+  const existingRecords: typeof record.$inferSelect[] = [];
+  for (const chunk of chunked(reusedReportIds, 200)) {
+    existingRecords.push(...await db.select().from(record).where(and(
+      eq(record.patientId, input.patientId), inArray(record.reportId, chunk),
+    )));
+  }
+  const plan = planMeasurementImport({ source: input.source, sessions, reports: existingReports, records: existingRecords });
   const result: ImportResult = {
+    ...plan.counts,
     createdSessions: 0,
     updatedSessions: 0,
-    writtenValues: 0,
-    skippedSessions: 0,
+    writtenValues: plan.counts.newValues + plan.counts.updatedValues,
+    skippedSessions: plan.skippedSessions,
   };
-
-  // Existing imported sessions for this patient, so running the same export
-  // twice updates in place instead of duplicating every day.
-  const existingReports = await db.select().from(report).where(eq(report.patientId, input.patientId));
-  const bySourceKey = new Map<string, string>();
-
-  for (const existing of existingReports) {
-    const extra = parseJsonLike(existing.extraData);
-    if (typeof extra.importSourceKey === 'string') bySourceKey.set(extra.importSourceKey, existing.id);
-  }
-
-  // Everything is planned in memory first, then sent as a handful of batched
-  // statements. Writing a row at a time inside a transaction per session meant
-  // roughly a thousand network round trips to a remote database for one import,
-  // which took minutes rather than seconds.
-  type PlannedReport = { id: string; kind: ReportKind; testDate: string; sourceKey: string };
-  type PlannedRecord = {
-    id: string;
-    reportId: string;
-    metricName: string;
-    value: string;
-    unit: string | null;
-    extraData: string;
-  };
-
-  const reportsToInsert: PlannedReport[] = [];
-  const recordsToInsert: PlannedRecord[] = [];
+  const reportsToInsert: Array<{ id: string; kind: ReportKind; testDate: string; sourceKey: string }> = [];
+  const recordsToInsert: Array<{ id: string; reportId: string; metricName: string; value: string; unit: string | null; extraData: string }> = [];
   const reportsToTouch: Array<{ id: string; testDate: string }> = [];
   const recordsToUpdate: Array<{ id: string; value: string; unit: string | null; extraData: string }> = [];
 
-  const reusedReportIds: string[] = [];
-  const plannedBySession: Array<{ reportId: string; entries: ReturnType<typeof resolveEntries>; reused: boolean }> = [];
-
-  for (const session of sessions) {
-    if (!isMeasurementKind(session.kind)) {
-      result.skippedSessions += 1;
-      continue;
-    }
-
-    const measuredAt = new Date(session.measuredAt);
-    if (Number.isNaN(measuredAt.getTime())) {
-      result.skippedSessions += 1;
-      continue;
-    }
-
-    const entries = resolveEntries(session.entries);
-    if (entries.length === 0) {
-      result.skippedSessions += 1;
-      continue;
-    }
-
-    const sourceKey = `${input.source}:${session.sourceKey}`;
-    const existingId = bySourceKey.get(sourceKey);
-
-    if (existingId) {
-      reportsToTouch.push({ id: existingId, testDate: measuredAt.toISOString() });
-      reusedReportIds.push(existingId);
-      plannedBySession.push({ reportId: existingId, entries, reused: true });
+  for (const session of plan.sessions) {
+    const changedEntries = session.entries.filter((entry) => entry.action !== 'skip');
+    if (changedEntries.length === 0) continue;
+    const id = session.existingId ?? crypto.randomUUID();
+    if (session.existingId) {
+      reportsToTouch.push({ id, testDate: session.measuredAt });
       result.updatedSessions += 1;
     } else {
-      const id = crypto.randomUUID();
-      reportsToInsert.push({
-        id,
-        kind: session.kind,
-        testDate: measuredAt.toISOString(),
-        sourceKey,
-      });
-      plannedBySession.push({ reportId: id, entries, reused: false });
+      reportsToInsert.push({ id, kind: session.kind, testDate: session.measuredAt, sourceKey: session.sourceKey });
       result.createdSessions += 1;
     }
-  }
-
-  // Records of the sessions being re-imported, fetched in one query rather than
-  // one per session.
-  const existingRecordsByReport = new Map<string, Map<string, string>>();
-
-  if (reusedReportIds.length > 0) {
-    for (const chunk of chunked(reusedReportIds, 200)) {
-      const rows = await db.select().from(record).where(inArray(record.reportId, chunk));
-
-      for (const row of rows) {
-        const byName = existingRecordsByReport.get(row.reportId) ?? new Map<string, string>();
-        byName.set(row.metricName, row.id);
-        existingRecordsByReport.set(row.reportId, byName);
-      }
-    }
-  }
-
-  for (const planned of plannedBySession) {
-    const existingByName = planned.reused ? existingRecordsByReport.get(planned.reportId) : undefined;
-
-    for (const entry of planned.entries) {
+    for (const entry of changedEntries) {
       const extraData = buildExtraData(entry, input.source);
-      const existingRecordId = existingByName?.get(entry.metricName);
-
-      if (existingRecordId) {
-        recordsToUpdate.push({ id: existingRecordId, value: entry.value, unit: entry.unit, extraData });
+      if (entry.existingId) {
+        recordsToUpdate.push({ id: entry.existingId, value: entry.value, unit: entry.unit, extraData });
       } else {
-        recordsToInsert.push({
-          id: crypto.randomUUID(),
-          reportId: planned.reportId,
-          metricName: entry.metricName,
-          value: entry.value,
-          unit: entry.unit,
-          extraData,
-        });
+        recordsToInsert.push({ id: crypto.randomUUID(), reportId: id, metricName: entry.metricName, value: entry.value, unit: entry.unit, extraData });
       }
-
-      result.writtenValues += 1;
     }
   }
 

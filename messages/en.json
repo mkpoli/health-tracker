@@ -679,9 +679,9 @@
   "import_days": "Days",
   "import_daily_note": "One entry per day per measurement, taking the last reading of that day.",
   "import_unmapped": "Data types this app does not track",
-  "import_confirm": "Import {count} days",
+  "import_confirm": "Import {count} measurements",
   "import_saving": "Saving to your profile…",
-  "import_done": "Imported {sessions} days and {values} values.",
+  "import_done": "Added {added}, updated {updated}, skipped {skipped} unchanged measurements.",
   "import_failed": "The import could not be completed.",
   "import_nothing_found": "No measurements this app tracks were found in that file.",
   "import_json_unsupported": "That looks like this app own export. Choose an Apple Health zip or export.xml instead.",
@@ -1154,5 +1154,14 @@
   "error_reopen": "Reopen page",
   "error_home": "Go to home page",
   "error_save_notice": "If this happened while saving, check your records before submitting again.",
-  "error_reference": "Error reference"
+  "error_reference": "Error reference",
+  "import_comparison_title": "Compared with this profile",
+  "import_new_values": "New measurements",
+  "import_updated_values": "Measurements to update",
+  "import_duplicate_values": "Already imported · skip",
+  "import_duplicate_note": "Apple Health imports are matched by day and measurement type. Unchanged readings are skipped; changed values or times update existing records. Counts are checked again when you import.",
+  "import_no_changes": "All measurements are already imported. Nothing to change.",
+  "import_check_again": "Check again",
+  "import_checking_existing": "Checking existing measurements…",
+  "import_comparison_failed": "Couldn’t check existing measurements. Check again before importing."
 }
