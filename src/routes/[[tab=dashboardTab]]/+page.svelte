@@ -1,5 +1,8 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { dashboardTabHref, dashboardTabOf, type DashboardTab } from '$lib/dashboard-tabs';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { downloadPatientArchive } from '$lib/export';
@@ -86,9 +89,18 @@
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
-  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine' | 'calories';
+  // The tab is the route: a reload, a shared link or the back button lands
+  // on the same section.
+  const activeTab = $derived(dashboardTabOf(page.params.tab));
 
-  let activeTab = $state<DashboardTab>('lab');
+  function tabHref(tab: DashboardTab) {
+    return dashboardTabHref(tab, page.url.search);
+  }
+
+  function showTab(tab: DashboardTab) {
+    if (tab === activeTab) return Promise.resolve();
+    return goto(tabHref(tab), { noScroll: true, keepFocus: true });
+  }
 
   const dashboardTabs: Array<{
     id: DashboardTab;
@@ -1052,7 +1064,7 @@
     // report-* / record-* nodes the lab branch below scrolls to.
     if (point.reportId && measurementReportIds.has(point.reportId)) {
       const owningReport = reportLookup[point.reportId];
-      activeTab = owningReport?.kind === vitalDomain.kind ? 'vitals' : 'body';
+      await showTab(owningReport?.kind === vitalDomain.kind ? 'vitals' : 'body');
       focusedBodySessionId = point.reportId;
       await tick();
       document
@@ -1139,7 +1151,7 @@
       extractFile = file;
       setHomepageExtractFile(file, e.dataTransfer.files);
       smartUploadActive = true;
-      activeTab = 'lab';
+      void showTab('lab');
     }
   }
 </script>
@@ -2314,9 +2326,9 @@
         <nav aria-label={m.dashboard_sections()} class="mt-6 hidden border-b border-slate-200 sm:block">
           <div class="flex flex-wrap gap-1">
             {#each dashboardTabs as tab (tab.id)}
-              <button
-                type="button"
-                onclick={() => (activeTab = tab.id)}
+              <a
+                href={tabHref(tab.id)}
+                data-sveltekit-noscroll
                 aria-current={activeTab === tab.id ? 'page' : undefined}
                 class="group relative rounded-t-lg px-4 py-3 text-left transition-colors {activeTab === tab.id
                   ? 'bg-white'
@@ -2333,7 +2345,7 @@
                     ? tabAccent[tab.id].bar
                     : 'bg-transparent'}"
                 ></span>
-              </button>
+              </a>
             {/each}
           </div>
         </nav>
@@ -2937,9 +2949,9 @@
       >
         <div class="mx-auto flex max-w-lg">
           {#each dashboardTabs as tab (tab.id)}
-            <button
-              type="button"
-              onclick={() => (activeTab = tab.id)}
+            <a
+              href={tabHref(tab.id)}
+              data-sveltekit-noscroll
               aria-current={activeTab === tab.id ? 'page' : undefined}
               class="flex flex-1 flex-col items-center gap-1 px-1 py-2.5 text-[11px] font-medium transition-colors {activeTab ===
               tab.id
@@ -2971,7 +2983,7 @@
                 {/if}
               </span>
               {tab.short()}
-            </button>
+            </a>
           {/each}
         </div>
       </nav>
