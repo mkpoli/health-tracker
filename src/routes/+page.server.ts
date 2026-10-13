@@ -65,6 +65,7 @@ import {
   UnknownDoseSlotError,
   updateDoseOccurrence,
   updateDoseRegimen,
+  updateMedicineClaim,
   updateMedicineCourse,
 } from '$lib/server/medicine-plan-mutations';
 import { isValidTimeZone, normalizeTimeZone, toDateTimeLocal } from '$lib/time-zone';
@@ -92,7 +93,6 @@ import {
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
-  updateMedicineClaim,
 } from '$lib/server/claim-mutations';
 import {
   InvalidWorkoutInputError,

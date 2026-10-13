@@ -16,7 +16,6 @@ import {
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
-  updateMedicineClaim,
 } from '$lib/server/claim-mutations';
 import {
   StaleClaimRevisionError,
@@ -35,6 +34,7 @@ import {
   createScheduledMedicine,
   normalizeDoseRegimen,
   normalizeMedicineCourse,
+  updateMedicineClaim,
 } from '$lib/server/medicine-plan-mutations';
 import { InvalidMedicinePlanInputError } from '$lib/server/medicine-plan';
 import {
@@ -537,7 +537,7 @@ const updateMedicine: ToolDefinition = {
   name: 'update_medicine',
   title: 'Update a medicine claim',
   description:
-    'Change selected fields on a medicine claim. expected_revision prevents an agent from overwriting a newer edit. Send null to clear an optional field.',
+    'Change selected fields on a medicine claim. expected_revision prevents an agent from overwriting a newer edit. Send null to clear an optional field. Status stopped or completed ends every open course of the medicine on end_date, or today when none is set.',
   inputSchema: {
     type: 'object',
     properties: {

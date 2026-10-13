@@ -140,7 +140,8 @@ beforeAll(async () => {
     INSERT INTO patient (id, owner_user_id, name, extra_data) VALUES
       ('profile-1', 'owner-1', 'Primary', '{"timeZone":"Asia/Tokyo"}');
     INSERT INTO medicine_claim (id, patient_id, name) VALUES
-      ('medicine-1', 'profile-1', 'アモキシシリン');
+      ('medicine-1', 'profile-1', 'アモキシシリン'),
+      ('medicine-2', 'profile-1', 'ベタメタゾンローション');
   `);
   mutations = await import('./medicine-plan-mutations');
   revisions = await import('./claim-revisions');
@@ -586,5 +587,122 @@ describe('medicine plan mutations', () => {
     expect(Number(closed.rows[0].revision)).toBe(2);
     expect(second.effectiveTo).toBeNull();
     expect(await revisionRows('dose_regimen', first.id)).toEqual([1, 2]);
+  });
+
+  it('ends the open courses of a medicine marked stopped', async () => {
+    const courseInput = {
+      kind: 'initial' as const,
+      status: 'active' as const,
+      previousCourseId: null,
+      startDate: '2026-09-03',
+      endDate: null,
+      endReason: null,
+      notes: null,
+    };
+    const open = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: courseInput,
+      origin,
+    });
+    const finished = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: { ...courseInput, status: 'ended', startDate: '2026-08-01', endDate: '2026-08-20' },
+      origin,
+    });
+    await mutations.createDoseRegimen({
+      patientId: 'profile-1',
+      courseId: open.id,
+      input: {
+        ruleKind: 'fixed_slots',
+        slots: [],
+        daysOfWeek: null,
+        intervalHours: null,
+        anchorAt: null,
+        doseText: null,
+        route: null,
+        site: null,
+        timezone: 'Asia/Tokyo',
+        effectiveFrom: '2026-09-03',
+        effectiveTo: null,
+        remindMinutesBefore: null,
+        notes: null,
+      },
+      origin,
+    });
+
+    const courseRow = async (id: string) =>
+      (
+        await client.execute({
+          sql: 'SELECT status, end_date, revision FROM medicine_course WHERE id = ?',
+          args: [id],
+        })
+      ).rows[0];
+    const medicineRow = async () =>
+      (await client.execute("SELECT * FROM medicine_claim WHERE id = 'medicine-2'")).rows[0];
+    const medicineInput = {
+      name: 'ベタメタゾンローション',
+      genericName: null,
+      form: null,
+      strength: null,
+      route: null,
+      startDate: '2026-09-03',
+      endDate: null,
+      purpose: null,
+      prescriber: null,
+      notes: null,
+    };
+    const current = async () => {
+      const row = await medicineRow();
+      return {
+        id: String(row.id),
+        patientId: String(row.patient_id),
+        name: String(row.name),
+        genericName: null,
+        form: null,
+        strength: null,
+        route: null,
+        status: String(row.status),
+        startDate: row.start_date as string | null,
+        endDate: row.end_date as string | null,
+        purpose: null,
+        prescriber: null,
+        notes: null,
+        originKind: String(row.origin_kind),
+        originProvider: row.origin_provider as string | null,
+        originExternalId: row.origin_external_id as string | null,
+        revision: Number(row.revision),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      };
+    };
+
+    await mutations.updateMedicineClaim({
+      current: await current(),
+      input: { ...medicineInput, status: 'active', notes: '頭部' },
+      expectedRevision: 1,
+      source: origin,
+    });
+    expect((await courseRow(open.id)).status).toBe('active');
+
+    // 16:00Z on 10/13 is already 10/14 on the regimen's Tokyo calendar.
+    await mutations.updateMedicineClaim({
+      current: await current(),
+      input: { ...medicineInput, status: 'stopped' },
+      expectedRevision: 2,
+      source: origin,
+      changedAt: '2026-10-13T16:00:00.000Z',
+    });
+
+    const ended = await courseRow(open.id);
+    expect(ended.status).toBe('ended');
+    expect(ended.end_date).toBe('2026-10-14');
+    expect(Number(ended.revision)).toBe(2);
+    expect(await revisionRows('medicine_course', open.id)).toEqual([1, 2]);
+
+    const untouched = await courseRow(finished.id);
+    expect(untouched.end_date).toBe('2026-08-20');
+    expect(Number(untouched.revision)).toBe(1);
   });
 });
