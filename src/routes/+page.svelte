@@ -49,6 +49,7 @@
   import DangerZoneModal from '$lib/components/DangerZoneModal.svelte';
   import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
   import MedicinePanel from '$lib/components/MedicinePanel.svelte';
+  import ActivityPanel from '$lib/components/ActivityPanel.svelte';
   import CaloriePanel from '$lib/components/CaloriePanel.svelte';
   import WorkoutPanel from '$lib/components/WorkoutPanel.svelte';
   import RefRangePicker from '$lib/components/RefRangePicker.svelte';
@@ -86,7 +87,7 @@
   let reviewTargetReportId = $state<ReportDestination>('new');
   let expandedReportIds = $state<string[]>([]);  let trendOptionButtons = $state<Record<string, HTMLButtonElement | null>>({});  let focusedBodySessionId = $state<string | null>(null);
 
-  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine' | 'calories';
+  type DashboardTab = 'lab' | 'body' | 'vitals' | 'medicine' | 'calories' | 'activity';
 
   let activeTab = $state<DashboardTab>('lab');
 
@@ -101,6 +102,7 @@
     { id: 'body', label: () => m.tab_body_measurements(), short: () => m.tab_body_measurements_short(), hint: () => m.tab_body_measurements_hint(), domain: bodyDomain },
     { id: 'vitals', label: () => m.tab_vitals(), short: () => m.tab_vitals_short(), hint: () => m.tab_vitals_hint(), domain: vitalDomain },
     { id: 'medicine', label: () => m.tab_medicine(), short: () => m.tab_medicine_short(), hint: () => m.tab_medicine_hint() },
+    { id: 'activity', label: () => m.activity_title(), short: () => m.activity_tab(), hint: () => m.activity_tab_hint() },
     { id: 'calories', label: () => m.tab_calories(), short: () => m.tab_calories_short(), hint: () => m.tab_calories_hint() },
   ];
 
@@ -110,6 +112,7 @@
     body: { bar: 'bg-violet-500', active: 'text-violet-700' },
     vitals: { bar: 'bg-rose-500', active: 'text-rose-700' },
     medicine: { bar: 'bg-blue-500', active: 'text-blue-700' },
+    activity: { bar: 'bg-sky-500', active: 'text-sky-700' },
     calories: { bar: 'bg-orange-500', active: 'text-orange-700' },
   };
 
@@ -230,7 +233,8 @@
     new Set(data.reports.filter((report) => isMeasurementKind(report.kind)).map((report) => report.id)),
   );
 
-  const labRecords = $derived(data.records.filter((record) => !measurementReportIds.has(record.reportId)));
+  const labReportIds = $derived(new Set(labReports.map((report) => report.id)));
+  const labRecords = $derived(data.records.filter((record) => labReportIds.has(record.reportId)));
 
   function sessionsOfKind(kind: string) {
     return data.reports
@@ -1734,6 +1738,7 @@
         reports={data.reports}
         records={data.records}
         initialFile={importInitialFile}
+        timeZone={patientTimeZone}
         onClose={closeImportModal}
       />
     {/if}
@@ -2907,6 +2912,12 @@
           />
         </div>
 
+        <div class="mt-6" hidden={activeTab !== 'activity'}>
+          {#key data.currentPatient.id}
+            <ActivityPanel reports={data.reports} records={data.records} onImport={() => openImportModal()} />
+          {/key}
+        </div>
+
         <div class="mt-6" hidden={activeTab !== 'calories'}>
           <div class="space-y-6">
             <WorkoutPanel
@@ -2959,6 +2970,8 @@
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h3l2.25-6 3.75 12 2.25-6h5.25" />
                   </svg>
+                {:else if tab.id === 'activity'}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM7 12l3-4 4 1 3 4h3M12 9l-2 6 4 3v4M10 15l-4 7" /></svg>
                 {:else if tab.id === 'medicine'}
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6.75l6.75 6.75m-9.9 3.15l9.3-9.3a3.182 3.182 0 00-4.5-4.5l-9.3 9.3a3.182 3.182 0 004.5 4.5zm0 0l-1.2 1.2a3.182 3.182 0 004.5 4.5l1.2-1.2" />

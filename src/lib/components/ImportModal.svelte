@@ -5,7 +5,7 @@
   import type { ImportResult } from '$lib/server/measurement-import';
   import { invalidateAll } from '$app/navigation';
   import * as m from '$lib/paraglide/messages.js';
-  import { readAppleHealthFile, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
+  import { readAppleHealthFile, isSupportedAppleType, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
   import {
     chunkArchiveItems,
     forEachArchiveMedia,
@@ -23,12 +23,14 @@
     reports,
     records,
     initialFile = null,
+    timeZone = 'UTC',
     onClose,
   }: {
     patientId: string;
     reports: ImportReport[];
     records: ImportRecord[];
     initialFile?: File | null;
+    timeZone?: string;
     onClose: () => void;
   } = $props();
 
@@ -53,6 +55,15 @@
   const measurementPreview = $derived(planMeasurementImport({
     source: 'apple-health', sessions: summary?.sessions ?? [], reports, records,
   }).counts);
+  const activityPreview = $derived.by(() => {
+    const entries = summary?.sessions.filter((session) => session.kind === 'activity').flatMap((session) => session.entries) ?? [];
+    return {
+      count: entries.length,
+      samples: entries.reduce((sum, entry) => sum + (entry.dailySummary?.sampleCount ?? 0), 0),
+      excluded: entries.reduce((sum, entry) => sum + (entry.dailySummary?.excludedSamples ?? 0), 0),
+      sources: [...new Set(entries.map((entry) => entry.dailySummary?.source).filter(Boolean))].join(', '),
+    };
+  });
   const changedValues = $derived(measurementPreview.newValues + measurementPreview.updatedValues);
   const measurementDays = $derived(new Set(summary?.sessions.map((session) => session.sourceKey.split(':').at(-1))).size);
 
@@ -82,7 +93,7 @@
     if (!summary) return [] as Array<{ type: string; count: number }>;
 
     return Object.entries(summary.seen)
-      .filter(([type]) => !metricCounts.some((item) => type.toLowerCase().includes(item.key.replace(/-/g, ''))))
+      .filter(([type]) => !isSupportedAppleType(type))
       .map(([type, count]) => ({ type: type.replace('HKQuantityTypeIdentifier', ''), count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
@@ -226,13 +237,13 @@
 
           summary = await readAppleHealthFile(file, (read, total) => {
             progress = total > 0 ? Math.min(read / total, 1) : 0;
-          });
+          }, timeZone);
           importKind = 'apple-health';
         }
       } else {
         summary = await readAppleHealthFile(file, (read, total) => {
           progress = total > 0 ? Math.min(read / total, 1) : 0;
-        });
+        }, timeZone);
         importKind = 'apple-health';
       }
 
@@ -652,6 +663,14 @@
           </div>
 
           <p class="mt-3 text-xs text-slate-500">{m.import_daily_note()}</p>
+          {#if activityPreview.count > 0}
+            <section class="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs leading-relaxed text-slate-700">
+              <h3 class="font-semibold">{m.activity_import_summary({ count: activityPreview.count, samples: activityPreview.samples })}</h3>
+              <p class="mt-1">{m.activity_source_policy()}</p>
+              <p class="mt-1">{m.activity_import_sources({ sources: activityPreview.sources, count: activityPreview.excluded, zone: timeZone })}</p>
+              <p class="mt-1">{m.activity_replace_note()}</p>
+            </section>
+          {/if}
 
           {#if unmappedTypes.length > 0}
             <details class="mt-3">

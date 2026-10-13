@@ -1,18 +1,19 @@
+import { activityMetricByKey, readDailySummary, type DailySummary } from '$lib/metrics/activity';
 import { getMetricDefinitionByKey } from '$lib/metrics/catalog';
 import { parseNumber } from '$lib/metrics/normalization';
-import { isMeasurementKind, type ReportKind } from '$lib/report-kind';
+import { isImportableKind, type ReportKind } from '$lib/report-kind';
 
 export type ImportedSession = {
   kind: ReportKind;
   measuredAt: string;
   sourceKey: string;
-  entries: Array<{ key?: string; label?: string; value: string | number; unit?: string | null }>;
+  entries: Array<{ key?: string; label?: string; value: string | number; unit?: string | null; dailySummary?: DailySummary }>;
 };
 
 export type ImportReport = { id: string; testDate: string; extraData: unknown };
-export type ImportRecord = { id: string; reportId: string; metricName: string; value: string; unit: string | null };
+export type ImportRecord = { id: string; reportId: string; metricName: string; value: string; unit: string | null; extraData?: unknown };
 export type ImportCounts = { newValues: number; updatedValues: number; duplicateValues: number };
-export type ResolvedImportEntry = { metricKey: string | null; metricName: string; value: string; unit: string | null };
+export type ResolvedImportEntry = { metricKey: string | null; metricName: string; value: string; unit: string | null; dailySummary?: DailySummary };
 type PlannedEntry = ResolvedImportEntry & { existingId?: string; action: 'insert' | 'update' | 'skip' };
 type PlannedSession = { existingId?: string; sourceKey: string; kind: ReportKind; measuredAt: string; entries: PlannedEntry[] };
 
@@ -23,7 +24,7 @@ export function importMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function resolveEntries(entries: ImportedSession['entries']): ResolvedImportEntry[] {
+function resolveEntries(entries: ImportedSession['entries'], kind: ReportKind): ResolvedImportEntry[] {
   const resolved = new Map<string, ResolvedImportEntry>();
   if (!Array.isArray(entries)) return [];
   for (const entry of entries.slice(0, 200)) {
@@ -33,7 +34,12 @@ function resolveEntries(entries: ImportedSession['entries']): ResolvedImportEntr
     const definition = typeof entry.key === 'string' ? getMetricDefinitionByKey(entry.key) : null;
     const label = definition?.canonicalLabel || (typeof entry.label === 'string' ? entry.label.trim() : '');
     if (!label) continue;
+    const activityMetric = definition ? activityMetricByKey.get(definition.key) : undefined;
+    const dailySummary = activityMetric ? readDailySummary(entry.dailySummary, definition!.key) : null;
+    if (kind === 'activity' && (!activityMetric || !dailySummary || entry.unit !== activityMetric.unit || (activityMetric.unit === '%' && numeric > 100))) continue;
+    if (kind !== 'activity' && activityMetric) continue;
     resolved.set(label, {
+      ...(dailySummary ? { dailySummary } : {}),
       metricKey: definition?.key || null,
       metricName: label,
       value: String(numeric),
@@ -53,12 +59,17 @@ export function planMeasurementImport(input: {
   const reportsByKey = new Map<string, ImportReport>();
   for (const report of input.reports) {
     const key = importMetadata(report.extraData).importSourceKey;
-    if (typeof key === 'string') reportsByKey.set(key, report);
+    if (typeof key !== 'string') continue;
+    // Archive restores can leave several reports for one activity day. Reuse the
+    // same stable winner as the activity view, regardless of database row order.
+    const previous = reportsByKey.get(key);
+    if (!key.includes(':activity:') || !previous || report.id > previous.id) reportsByKey.set(key, report);
   }
   const recordsByReport = new Map<string, Map<string, ImportRecord>>();
   for (const record of input.records) {
     const byName = recordsByReport.get(record.reportId) ?? new Map<string, ImportRecord>();
-    byName.set(record.metricName, record);
+    const previous = byName.get(record.metricName);
+    if (!previous || record.id > previous.id) byName.set(record.metricName, record);
     recordsByReport.set(record.reportId, byName);
   }
 
@@ -66,13 +77,18 @@ export function planMeasurementImport(input: {
   const uniqueSessions = new Map<string, { kind: ReportKind; measuredAt: string; entries: Map<string, ResolvedImportEntry> }>();
   let skippedSessions = 0;
   for (const session of input.sessions) {
-    if (!session || !isMeasurementKind(session.kind) || typeof session.sourceKey !== 'string' || !session.sourceKey.trim()) {
+    if (!session || !isImportableKind(session.kind) || typeof session.sourceKey !== 'string' || !session.sourceKey.trim()) {
       skippedSessions += 1;
       continue;
     }
     const measuredAt = new Date(session.measuredAt);
-    const entries = resolveEntries(session.entries);
+    const entries = resolveEntries(session.entries, session.kind);
     if (Number.isNaN(measuredAt.getTime()) || entries.length === 0) {
+      skippedSessions += 1;
+      continue;
+    }
+    if (session.kind === 'activity' && entries.some((entry) =>
+      session.sourceKey !== `activity:${entry.dailySummary?.date}` || measuredAt.toISOString() !== `${entry.dailySummary?.date}T12:00:00.000Z`)) {
       skippedSessions += 1;
       continue;
     }
@@ -91,7 +107,8 @@ export function planMeasurementImport(input: {
     const sameTime = existing && new Date(existing.testDate).getTime() === new Date(session.measuredAt).getTime();
     const entries = Array.from(session.entries.values()).map((entry): PlannedEntry => {
       const record = existingEntries?.get(entry.metricName);
-      const unchanged = record && sameTime && parseNumber(record.value) === Number(entry.value) && (record.unit?.trim() || null) === entry.unit;
+      const sameSummary = !entry.dailySummary || JSON.stringify(readDailySummary(importMetadata(record?.extraData).dailySummary, entry.metricKey!)) === JSON.stringify(entry.dailySummary);
+      const unchanged = record && sameTime && sameSummary && parseNumber(record.value) === Number(entry.value) && (record.unit?.trim() || null) === entry.unit;
       const action = !record ? 'insert' : unchanged ? 'skip' : 'update';
       if (action === 'insert') counts.newValues += 1;
       else if (action === 'update') counts.updatedValues += 1;
