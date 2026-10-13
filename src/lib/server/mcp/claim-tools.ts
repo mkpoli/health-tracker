@@ -537,7 +537,7 @@ const updateMedicine: ToolDefinition = {
   name: 'update_medicine',
   title: 'Update a medicine claim',
   description:
-    'Change selected fields on a medicine claim. expected_revision prevents an agent from overwriting a newer edit. Send null to clear an optional field. Changing status to stopped or completed ends the medicine's active courses on end_date, or today when none is set.',
+    'Change selected fields on a medicine claim. expected_revision prevents an agent from overwriting a newer edit. Send null to clear an optional field. Changing status to stopped or completed ends the active courses of the medicine on end_date, or today when none is set.',
   inputSchema: {
     type: 'object',
     properties: {
