@@ -107,51 +107,6 @@ export async function createMedicineClaim(options: {
   });
 }
 
-export async function updateMedicineClaim(options: {
-  current: typeof medicineClaim.$inferSelect;
-  input: MedicineInput;
-  expectedRevision: number;
-  source: ClaimRevisionSource;
-  changedAt?: string;
-}) {
-  if (options.current.revision !== options.expectedRevision) {
-    throw new StaleClaimRevisionError();
-  }
-
-  return db.transaction(async (tx) => {
-    const currentSnapshot = normalizeMedicineClaim(options.current);
-    await tx
-      .insert(claimRevision)
-      .values(claimRevisionValues('medicine', currentSnapshot, options.source))
-      .onConflictDoNothing();
-
-    const updated = await tx
-      .update(medicineClaim)
-      .set({
-        ...options.input,
-        revision: options.expectedRevision + 1,
-        updatedAt: options.changedAt ?? new Date().toISOString(),
-      })
-      .where(
-        and(
-          eq(medicineClaim.id, options.current.id),
-          eq(medicineClaim.patientId, options.current.patientId),
-          eq(medicineClaim.revision, options.expectedRevision),
-        ),
-      )
-      .returning();
-
-    if (!updated[0]) throw new StaleClaimRevisionError();
-
-    const snapshot = normalizeMedicineClaim(updated[0]);
-    await tx
-      .insert(claimRevision)
-      .values(claimRevisionValues('medicine', snapshot, options.source));
-
-    return snapshot;
-  });
-}
-
 export async function createEnergyClaim(options: {
   patientId: string;
   input: EnergyInput;

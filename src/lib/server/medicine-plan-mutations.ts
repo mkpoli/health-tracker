@@ -1,10 +1,11 @@
-import { and, eq, max } from 'drizzle-orm';
+import { and, desc, eq, max } from 'drizzle-orm';
 import {
   addDays,
   isCourseKind,
   isCourseStatus,
   isDoseStatus,
   isRegimenRuleKind,
+  localDateOf,
   normalizeDaysOfWeek,
   normalizeDoseSlots,
   planDoses,
@@ -13,8 +14,16 @@ import {
   type DoseSlot,
   type MedicineCourseRecord,
 } from '$lib/medicine-plan';
+import { timeZoneFromMetadata } from '$lib/time-zone';
 import { db } from '$lib/server/db';
-import { claimRevision, doseOccurrence, doseRegimen, medicineCourse } from '$lib/server/db/schema';
+import {
+  claimRevision,
+  doseOccurrence,
+  doseRegimen,
+  medicineClaim,
+  medicineCourse,
+  patient,
+} from '$lib/server/db/schema';
 import {
   InvalidMedicinePlanInputError,
   type DoseActionInput,
@@ -29,6 +38,7 @@ import {
 import {
   createMedicineClaim,
   inTransaction,
+  normalizeMedicineClaim,
   type ClaimOrigin,
   type WriteTx,
 } from '$lib/server/claim-mutations';
@@ -163,6 +173,144 @@ export async function updateMedicineCourse(options: {
 
     return snapshot;
   });
+}
+
+/** Medicine statuses that mean no further doses are planned. */
+const finishedMedicineStatuses = new Set(['stopped', 'completed']);
+
+/**
+ * Saves a medicine claim. A medicine marked stopped or completed ends every
+ * course still open under it in the same transaction, so its regimens stop
+ * planning doses from the end date on while past slots stay on record.
+ */
+export async function updateMedicineClaim(options: {
+  current: typeof medicineClaim.$inferSelect;
+  input: MedicineInput;
+  expectedRevision: number;
+  source: ClaimRevisionSource;
+  changedAt?: string;
+}) {
+  if (options.current.revision !== options.expectedRevision) {
+    throw new StaleClaimRevisionError();
+  }
+
+  const changedAt = options.changedAt ?? new Date().toISOString();
+
+  return db.transaction(async (tx) => {
+    const currentSnapshot = normalizeMedicineClaim(options.current);
+    await tx
+      .insert(claimRevision)
+      .values(claimRevisionValues('medicine', currentSnapshot, options.source))
+      .onConflictDoNothing();
+
+    const updated = await tx
+      .update(medicineClaim)
+      .set({
+        ...options.input,
+        revision: options.expectedRevision + 1,
+        updatedAt: changedAt,
+      })
+      .where(
+        and(
+          eq(medicineClaim.id, options.current.id),
+          eq(medicineClaim.patientId, options.current.patientId),
+          eq(medicineClaim.revision, options.expectedRevision),
+        ),
+      )
+      .returning();
+
+    if (!updated[0]) throw new StaleClaimRevisionError();
+
+    const snapshot = normalizeMedicineClaim(updated[0]);
+    await tx
+      .insert(claimRevision)
+      .values(claimRevisionValues('medicine', snapshot, options.source));
+
+    // Only the change into a finished status ends courses: a restart course
+    // opened later under a still-stopped medicine survives further edits.
+    if (
+      finishedMedicineStatuses.has(snapshot.status) &&
+      !finishedMedicineStatuses.has(currentSnapshot.status)
+    ) {
+      await endActiveCourses(tx, snapshot, changedAt, options.source);
+    }
+
+    return snapshot;
+  });
+}
+
+async function endActiveCourses(
+  tx: WriteTx,
+  medicine: { id: string; patientId: string; endDate: string | null },
+  changedAt: string,
+  source: ClaimRevisionSource,
+) {
+  // Planned and held courses plan no doses; ending one would make its dates
+  // plan slots that never existed, so only active courses end.
+  const active = await tx
+    .select()
+    .from(medicineCourse)
+    .where(
+      and(
+        eq(medicineCourse.medicineClaimId, medicine.id),
+        eq(medicineCourse.patientId, medicine.patientId),
+        eq(medicineCourse.status, 'active'),
+      ),
+    );
+
+  for (const course of active) {
+    const changeDay = await changeDate(tx, course.id, medicine.patientId, changedAt);
+    // A course that has not begun by the day of the change is held: an ended
+    // course still plans its start day, a held one plans nothing.
+    const notStarted = changeDay < course.startDate;
+    let endDate = medicine.endDate ?? changeDay;
+    if (course.endDate && course.endDate < endDate) endDate = course.endDate;
+    if (endDate < course.startDate) endDate = course.startDate;
+
+    await tx
+      .insert(claimRevision)
+      .values(claimRevisionValues('medicine_course', normalizeMedicineCourse(course), source))
+      .onConflictDoNothing();
+
+    const ended = await tx
+      .update(medicineCourse)
+      .set({
+        ...(notStarted ? { status: 'held' } : { status: 'ended', endDate }),
+        revision: course.revision + 1,
+        updatedAt: changedAt,
+      })
+      .where(and(eq(medicineCourse.id, course.id), eq(medicineCourse.revision, course.revision)))
+      .returning();
+
+    if (!ended[0]) throw new StaleClaimRevisionError();
+
+    await tx
+      .insert(claimRevision)
+      .values(claimRevisionValues('medicine_course', normalizeMedicineCourse(ended[0]), source));
+  }
+}
+
+/**
+ * The calendar date of a change on the calendar of the course's rule in force
+ * at that moment, or the patient's own zone when no rule has started.
+ */
+async function changeDate(tx: WriteTx, courseId: string, patientId: string, changedAt: string) {
+  const rules = await tx
+    .select({ timezone: doseRegimen.timezone, effectiveFrom: doseRegimen.effectiveFrom })
+    .from(doseRegimen)
+    .where(eq(doseRegimen.courseId, courseId))
+    .orderBy(desc(doseRegimen.effectiveFrom));
+  for (const rule of rules) {
+    const date = localDateOf(changedAt, rule.timezone);
+    if (rule.effectiveFrom <= date) return date;
+  }
+
+  const [owner] = await tx
+    .select({ extraData: patient.extraData })
+    .from(patient)
+    .where(eq(patient.id, patientId))
+    .limit(1);
+  return localDateOf(changedAt, timeZoneFromMetadata(owner?.extraData));
 }
 
 export async function createDoseRegimen(options: {
