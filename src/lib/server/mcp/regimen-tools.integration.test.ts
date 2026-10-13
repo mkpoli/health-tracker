@@ -524,5 +524,18 @@ describe('MCP medicine plans', () => {
       previous_course_id: 'stopped-course',
       start_date: '2026-10-25',
     });
+
+    // A later rule change lands on the same restart course.
+    const changed = (await tool('set_regimen').handler(context, {
+      patient_id: 'profile-1',
+      medicine_id: 'stopped-1',
+      request_id: 'stopped-change',
+      regimen: {
+        rule: 'fixed_slots',
+        effective_from: '2026-11-01',
+        slots: [{ label: '朝食後', anchor: { kind: 'meal', meal: 'breakfast' } }],
+      },
+    })) as any;
+    expect(changed.course.course_id).toBe(result.course.course_id);
   });
 });
