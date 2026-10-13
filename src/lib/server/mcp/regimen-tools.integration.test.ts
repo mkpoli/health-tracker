@@ -498,4 +498,31 @@ describe('MCP medicine plans', () => {
       tool('get_medicine_plan').handler(context, { patient_id: 'profile-2', medicine_id: 'loose-1' }),
     ).rejects.toThrow('No such patient');
   });
+
+  it('restarts a stopped medicine on a new course', async () => {
+    await client.execute({
+      sql: `INSERT INTO medicine_claim (id, patient_id, name, status, start_date) VALUES (?, ?, ?, ?, ?)`,
+      args: ['stopped-1', 'profile-1', 'Stopped tablet', 'stopped', '2026-09-01'],
+    });
+    await client.execute({
+      sql: `INSERT INTO medicine_course (id, patient_id, medicine_claim_id, status, start_date) VALUES (?, ?, ?, ?, ?)`,
+      args: ['stopped-course', 'profile-1', 'stopped-1', 'held', '2026-10-20'],
+    });
+    const result = (await tool('set_regimen').handler(context, {
+      patient_id: 'profile-1',
+      medicine_id: 'stopped-1',
+      request_id: 'stopped-restart',
+      regimen: {
+        rule: 'fixed_slots',
+        effective_from: '2026-10-25',
+        slots: [{ label: '就寝前', anchor: { kind: 'bedtime' } }],
+      },
+    })) as any;
+    expect(result.course).toMatchObject({
+      kind: 'restart',
+      status: 'active',
+      previous_course_id: 'stopped-course',
+      start_date: '2026-10-25',
+    });
+  });
 });

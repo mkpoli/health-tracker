@@ -259,12 +259,13 @@ async function endActiveCourses(
     );
 
   for (const course of active) {
-    let endDate =
-      medicine.endDate ?? (await changeDate(tx, course.id, medicine.patientId, changedAt));
+    const changeDay = await changeDate(tx, course.id, medicine.patientId, changedAt);
+    // A course that has not begun by the day of the change is held: an ended
+    // course still plans its start day, a held one plans nothing.
+    const notStarted = changeDay < course.startDate;
+    let endDate = medicine.endDate ?? changeDay;
     if (course.endDate && course.endDate < endDate) endDate = course.endDate;
-    // A course that would only begin after the end is held instead: an ended
-    // course plans its own start day, a held one plans nothing.
-    const notStarted = endDate < course.startDate;
+    if (endDate < course.startDate) endDate = course.startDate;
 
     await tx
       .insert(claimRevision)

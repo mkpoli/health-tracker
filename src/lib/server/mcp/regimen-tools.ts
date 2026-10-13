@@ -403,8 +403,9 @@ const setRegimen: ToolDefinition = {
         const current = activeCourseOf(plan.courses);
         // A rule on an ended course would plan nothing; a medicine taken again
         // after a stop gets a restart course, one never planned gets its first.
+        const finished = medicine.status === 'stopped' || medicine.status === 'completed';
         const course =
-          current && current.status !== 'ended'
+          current && current.status !== 'ended' && !finished
             ? current
             : await createMedicineCourse({
                 id: ids.course,
