@@ -611,6 +611,18 @@ describe('medicine plan mutations', () => {
       input: { ...courseInput, status: 'ended', startDate: '2026-08-01', endDate: '2026-08-20' },
       origin,
     });
+    const held = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: { ...courseInput, status: 'held', startDate: '2026-08-21' },
+      origin,
+    });
+    const ruleless = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: { ...courseInput, startDate: '2026-10-01' },
+      origin,
+    });
     await mutations.createDoseRegimen({
       patientId: 'profile-1',
       courseId: open.id,
@@ -701,8 +713,29 @@ describe('medicine plan mutations', () => {
     expect(Number(ended.revision)).toBe(2);
     expect(await revisionRows('medicine_course', open.id)).toEqual([1, 2]);
 
+    // A course with no rule falls back to the patient's Tokyo calendar.
+    const rulelessEnded = await courseRow(ruleless.id);
+    expect(rulelessEnded.status).toBe('ended');
+    expect(rulelessEnded.end_date).toBe('2026-10-14');
+
     const untouched = await courseRow(finished.id);
     expect(untouched.end_date).toBe('2026-08-20');
     expect(Number(untouched.revision)).toBe(1);
+    expect((await courseRow(held.id)).status).toBe('held');
+
+    // A restart opened under the still-stopped medicine survives later edits.
+    const restart = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: { ...courseInput, kind: 'restart', startDate: '2026-10-20' },
+      origin,
+    });
+    await mutations.updateMedicineClaim({
+      current: await current(),
+      input: { ...medicineInput, status: 'stopped', strength: '0.05%' },
+      expectedRevision: 3,
+      source: origin,
+    });
+    expect((await courseRow(restart.id)).status).toBe('active');
   });
 });

@@ -1,4 +1,4 @@
-import { and, desc, eq, max, ne } from 'drizzle-orm';
+import { and, desc, eq, max } from 'drizzle-orm';
 import {
   addDays,
   isCourseKind,
@@ -14,6 +14,7 @@ import {
   type DoseSlot,
   type MedicineCourseRecord,
 } from '$lib/medicine-plan';
+import { normalizeTimeZone } from '$lib/time-zone';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
@@ -21,6 +22,7 @@ import {
   doseRegimen,
   medicineClaim,
   medicineCourse,
+  patient,
 } from '$lib/server/db/schema';
 import {
   InvalidMedicinePlanInputError,
@@ -224,44 +226,41 @@ export async function updateMedicineClaim(options: {
       .insert(claimRevision)
       .values(claimRevisionValues('medicine', snapshot, options.source));
 
-    if (finishedMedicineStatuses.has(snapshot.status)) {
-      await endOpenCourses(tx, snapshot, changedAt, options.source);
+    // Only the change into a finished status ends courses: a restart course
+    // opened later under a still-stopped medicine survives further edits.
+    if (
+      finishedMedicineStatuses.has(snapshot.status) &&
+      !finishedMedicineStatuses.has(currentSnapshot.status)
+    ) {
+      await endActiveCourses(tx, snapshot, changedAt, options.source);
     }
 
     return snapshot;
   });
 }
 
-async function endOpenCourses(
+async function endActiveCourses(
   tx: WriteTx,
   medicine: { id: string; patientId: string; endDate: string | null },
   changedAt: string,
   source: ClaimRevisionSource,
 ) {
-  const open = await tx
+  // Planned and held courses plan no doses; ending one would make its dates
+  // plan slots that never existed, so only active courses end.
+  const active = await tx
     .select()
     .from(medicineCourse)
     .where(
       and(
         eq(medicineCourse.medicineClaimId, medicine.id),
         eq(medicineCourse.patientId, medicine.patientId),
-        ne(medicineCourse.status, 'ended'),
+        eq(medicineCourse.status, 'active'),
       ),
     );
 
-  for (const course of open) {
-    // Without a stated end date the course ends on the day of the change, on
-    // the calendar its latest rule keeps.
-    let endDate = medicine.endDate;
-    if (!endDate) {
-      const [latest] = await tx
-        .select({ timezone: doseRegimen.timezone })
-        .from(doseRegimen)
-        .where(eq(doseRegimen.courseId, course.id))
-        .orderBy(desc(doseRegimen.effectiveFrom))
-        .limit(1);
-      endDate = localDateOf(changedAt, latest?.timezone || 'UTC');
-    }
+  for (const course of active) {
+    let endDate =
+      medicine.endDate ?? (await changeDate(tx, course.id, medicine.patientId, changedAt));
     if (course.endDate && course.endDate < endDate) endDate = course.endDate;
     if (endDate < course.startDate) endDate = course.startDate;
 
@@ -287,6 +286,30 @@ async function endOpenCourses(
       .insert(claimRevision)
       .values(claimRevisionValues('medicine_course', normalizeMedicineCourse(ended[0]), source));
   }
+}
+
+/**
+ * The calendar date of a change on the calendar of the course's rule in force
+ * at that moment, or the patient's own zone when no rule has started.
+ */
+async function changeDate(tx: WriteTx, courseId: string, patientId: string, changedAt: string) {
+  const rules = await tx
+    .select({ timezone: doseRegimen.timezone, effectiveFrom: doseRegimen.effectiveFrom })
+    .from(doseRegimen)
+    .where(eq(doseRegimen.courseId, courseId))
+    .orderBy(desc(doseRegimen.effectiveFrom));
+  for (const rule of rules) {
+    const date = localDateOf(changedAt, rule.timezone);
+    if (rule.effectiveFrom <= date) return date;
+  }
+
+  const [owner] = await tx
+    .select({ extraData: patient.extraData })
+    .from(patient)
+    .where(eq(patient.id, patientId))
+    .limit(1);
+  const extra = owner?.extraData as { timeZone?: unknown } | null | undefined;
+  return localDateOf(changedAt, normalizeTimeZone(extra?.timeZone));
 }
 
 export async function createDoseRegimen(options: {
