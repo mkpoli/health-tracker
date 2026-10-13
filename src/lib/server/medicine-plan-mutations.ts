@@ -14,7 +14,7 @@ import {
   type DoseSlot,
   type MedicineCourseRecord,
 } from '$lib/medicine-plan';
-import { normalizeTimeZone } from '$lib/time-zone';
+import { timeZoneFromMetadata } from '$lib/time-zone';
 import { db } from '$lib/server/db';
 import {
   claimRevision,
@@ -262,7 +262,9 @@ async function endActiveCourses(
     let endDate =
       medicine.endDate ?? (await changeDate(tx, course.id, medicine.patientId, changedAt));
     if (course.endDate && course.endDate < endDate) endDate = course.endDate;
-    if (endDate < course.startDate) endDate = course.startDate;
+    // A course that would only begin after the end is held instead: an ended
+    // course plans its own start day, a held one plans nothing.
+    const notStarted = endDate < course.startDate;
 
     await tx
       .insert(claimRevision)
@@ -272,8 +274,7 @@ async function endActiveCourses(
     const ended = await tx
       .update(medicineCourse)
       .set({
-        status: 'ended',
-        endDate,
+        ...(notStarted ? { status: 'held' } : { status: 'ended', endDate }),
         revision: course.revision + 1,
         updatedAt: changedAt,
       })
@@ -308,8 +309,7 @@ async function changeDate(tx: WriteTx, courseId: string, patientId: string, chan
     .from(patient)
     .where(eq(patient.id, patientId))
     .limit(1);
-  const extra = owner?.extraData as { timeZone?: unknown } | null | undefined;
-  return localDateOf(changedAt, normalizeTimeZone(extra?.timeZone));
+  return localDateOf(changedAt, timeZoneFromMetadata(owner?.extraData));
 }
 
 export async function createDoseRegimen(options: {

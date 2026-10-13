@@ -617,6 +617,12 @@ describe('medicine plan mutations', () => {
       input: { ...courseInput, status: 'held', startDate: '2026-08-21' },
       origin,
     });
+    const upcoming = await mutations.createMedicineCourse({
+      patientId: 'profile-1',
+      medicineClaimId: 'medicine-2',
+      input: { ...courseInput, startDate: '2026-10-20' },
+      origin,
+    });
     const ruleless = await mutations.createMedicineCourse({
       patientId: 'profile-1',
       medicineClaimId: 'medicine-2',
@@ -722,6 +728,11 @@ describe('medicine plan mutations', () => {
     expect(untouched.end_date).toBe('2026-08-20');
     expect(Number(untouched.revision)).toBe(1);
     expect((await courseRow(held.id)).status).toBe('held');
+
+    // A course that had not begun is held, so its start day plans nothing.
+    const upcomingHeld = await courseRow(upcoming.id);
+    expect(upcomingHeld.status).toBe('held');
+    expect(upcomingHeld.end_date).toBeNull();
 
     // A restart opened under the still-stopped medicine survives later edits.
     const restart = await mutations.createMedicineCourse({
