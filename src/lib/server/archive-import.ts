@@ -1,5 +1,10 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { ACTIVITY_REPORT_KIND, isReportKind } from '$lib/report-kind';
+import { getMetricDefinition } from '$lib/metrics/catalog';
+import { parseNumber } from '$lib/metrics/normalization';
+import { activityMetricByKey, readDailySummary } from '$lib/metrics/activity';
+import { importMetadata } from '$lib/import/measurement-plan';
 import {
   claimRevision,
   dataImport,
@@ -464,9 +469,10 @@ function importedRawData(value: unknown) {
 
 function parseReport(value: unknown) {
   const row = asRecord(value, 'invalid_report');
+  if (!isReportKind(row.kind)) throw new ArchiveImportError('invalid_report');
   return {
     sourceId: sourceId(row, 'invalid_report'),
-    kind: requiredText(row.kind, 'invalid_report', 64),
+    kind: row.kind,
     testDate: validDateText(row.testDate, 'invalid_report'),
     reportTime: optionalText(row.reportTime, 'invalid_report', 64),
     rawData: importedRawData(row.rawData),
@@ -1003,11 +1009,32 @@ async function importRecords(patientId: string, sourcePatientId: string, items: 
   const reportIds = [...new Set(values.map((item) => item.reportId))];
   const parents = reportIds.length
     ? await db
-        .select({ id: report.id })
+        .select({ id: report.id, kind: report.kind, testDate: report.testDate })
         .from(report)
         .where(and(eq(report.patientId, patientId), inArray(report.id, reportIds)))
     : [];
   if (parents.length !== reportIds.length) throw new ArchiveImportError('missing_report');
+  const parentsById = new Map(parents.map((parent) => [parent.id, parent]));
+  // Check the stored parent, including reports reused by an idempotent restore.
+  // Validate the entire batch before inserting any records.
+  for (const value of values) {
+    const parent = parentsById.get(value.reportId)!;
+    if (!isReportKind(parent.kind)) throw new ArchiveImportError('invalid_record');
+    // Clinical reports and manual measurements support free-form metric names.
+    // Activity reports are daily summaries and must satisfy their display contract.
+    if (parent.kind !== ACTIVITY_REPORT_KIND) continue;
+    const key = getMetricDefinition(value.metricName).key;
+    const metric = activityMetricByKey.get(key);
+    const summary = readDailySummary(importMetadata(value.extraData).dailySummary, key);
+    const numeric = parseNumber(value.value);
+    if (!metric || !summary || value.unit !== metric.unit || numeric === null || numeric < 0 ||
+        (metric.unit === '%' && numeric > 100) ||
+        Date.parse(parent.testDate) !== Date.parse(`${summary.date}T12:00:00.000Z`)) {
+      throw new ArchiveImportError('invalid_record');
+    }
+    // The activity reader expects a plain number, including for grouped input.
+    value.value = String(numeric);
+  }
 
   const inserted = await db.insert(record).values(values).onConflictDoNothing().returning({ id: record.id });
   return insertResult(items.length, inserted.length);

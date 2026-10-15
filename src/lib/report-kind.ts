@@ -24,3 +24,8 @@ export function isLabReport(report: { kind?: string | null }) {
 export function isImportableKind(kind?: string | null): kind is ReportKind {
   return isMeasurementKind(kind) || kind === ACTIVITY_REPORT_KIND;
 }
+
+/** Recognized report containers accepted by archive restore. */
+export function isReportKind(value: unknown): value is ReportKind {
+  return value === LAB_REPORT_KIND || value === BODY_REPORT_KIND || value === VITAL_REPORT_KIND || value === ACTIVITY_REPORT_KIND;
+}
