@@ -822,3 +822,125 @@ describe('archive import storage', () => {
     expect(afterDelete.rows[0]?.count).toBe(0);
   });
 });
+
+describe('archive report validation', () => {
+  const date = '2026-10-01T12:00:00.000Z';
+  const summary = {
+    date: '2026-10-01', timeZone: 'Asia/Tokyo', aggregation: 'sum', source: 'Apple Watch',
+    sampleCount: 1, coverageSeconds: 3600, excludedSamples: 0, estimated: false,
+  };
+  const activityRecord = {
+    id: 'steps', reportId: 'daily', metricName: 'Daily Steps', value: '100', unit: 'count',
+    extraData: { dailySummary: summary },
+  };
+  async function profile() {
+    const patientId = crypto.randomUUID();
+    await client.execute({ sql: 'INSERT INTO patient (id, name) VALUES (?, ?)', args: [patientId, 'Validation test'] });
+    return patientId;
+  }
+  function restore(patientId: string, kind: 'reports' | 'records', items: unknown[], sourcePatientId = 'validation-source') {
+    return archiveModule.importArchiveBatch({ patientId, sourcePatientId, kind, items });
+  }
+  async function count(patientId: string, table: 'report' | 'record') {
+    return (await client.execute({ sql: `SELECT count(*) AS count FROM ${table} WHERE patient_id = ?`, args: [patientId] })).rows[0].count;
+  }
+
+  it.each(['unknown', 'Activity', '', null, undefined])('rejects unsupported report kind %s before writing the batch', async (kind) => {
+    const patientId = await profile();
+    await expect(restore(patientId, 'reports', [
+      { id: 'valid', kind: 'lab', testDate: date }, { id: 'invalid', kind, testDate: date },
+    ])).rejects.toMatchObject({ code: 'invalid_report' });
+    expect(await count(patientId, 'report')).toBe(0);
+  });
+
+  it.each(['Glucose', 'Body Weight', 'Heart Rate', 'Custom marker'])('rejects %s under an activity report without writing sibling records', async (metricName) => {
+    const patientId = await profile();
+    await restore(patientId, 'reports', [{ id: 'daily', kind: 'activity', testDate: date }]);
+    await expect(restore(patientId, 'records', [activityRecord, {
+      ...activityRecord, id: 'wrong-kind', metricName,
+      extraData: { metricKey: 'daily-steps', dailySummary: summary },
+    }])).rejects.toMatchObject({ code: 'invalid_record' });
+    expect(await count(patientId, 'record')).toBe(0);
+  });
+
+  it.each([
+    ['missing summary', { extraData: null }],
+    ['invalid summary', { extraData: { dailySummary: { ...summary, aggregation: 'mean' } } }],
+    ['wrong day', { extraData: { dailySummary: { ...summary, date: '2026-10-02' } } }],
+    ['wrong unit', { unit: 'kg' }],
+    ['non-numeric value', { value: 'unknown' }],
+    ['blank value', { value: ' \t' }],
+    ['hexadecimal value', { value: '0x10' }],
+    ['binary value', { value: '0b10' }],
+    ['non-finite value', { value: 'Infinity' }],
+    ['negative value', { value: '-1' }],
+    ['percentage over 100', { metricName: 'Walking Asymmetry', unit: '%', value: '101', extraData: { dailySummary: { ...summary, aggregation: 'mean' } } }],
+  ])('rejects an activity record with %s', async (_name, change) => {
+    const patientId = await profile();
+    await restore(patientId, 'reports', [{ id: 'daily', kind: 'activity', testDate: date }]);
+    await expect(restore(patientId, 'records', [{ ...activityRecord, ...change }])).rejects.toMatchObject({ code: 'invalid_record' });
+    expect(await count(patientId, 'record')).toBe(0);
+  });
+
+  it('normalizes accepted decimal values for the activity reader', async () => {
+    const patientId = await profile();
+    await restore(patientId, 'reports', [{ id: 'daily', kind: 'activity', testDate: date }]);
+    await restore(patientId, 'records', [{ ...activityRecord, value: '1,000.00' }]);
+    const { db } = await import('./db');
+    const schema = await import('./db/schema');
+    const { eq } = await import('drizzle-orm');
+    const { activityPoints } = await import('$lib/activity');
+    const reports = await db.select().from(schema.report).where(eq(schema.report.patientId, patientId));
+    const records = await db.select().from(schema.record).where(eq(schema.record.patientId, patientId));
+    expect(records[0].value).toBe('1000');
+    expect(activityPoints(reports, records)).toMatchObject([{ key: 'daily-steps', value: 1000 }]);
+  });
+
+  it.each(['lab', 'body', 'vital'])('preserves custom metric names in %s reports', async (kind) => {
+    const patientId = await profile();
+    await restore(patientId, 'reports', [{ id: 'custom-report', kind, testDate: date }]);
+    await restore(patientId, 'records', [{ id: 'custom-record', reportId: 'custom-report', metricName: 'Custom measurement', value: '12.3', unit: 'custom unit' }]);
+    expect(await count(patientId, 'record')).toBe(1);
+  });
+
+  it('validates against the stored parent when a repeated report ID has a different incoming kind', async () => {
+    const patientId = await profile();
+    await restore(patientId, 'reports', [{ id: 'daily', kind: 'activity', testDate: date }]);
+    await restore(patientId, 'reports', [{ id: 'daily', kind: 'lab', testDate: date }]);
+    await expect(restore(patientId, 'records', [{ ...activityRecord, metricName: 'Glucose' }])).rejects.toMatchObject({ code: 'invalid_record' });
+    expect(await count(patientId, 'record')).toBe(0);
+    expect((await client.execute({ sql: 'SELECT kind FROM report WHERE patient_id = ?', args: [patientId] })).rows).toEqual([{ kind: 'activity' }]);
+  });
+
+  it('round-trips all eight imported activity metrics with their summaries and stays idempotent', async () => {
+    const { parseAppleHealthExport } = await import('$lib/import/apple-health');
+    const { importMeasurementSessions } = await import('./measurement-import');
+    const { activityPoints } = await import('$lib/activity');
+    const sourcePatientId = await profile();
+    const patientId = await profile();
+    const samples = [
+      ['StepCount', 100, 'count'], ['DistanceWalkingRunning', 1, 'km'],
+      ['ActiveEnergyBurned', 100, 'kcal'], ['BasalEnergyBurned', 200, 'kcal'],
+      ['WalkingSpeed', 3.6, 'km/hr'], ['WalkingStepLength', 60, 'cm'],
+      ['WalkingDoubleSupportPercentage', 0.25, '%'], ['WalkingAsymmetryPercentage', 0.02, '%'],
+    ];
+    const xml = `<HealthData>${samples.map(([type, value, unit]) => `<Record type="HKQuantityTypeIdentifier${type}" sourceName="Apple Watch" unit="${unit}" value="${value}" startDate="2026-10-01T08:00:00Z" endDate="2026-10-01T09:00:00Z"/>`).join('')}</HealthData>`;
+    await importMeasurementSessions({ patientId: sourcePatientId, source: 'apple-health', sessions: parseAppleHealthExport(xml, 'Asia/Tokyo').sessions });
+    // Read through Drizzle, matching the report/record objects used by archive export.
+    const { db } = await import('./db');
+    const schema = await import('./db/schema');
+    const { eq } = await import('drizzle-orm');
+    const reports = await db.select().from(schema.report).where(eq(schema.report.patientId, sourcePatientId));
+    const records = await db.select().from(schema.record).where(eq(schema.record.patientId, sourcePatientId));
+    await restore(patientId, 'reports', reports, sourcePatientId);
+    await restore(patientId, 'records', records, sourcePatientId);
+    await restore(patientId, 'reports', reports, sourcePatientId);
+    await restore(patientId, 'records', records, sourcePatientId);
+    expect(await count(patientId, 'report')).toBe(1);
+    expect(await count(patientId, 'record')).toBe(8);
+    const restoredReports = await db.select().from(schema.report).where(eq(schema.report.patientId, patientId));
+    const restoredRecords = await db.select().from(schema.record).where(eq(schema.record.patientId, patientId));
+    expect(activityPoints(restoredReports, restoredRecords)).toEqual(activityPoints(reports, records));
+    expect(activityPoints(restoredReports, restoredRecords)).toHaveLength(8);
+  });
+});
