@@ -55,7 +55,8 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 
   const pathname = event.url.pathname;
   const isAuthRoute = pathname.startsWith('/auth');
-  const isPublicLandingRoute = event.route.id === '/';
+  // The dashboard root doubles as the landing page; its tab paths need a session.
+  const isPublicLandingRoute = event.route.id === '/[[tab=dashboardTab]]' && !event.params.tab;
 
   // An agent authenticates with a bearer token and cannot follow an HTML login.
   // These paths answer 401 with the metadata that starts the OAuth flow, so a
