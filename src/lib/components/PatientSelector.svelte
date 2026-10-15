@@ -1,5 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { dashboardTabHref, dashboardTabOf } from '$lib/dashboard-tabs';
   import { tick } from 'svelte';
 
   type PatientOption = {
@@ -18,6 +20,11 @@
     label: string;
     emptyLabel: string;
   } = $props();
+
+  // Switching profile keeps the dashboard tab in view.
+  function patientHref(patientId: string) {
+    return dashboardTabHref(dashboardTabOf(page.params.tab), `?patientId=${encodeURIComponent(patientId)}`);
+  }
 
   const selectorId = $props.id();
   const listboxId = `${selectorId}-listbox`;
@@ -139,7 +146,7 @@
     if (!patient) return;
 
     open = false;
-    void goto(`/?patientId=${encodeURIComponent(patient.id)}`);
+    void goto(patientHref(patient.id));
   }
 
   $effect(() => {
@@ -210,7 +217,7 @@
         <a
           bind:this={optionElements[index]}
           id={optionId(index)}
-          href={`/?patientId=${encodeURIComponent(patient.id)}`}
+          href={patientHref(patient.id)}
           role="option"
           aria-selected={patient.id === currentPatientId}
           tabindex="-1"
