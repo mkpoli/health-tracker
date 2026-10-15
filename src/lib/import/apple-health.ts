@@ -1,3 +1,5 @@
+import { createAppleActivityParser, APPLE_ACTIVITY_TYPES } from './apple-activity';
+import type { DailySummary } from '$lib/metrics/activity';
 import { BODY_REPORT_KIND, VITAL_REPORT_KIND, type ReportKind } from '$lib/report-kind';
 
 // Apple Health's "Export All Health Data" produces a zip containing export.xml,
@@ -122,7 +124,7 @@ export const APPLE_HEALTH_MAPPINGS: Record<string, AppleMapping> = {
   },
 };
 
-export type ImportEntry = { key: string; value: string; unit: string };
+export type ImportEntry = { key: string; value: string; unit: string; dailySummary?: DailySummary };
 
 export type ImportSession = {
   kind: ReportKind;
@@ -169,7 +171,8 @@ function readAttributes(raw: string) {
 
   let match: RegExpExecArray | null;
   while ((match = ATTRIBUTE_PATTERN.exec(raw))) {
-    attributes[match[1]] = match[2];
+    attributes[match[1]] = match[2].replace(/&(amp|lt|gt|quot|apos);/g, (_, entity: string) =>
+      ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity] ?? _);
   }
 
   return attributes;
@@ -177,14 +180,16 @@ function readAttributes(raw: string) {
 
 /**
  * Incremental parser: the export is far too large to hold as one string, so it
- * is fed in chunks and only the running per-day totals are kept.
+ * is fed in chunks. Activity intervals are retained until source selection;
+ * other measurements keep one value per day.
  *
- * Samples are grouped into one session per day per kind, keeping the last
- * reading of each day. A watch records heart rate thousands of times a day;
+ * Body and vital samples keep the last reading in each daily session.
+ * Activity uses daily totals or duration-weighted averages. A watch records heart rate thousands of times a day;
  * storing every sample would bury the hand-entered measurements this app is
  * built around, so the daily figure is what gets imported.
  */
-export function createAppleHealthParser() {
+export function createAppleHealthParser(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const activity = createAppleActivityParser(timeZone);
   const seen: Record<string, number> = {};
   const byDay = new Map<string, { kind: ReportKind; measuredAt: Date; entries: Map<string, ImportEntry> }>();
 
@@ -200,6 +205,20 @@ export function createAppleHealthParser() {
     if (!type) return;
 
     seen[type] = (seen[type] || 0) + 1;
+
+    if (Object.hasOwn(APPLE_ACTIVITY_TYPES, type)) {
+      const start = parseAppleDate(attributes.startDate || '');
+      const end = attributes.endDate ? parseAppleDate(attributes.endDate) : start;
+      const created = parseAppleDate(attributes.creationDate || '') ?? start;
+      if (!start || !end || !created || !activity.consume(attributes, start.getTime(), end.getTime(), created.getTime())) {
+        skipped += 1;
+        return;
+      }
+      mapped += 1;
+      if (!earliest || start < earliest) earliest = start;
+      if (!latest || end > latest) latest = end;
+      return;
+    }
 
     const mapping = APPLE_HEALTH_MAPPINGS[type];
     if (!mapping) {
@@ -274,6 +293,7 @@ export function createAppleHealthParser() {
           entries: Array.from(session.entries.values()),
           sourceKey,
         }))
+        .concat(activity.finish())
         .sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
 
       return {
@@ -289,8 +309,8 @@ export function createAppleHealthParser() {
 }
 
 /** Convenience wrapper for a whole document held in memory (tests, small files). */
-export function parseAppleHealthExport(xml: string): ImportSummary {
-  const parser = createAppleHealthParser();
+export function parseAppleHealthExport(xml: string, timeZone?: string): ImportSummary {
+  const parser = createAppleHealthParser(timeZone);
   parser.push(xml);
   return parser.finish();
 }
@@ -299,8 +319,9 @@ export function parseAppleHealthExport(xml: string): ImportSummary {
 export async function readAppleHealthFile(
   file: File,
   onProgress?: (bytesRead: number, totalBytes: number) => void,
+  timeZone?: string,
 ): Promise<ImportSummary> {
-  const parser = createAppleHealthParser();
+  const parser = createAppleHealthParser(timeZone);
   const decoder = new TextDecoder();
   let bytesRead = 0;
 
@@ -373,4 +394,8 @@ export async function readAppleHealthFile(
 
   parser.push(decoder.decode());
   return parser.finish();
+}
+
+export function isSupportedAppleType(type: string) {
+  return Object.hasOwn(APPLE_HEALTH_MAPPINGS, type) || Object.hasOwn(APPLE_ACTIVITY_TYPES, type);
 }

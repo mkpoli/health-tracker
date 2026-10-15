@@ -1,4 +1,4 @@
-export const dashboardTabIds = ['lab', 'body', 'vitals', 'medicine', 'calories'] as const;
+export const dashboardTabIds = ['lab', 'body', 'vitals', 'medicine', 'activity', 'calories'] as const;
 
 export type DashboardTab = (typeof dashboardTabIds)[number];
 

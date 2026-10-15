@@ -1,9 +1,9 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { record, report } from '$lib/server/db/schema';
 import { getMetricDefinition, getMetricTags } from '$lib/metrics/catalog';
 import { normalizeComparableMeasurement } from '$lib/metrics/normalization';
-import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { isLabReport } from '$lib/report-kind';
 import { resolveReportTime } from '$lib/server/report-time';
 import { normalizeExtractionEvidence } from '$lib/extraction-evidence';
 
@@ -90,11 +90,11 @@ export async function saveReviewedReport(input: {
   // writes (e.g. an orphaned report with no records) when a later step fails.
   return db.transaction(async (tx) => {
     // Clinical reports only, so neither the fallback record matching below nor
-    // the target lookup can reach a body measurement session.
-    const patientReports = await tx
+    // the target lookup can reach body, vital or activity measurements.
+    const patientReports = (await tx
       .select()
       .from(report)
-      .where(and(eq(report.patientId, patientId), ne(report.kind, BODY_REPORT_KIND)));
+      .where(eq(report.patientId, patientId))).filter(isLabReport);
     const patientReportMap = new Map(patientReports.map((item) => [item.id, item]));
 
     const allRecords = await tx.select().from(record).where(eq(record.patientId, patientId));

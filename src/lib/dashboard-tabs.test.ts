@@ -10,6 +10,12 @@ describe('dashboard tab routes', () => {
     expect(dashboardTabOf('vitals')).toBe('vitals');
   });
 
+  it('routes activity while preserving the selected profile and query', () => {
+    expect(match('activity')).toBe(true);
+    expect(dashboardTabOf('activity')).toBe('activity');
+    expect(dashboardTabHref('activity', '?patientId=p1&metric=daily-steps')).toBe('/activity?patientId=p1&metric=daily-steps');
+  });
+
   it('matches only the routed tab segments', () => {
     expect(match('calories')).toBe(true);
     expect(match('lab')).toBe(false);

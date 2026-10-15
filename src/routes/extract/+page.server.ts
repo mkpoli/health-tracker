@@ -1,13 +1,13 @@
 import { redirect, fail } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 import type { Actions, PageServerLoad } from './$types';
-import { and, eq, desc, ne } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { patient, report } from '$lib/server/db/schema';
 import { buildRawReportSource, ExtractionInputError, extractMedicalData } from '$lib/server/extraction';
 import { saveReviewedReport } from '$lib/server/report-review';
 import { getOwnedLabReport, getOwnedPatient, requireUserId } from '$lib/server/ownership';
-import { BODY_REPORT_KIND } from '$lib/report-kind';
+import { isLabReport } from '$lib/report-kind';
 import { InvalidReportTimeError } from '$lib/server/report-time';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
@@ -27,11 +27,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   const reports = await db
     .select()
     .from(report)
-    .where(and(eq(report.patientId, selectedPatient.id), ne(report.kind, BODY_REPORT_KIND)))
+    .where(eq(report.patientId, selectedPatient.id))
     .orderBy(desc(report.testDate));
   return {
     currentPatient: selectedPatient,
-    reports,
+    reports: reports.filter(isLabReport),
   };
 };
 

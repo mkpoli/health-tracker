@@ -368,12 +368,12 @@ const listReports: ToolDefinition = {
   name: 'list_reports',
   title: 'List reports',
   description:
-    'Dated index of one profile’s reports — lab results, body measurement sessions and vitals — with how many values each carries. Cheap; use it to decide which report is worth opening.',
+    'Dated index of one profile’s reports — lab results, body measurements, vitals and daily activity — with how many values each carries. Cheap; use it to decide which report is worth opening.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
-      kind: { type: 'string', enum: ['lab', 'body', 'vital'] },
+      kind: { type: 'string', enum: ['lab', 'body', 'vital', 'activity'] },
       from: { type: 'string' },
       to: { type: 'string' },
       limit: { type: 'integer', minimum: 1, maximum: MAX_REPORTS_PER_PAGE },

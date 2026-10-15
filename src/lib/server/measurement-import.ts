@@ -34,6 +34,7 @@ function buildExtraData(
   const comparable = normalizeComparableMeasurement(entry.value, entry.unit, null);
 
   return JSON.stringify({
+    ...(entry.dailySummary ? { dailySummary: entry.dailySummary } : {}),
     metricKey: entry.metricKey,
     parsedLabel: entry.metricName,
     originalLabel: entry.metricName,
