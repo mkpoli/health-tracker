@@ -34,7 +34,7 @@ export type WriteTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export async function validateMedicineProduct(
   tx: WriteTx,
   patientId: string,
-  productId: string | null,
+  productId: string | null | undefined,
 ) {
   if (!productId) return;
   const rows = await tx

@@ -158,3 +158,82 @@ describe('medicine catalog mutations', () => {
     expect((await client.execute('PRAGMA foreign_key_check')).rows).toEqual([]);
   });
 });
+
+async function dashboardAction(name: 'createMedicine' | 'updateMedicine', data: FormData) {
+  const { actions } = await import('../../routes/[[tab=dashboardTab]]/+page.server');
+  return actions[name]({
+    request: new Request('http://localhost/?/' + name, { method: 'POST', body: data }),
+    locals: { user: { sub: 'owner-1' } },
+  } as Parameters<typeof actions[typeof name]>[0]);
+}
+
+async function medicineTool(name: string, args: Record<string, unknown>) {
+  const { healthClaimTools } = await import('./mcp/claim-tools');
+  const tool = healthClaimTools.find((value) => value.name === name)!;
+  return tool.handler({
+    userId: 'owner-1', grant: { id: 'grant-1', lastUsedAt: null }, clientId: 'assistant-client',
+    patientIds: ['profile-1'], shareDemographics: false, canWriteMeasurements: false,
+    canWriteClaims: true, origin: 'https://health.example', now: Date.parse('2026-08-15T12:00:00Z'),
+  }, args);
+}
+
+async function linkedMedicine(patientId = 'profile-1') {
+  const ingredient = await catalog.createMedicineIngredient({
+    patientId, input: ingredientInput(), origin,
+  });
+  const product = await catalog.createMedicineProduct({
+    patientId, input: productInput(ingredient.id), origin,
+  });
+  const { claim } = await claims.createMedicineClaim({
+    patientId, origin,
+    input: parseMedicineInput(form({ name: 'Medicine', status: 'active', productId: product.id })),
+  });
+  return { claim, product };
+}
+
+describe('medicine product links', () => {
+  it.each(['dashboard', 'MCP'])(
+    'preserves a linked product through an unrelated %s edit',
+    async (caller) => {
+      const { claim, product } = await linkedMedicine();
+      if (caller === 'dashboard') {
+        const result = await dashboardAction('updateMedicine', form({
+          id: claim.id, revision: '1', name: 'Medicine', status: 'active', notes: 'Edited notes',
+        }));
+        expect(result).toMatchObject({ success: true });
+      } else {
+        await medicineTool('update_medicine', {
+          patient_id: 'profile-1', medicine_id: claim.id, expected_revision: 1, notes: 'Edited notes',
+        });
+      }
+      const stored = await client.execute({
+        sql: 'SELECT product_id, notes, revision FROM medicine_claim WHERE id = ?', args: [claim.id],
+      });
+      expect(stored.rows[0]).toMatchObject({ product_id: product.id, notes: 'Edited notes', revision: 2 });
+      const history = await client.execute({
+        sql: 'SELECT snapshot FROM claim_revision WHERE claim_id = ? ORDER BY revision', args: [claim.id],
+      });
+      expect(history.rows.map((row) => JSON.parse(String(row.snapshot)).productId))
+        .toEqual([product.id, product.id]);
+    },
+  );
+
+  it('allows an explicit dashboard unlink', async () => {
+    const { claim } = await linkedMedicine();
+    expect(await dashboardAction('updateMedicine', form({
+      id: claim.id, revision: '1', name: 'Medicine', status: 'active', productId: '',
+    }))).toMatchObject({ success: true, medicine: { productId: null, revision: 2 } });
+  });
+
+  it('allows MCP to link and explicitly unlink a product', async () => {
+    const { product } = await linkedMedicine();
+    const created = await medicineTool('create_medicine', {
+      patient_id: 'profile-1', request_id: crypto.randomUUID(), product_id: product.id,
+      name: 'Medicine', start_date: '2026-08-15', regimen: { rule: 'as_needed' },
+    }) as { medicine: { medicine_id: string; product_id: string } };
+    expect(created.medicine.product_id).toBe(product.id);
+    expect(await medicineTool('update_medicine', {
+      patient_id: 'profile-1', medicine_id: created.medicine.medicine_id, expected_revision: 1, product_id: null,
+    })).toMatchObject({ medicine: { product_id: null, revision: 2 } });
+  });
+});

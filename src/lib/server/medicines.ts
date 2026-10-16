@@ -13,7 +13,7 @@ const fieldLimits = {
 } as const;
 
 export type MedicineInput = {
-  productId: string | null;
+  productId?: string | null;
   name: string;
   genericName: string | null;
   form: string | null;
@@ -77,7 +77,7 @@ export function parseMedicineInput(data: FormData): MedicineInput {
   if (!isMedicineStatus(status)) throw new InvalidMedicineInputError('invalid_status');
 
   return {
-    productId: readText(data, 'productId'),
+    ...(data.has('productId') ? { productId: readText(data, 'productId') } : {}),
     name,
     genericName: readText(data, 'genericName'),
     form: readText(data, 'form'),

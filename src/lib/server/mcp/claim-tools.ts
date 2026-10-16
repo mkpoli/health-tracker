@@ -62,6 +62,7 @@ const MAX_CLAIMS_PER_PAGE = 100;
 const MAX_HISTORY_PER_PAGE = 100;
 
 const medicineFields = [
+  'product_id',
   'name',
   'generic_name',
   'form',
@@ -88,6 +89,7 @@ const energyFields = [
 ] as const;
 
 const medicineProperties = {
+  product_id: { type: ['string', 'null'], maxLength: 128 },
   name: { type: 'string', maxLength: 200 },
   generic_name: { type: ['string', 'null'], maxLength: 200 },
   form: { type: ['string', 'null'], maxLength: 120 },
@@ -222,6 +224,7 @@ function mcpProvider(ctx: McpContext) {
 
 function medicineForm(args: Record<string, unknown>, current?: MedicineClaimRecord) {
   const data = new FormData();
+  if (owns(args, 'product_id')) data.set('productId', optionalTextField(args, 'product_id'));
   data.set('name', optionalTextField(args, 'name', current?.name ?? null));
   data.set('genericName', optionalTextField(args, 'generic_name', current?.genericName ?? null));
   data.set('form', optionalTextField(args, 'form', current?.form ?? null));
@@ -336,6 +339,7 @@ function parseEnergy(
 
 function serializeMedicine(claim: MedicineClaimRecord) {
   return {
+    product_id: claim.productId,
     medicine_id: claim.id,
     patient_id: claim.patientId,
     name: claim.name,

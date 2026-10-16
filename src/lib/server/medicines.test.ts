@@ -29,7 +29,6 @@ describe('parseMedicineInput', () => {
       name: 'Amoxicillin',
       genericName: 'amoxicillin',
       form: 'capsule',
-      productId: null,
       strength: '500 mg',
       route: 'oral',
       status: 'active',
@@ -51,6 +50,13 @@ describe('parseMedicineInput', () => {
         }),
       ).productId,
     ).toBe('product-1');
+  });
+
+  it('distinguishes an omitted product link from an explicit unlink', () => {
+    expect(parseMedicineInput(form({ name: 'Medicine', status: 'active' })))
+      .not.toHaveProperty('productId');
+    expect(parseMedicineInput(form({ name: 'Medicine', status: 'active', productId: '' })).productId)
+      .toBeNull();
   });
 
   it('rejects a missing name', () => {
