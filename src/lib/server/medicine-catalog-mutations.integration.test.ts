@@ -237,3 +237,39 @@ describe('medicine product links', () => {
     })).toMatchObject({ medicine: { product_id: null, revision: 2 } });
   });
 });
+
+describe('medicine reference errors', () => {
+  it.each(['createMedicine', 'updateMedicine'] as const)(
+    'returns 400 for another profile product in dashboard %s',
+    async (action) => {
+      const { product } = await linkedMedicine('profile-2');
+      const { claim } = await linkedMedicine();
+      const before = await client.execute('SELECT count(*) AS count FROM claim_revision');
+      const result = await dashboardAction(action, form({
+        patientId: 'profile-1', id: claim.id, revision: '1', productId: product.id,
+        name: 'Medicine', status: 'active', startDate: '2026-08-15',
+        'regimen.ruleKind': 'as_needed', 'regimen.timezone': 'UTC', 'regimen.slots': '[]',
+      }));
+      expect(result).toMatchObject({ status: 400, data: { code: 'medicine_invalid_product' } });
+      expect((await client.execute('SELECT count(*) AS count FROM claim_revision')).rows).toEqual(before.rows);
+    },
+  );
+
+  it.each(['create_medicine', 'update_medicine'])(
+    'returns ToolError for another profile product in MCP %s',
+    async (name) => {
+      const { product } = await linkedMedicine('profile-2');
+      const { claim } = await linkedMedicine();
+      const { ToolError } = await import('./mcp/context');
+      const before = await client.execute('SELECT count(*) AS count FROM claim_revision');
+      const result = medicineTool(name, {
+        patient_id: 'profile-1', request_id: crypto.randomUUID(), medicine_id: claim.id,
+        expected_revision: 1, product_id: product.id, name: 'Medicine', start_date: '2026-08-15',
+        regimen: { rule: 'as_needed' },
+      });
+      await expect(result).rejects.toBeInstanceOf(ToolError);
+      await expect(result).rejects.toThrow('The medicine product is outside this profile');
+      expect((await client.execute('SELECT count(*) AS count FROM claim_revision')).rows).toEqual(before.rows);
+    },
+  );
+});

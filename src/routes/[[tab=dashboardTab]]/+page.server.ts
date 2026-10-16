@@ -90,6 +90,7 @@ import {
 } from '$lib/server/claim-revisions';
 import {
   createEnergyClaim,
+  InvalidMedicineReferenceError,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -402,6 +403,9 @@ export const actions: Actions = {
 
       return { success: true, medicine, course, regimen };
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        return fail(400, { code: 'medicine_invalid_product' });
+      }
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
       }
@@ -439,6 +443,9 @@ export const actions: Actions = {
 
       return { success: true, medicine };
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        return fail(400, { code: 'medicine_invalid_product' });
+      }
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
       }

@@ -13,6 +13,7 @@ import {
 } from '$lib/server/db/schema';
 import {
   createEnergyClaim,
+  InvalidMedicineReferenceError,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -522,6 +523,9 @@ const createMedicine: ToolDefinition = {
       origin: { kind: 'mcp', provider, externalId: key },
       });
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        throw new ToolError(error.message);
+      }
       if (error instanceof InvalidMedicinePlanInputError) {
         throw new ToolError('Invalid regimen: the rule must start inside the course, and end_date must not fall before start_date');
       }
@@ -583,6 +587,9 @@ const updateMedicine: ToolDefinition = {
       });
       return { updated: true, medicine: serializeMedicine(updated) };
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        throw new ToolError(error.message);
+      }
       if (error instanceof StaleClaimRevisionError) {
         const latest = await getOwnedMedicineClaim(ctx.userId, id);
         throw new ToolError(`Revision conflict; current_revision is ${latest?.revision ?? 'unknown'}`);
