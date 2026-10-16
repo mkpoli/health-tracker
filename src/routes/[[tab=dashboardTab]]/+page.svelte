@@ -5,8 +5,7 @@
   import { dashboardTabHref, dashboardTabOf, type DashboardTab } from '$lib/dashboard-tabs';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
-  import { downloadPatientArchive } from '$lib/export';
-  import { fetchMedicineCatalogArchive } from '$lib/medicine-catalog-client';
+  import { exportPatientArchive } from '$lib/patient-archive-export';
   import { tick } from 'svelte';
   import {
     normalizeComparableMeasurement,
@@ -550,28 +549,7 @@
     exportingPatientData = true;
 
     try {
-      const catalog = await fetchMedicineCatalogArchive(data.currentPatient.id);
-      await downloadPatientArchive(
-        {
-          patient: data.currentPatient,
-          reports: data.reports,
-          records: data.records,
-          medicineIngredients: catalog.medicineIngredients,
-          medicineProducts: catalog.medicineProducts,
-          medicines: data.medicines,
-          medicineCourses: data.medicineCourses,
-          doseRegimens: data.doseRegimens,
-          doseOccurrences: data.doseOccurrences,
-          energyEntries: data.energyEntries,
-          energySources: data.energySources,
-          dataImports: data.dataImports,
-          exerciseDefinitions: data.exerciseDefinitions,
-          workouts: data.workouts,
-          claimRevisions: data.claimRevisions,
-          medicineCatalogRevisions: catalog.medicineCatalogRevisions,
-        },
-        data.currentPatient.name,
-      );
+      await exportPatientArchive(data);
     } catch {
       alert(m.export_archive_failed());
     } finally {
