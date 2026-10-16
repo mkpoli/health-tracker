@@ -2924,6 +2924,9 @@
             patientId={data.currentPatient.id}
             medicines={data.medicines}
             revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
+            ingredients={data.medicineIngredients}
+            products={data.medicineProducts}
+            catalogRevisions={data.medicineCatalogRevisions}
             courses={data.medicineCourses}
             regimens={data.doseRegimens}
             occurrences={data.doseOccurrences}
