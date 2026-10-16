@@ -23,6 +23,7 @@ import {
 import { requirePatient, ToolError, type McpContext } from './context';
 import { capResult } from './budget';
 import { healthClaimTools } from './claim-tools';
+import { medicineCatalogTools } from './medicine-catalog-tools';
 
 // The surface follows the questions a reader asks: which profiles are shared,
 // what is current, how has a value moved, which claims exist, and what changed.
@@ -704,6 +705,7 @@ export const tools: ToolDefinition[] = [
   searchMetrics,
   getReferenceRanges,
   logMeasurement,
+  ...medicineCatalogTools,
   ...healthClaimTools,
 ];
 
@@ -720,7 +722,8 @@ export function toolAllowed(ctx: McpContext, tool: ToolDefinition) {
 export const serverInstructions = [
   'This server reads one account holder’s health records: lab results, measurements, medicine claims, food intake and energy expenditure.',
   'Call list_patients, then get_health_summary, and only then get_metric_history for the metrics in question.',
-  'Use list_medicines and list_energy_entries for claim data. A medicine schedule is a user-editable claim and does not show that a dose was taken.',
+  'Use list_medicine_catalog for products, ingredients, localized names, identifiers and provenance. Use list_medicines and list_energy_entries for claim data. A medicine schedule is a user-editable claim and does not show that a dose was taken.',
+  'Use get_medicine_catalog_history for prior product or ingredient versions. read_medicine_catalog_source returns retained source JSON in bounded chunks when the provenance payload is needed.',
   'Ask the person to confirm values before creating or changing a claim. Use the revision returned by a read when updating. Reuse request_id when retrying the same creation.',
   'Values arrive unit-normalized. A metric marked stale has outlived the period a reading of its kind describes; do not present it as current.',
   'A null status means no interval applied — the report carried none, no published range fits what is known about this person, or the draw conditions do not match the interval. Report the number without calling it normal or abnormal; range_notes says which.',

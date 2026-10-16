@@ -9,6 +9,8 @@ const databasePath = join(tmpdir(), `health-tracker-mcp-claims-${crypto.randomUU
 const databaseUrl = `file:${databasePath}`;
 let client: Client;
 let claimTools: typeof import('./claim-tools');
+let catalogTools: typeof import('./medicine-catalog-tools');
+let catalogMutations: typeof import('../medicine-catalog-mutations');
 let toolsModule: typeof import('./tools');
 let protocolModule: typeof import('./protocol');
 let contextModule: typeof import('./context');
@@ -45,9 +47,128 @@ beforeAll(async () => {
       birthday TEXT,
       extra_data TEXT
     );
+    CREATE TABLE medicine_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      canonical_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_product (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      product_type TEXT NOT NULL DEFAULT 'other',
+      status TEXT NOT NULL DEFAULT 'active',
+      dose_form_text TEXT,
+      dose_form_system TEXT,
+      dose_form_code TEXT,
+      route_text TEXT,
+      route_system TEXT,
+      route_code TEXT,
+      strength_text TEXT,
+      manufacturer TEXT,
+      marketing_authorization_holder TEXT,
+      market_country TEXT,
+      package_description TEXT,
+      imprint TEXT,
+      color TEXT,
+      shape TEXT,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_name (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      language_tag TEXT NOT NULL DEFAULT 'und',
+      name_type TEXT NOT NULL DEFAULT 'preferred',
+      jurisdiction TEXT,
+      preferred INTEGER NOT NULL DEFAULT 0,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_catalog_identifier (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      system TEXT NOT NULL,
+      code TEXT NOT NULL,
+      jurisdiction TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_product_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL,
+      ingredient_id TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'active',
+      numerator_value TEXT,
+      numerator_unit TEXT,
+      denominator_value TEXT,
+      denominator_unit TEXT,
+      strength_text TEXT,
+      basis_of_strength_text TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_revision (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      entity_kind TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      snapshot TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      change_origin_kind TEXT NOT NULL DEFAULT 'manual',
+      change_origin_provider TEXT,
+      UNIQUE(entity_kind, entity_id, revision)
+    );
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT,
       name TEXT NOT NULL,
       generic_name TEXT,
       form TEXT,
@@ -124,6 +245,8 @@ beforeAll(async () => {
       ('profile-3', 'owner-2', 'Other owner', '{"timeZone":"UTC"}');
   `);
   claimTools = await import('./claim-tools');
+  catalogTools = await import('./medicine-catalog-tools');
+  catalogMutations = await import('../medicine-catalog-mutations');
   toolsModule = await import('./tools');
   protocolModule = await import('./protocol');
   contextModule = await import('./context');
@@ -143,6 +266,251 @@ function tool(name: string) {
   if (!definition) throw new Error(`Missing tool ${name}`);
   return definition;
 }
+
+function catalogTool(name: string) {
+  const definition = catalogTools.medicineCatalogTools.find((candidate) => candidate.name === name);
+  if (!definition) throw new Error(`Missing tool ${name}`);
+  return definition;
+}
+
+describe('MCP medicine catalog', () => {
+  it('creates reusable ingredients and packaged products with retry-safe identifiers', async () => {
+    const createIngredient = catalogTool('create_medicine_ingredient');
+    const first = (await createIngredient.handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'ingredient-semaglutide',
+      canonical_name: 'Semaglutide',
+      names: [
+        {
+          name: 'Semaglutide',
+          language_tag: 'en',
+          name_type: 'generic',
+          preferred: true,
+          source_kind: 'terminology',
+          source_provider: 'RxNorm',
+        },
+        {
+          name: 'セマグルチド',
+          language_tag: 'ja',
+          name_type: 'generic',
+          preferred: true,
+          source_kind: 'regulator',
+          source_provider: 'PMDA',
+        },
+      ],
+      identifiers: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '1991302' }],
+      source_data: { source: 'test-fixture' },
+    })) as any;
+    const retry = (await createIngredient.handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'ingredient-semaglutide',
+      canonical_name: 'Changed retry payload',
+    })) as any;
+    expect(first.created).toBe(true);
+    expect(retry).toMatchObject({
+      created: false,
+      ingredient: { ingredient_id: first.ingredient.ingredient_id, canonical_name: 'Semaglutide' },
+    });
+    const sourceChunk = (await catalogTool('read_medicine_catalog_source').handler(context, {
+      patient_id: 'profile-1',
+      entity_kind: 'ingredient',
+      entity_id: first.ingredient.ingredient_id,
+      revision: 1,
+      limit: 5,
+    })) as any;
+    expect(sourceChunk).toMatchObject({
+      offset: 0,
+      revision: 1,
+      complete: false,
+      next_offset: 5,
+      sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+
+    const product = (await catalogTool('create_medicine_product').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'product-wegovy-025',
+      display_name: 'Wegovy 0.25 mg',
+      product_type: 'branded',
+      dose_form: 'injection',
+      route: 'subcutaneous',
+      strength: '0.25 mg per dose',
+      market_country: 'JP',
+      names: [{ name: 'ウゴービ皮下注 0.25 mg', language_tag: 'ja', name_type: 'brand', preferred: true }],
+      identifiers: [{ system: 'YJ', code: '2499418G1020', jurisdiction: 'JP' }],
+      ingredients: [
+        {
+          ingredient_id: first.ingredient.ingredient_id,
+          role: 'active',
+          numerator_value: '0.25',
+          numerator_unit: 'mg',
+          strength_text: '0.25 mg per dose',
+        },
+      ],
+    })) as any;
+    expect(product).toMatchObject({
+      created: true,
+      product: {
+        display_name: 'Wegovy 0.25 mg',
+        route: 'subcutaneous',
+        ingredients: [{ ingredient_id: first.ingredient.ingredient_id }],
+      },
+    });
+
+    const listed = (await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1',
+      query: 'ウゴービ',
+    })) as any;
+    expect(listed.product_total).toBe(1);
+    expect(listed.products[0].identifiers[0]).toMatchObject({ system: 'YJ', code: '2499418G1020' });
+    const normalizedSearch = (await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1',
+      query: 'Ｗｅｇｏｖｙ',
+    })) as any;
+    expect(normalizedSearch.product_total).toBe(1);
+
+    const medicine = (await tool('create_medicine').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'wegovy-plan',
+      product_id: product.product.product_id,
+      name: 'Wegovy',
+      strength: '0.25 mg',
+      schedule: 'Once weekly',
+      status: 'active',
+    })) as any;
+    expect(medicine.medicine.product_id).toBe(product.product.product_id);
+
+    await expect(
+      tool('create_medicine').handler(context, {
+        patient_id: 'profile-1',
+        request_id: 'unknown-product-plan',
+        product_id: 'missing-product',
+        name: 'Unknown product plan',
+        status: 'active',
+      }),
+    ).rejects.toThrow('does not identify a catalog product in this profile');
+  });
+
+  it('keeps catalog revisions and rejects cross-profile ingredient references', async () => {
+    const catalog = (await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1',
+      query: 'Wegovy',
+    })) as any;
+    const product = catalog.products[0];
+    const ingredient = product.ingredients[0].ingredient;
+    const changed = (await catalogTool('update_medicine_product').handler(context, {
+      patient_id: 'profile-1',
+      product_id: product.product_id,
+      expected_revision: product.revision,
+      display_name: 'Wegovy 0.25 mg single-dose pen',
+    })) as any;
+    expect(changed.product.revision).toBe(2);
+    expect(changed.product.ingredients[0].ingredient_id).toBe(ingredient.ingredient_id);
+    const history = (await catalogTool('get_medicine_catalog_history').handler(context, {
+      patient_id: 'profile-1',
+      entity_kind: 'product',
+      entity_id: product.product_id,
+    })) as any;
+    expect(history.revisions.map((revision: any) => revision.revision)).toEqual([2, 1]);
+    expect(history.revisions[0].change_source).toEqual({
+      kind: 'mcp',
+      provider: 'mcp:assistant-client',
+    });
+    const revisions = await client.execute({
+      sql: 'SELECT revision FROM medicine_catalog_revision WHERE entity_kind = ? AND entity_id = ? ORDER BY revision',
+      args: ['product', product.product_id],
+    });
+    expect(revisions.rows.map((row) => row.revision)).toEqual([1, 2]);
+
+    await client.execute({
+      sql: `INSERT INTO medicine_ingredient
+        (id, patient_id, canonical_name, normalized_name, status, origin_kind, revision)
+        VALUES (?, ?, ?, ?, 'active', 'manual', 1)`,
+      args: ['outside-ingredient', 'profile-2', 'Outside', 'outside'],
+    });
+    await expect(
+      catalogTool('create_medicine_product').handler(context, {
+        patient_id: 'profile-1',
+        request_id: 'cross-profile-product',
+        display_name: 'Invalid product',
+        ingredients: [{ ingredient_id: 'outside-ingredient' }],
+      }),
+    ).rejects.toThrow('does not belong to this profile');
+  });
+
+  it('guards catalog deletion and preserves detached medicine-plan history', async () => {
+    const catalog = (await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1',
+    })) as any;
+    const product = catalog.products[0];
+    const ingredient = product.ingredients[0].ingredient;
+
+    await expect(
+      catalogMutations.deleteMedicineIngredient({
+        patientId: 'profile-1',
+        id: ingredient.ingredient_id,
+        expectedRevision: ingredient.revision,
+      }),
+    ).rejects.toBeInstanceOf(catalogMutations.MedicineCatalogIngredientInUseError);
+    await expect(
+      catalogMutations.deleteMedicineProduct({
+        patientId: 'profile-1',
+        id: product.product_id,
+        expectedRevision: product.revision - 1,
+        source: { kind: 'manual', provider: null },
+      }),
+    ).rejects.toMatchObject({ name: 'StaleClaimRevisionError' });
+
+    const deleted = await catalogMutations.deleteMedicineProduct({
+      patientId: 'profile-1',
+      id: product.product_id,
+      expectedRevision: product.revision,
+      source: { kind: 'manual', provider: null },
+      changedAt: '2026-08-15T13:00:00.000Z',
+    });
+    expect(deleted.detachedClaimIds).toHaveLength(1);
+
+    const detached = await client.execute({
+      sql: `SELECT product_id, revision, updated_at FROM medicine_claim WHERE id = ?`,
+      args: [deleted.detachedClaimIds[0]],
+    });
+    expect(detached.rows[0]).toMatchObject({
+      product_id: null,
+      revision: 2,
+      updated_at: '2026-08-15T13:00:00.000Z',
+    });
+    const planHistory = await client.execute({
+      sql: `SELECT revision, json_extract(snapshot, '$.productId') AS product_id
+        FROM claim_revision WHERE claim_kind = 'medicine' AND claim_id = ? ORDER BY revision`,
+      args: [deleted.detachedClaimIds[0]],
+    });
+    expect(planHistory.rows).toEqual([
+      { revision: 1, product_id: product.product_id },
+      { revision: 2, product_id: null },
+    ]);
+    const productRows = await client.execute({
+      sql: `SELECT
+        (SELECT count(*) FROM medicine_product WHERE id = ?) AS products,
+        (SELECT count(*) FROM medicine_catalog_revision
+          WHERE entity_kind = 'product' AND entity_id = ?) AS revisions`,
+      args: [product.product_id, product.product_id],
+    });
+    expect(productRows.rows[0]).toMatchObject({ products: 0, revisions: 0 });
+
+    await catalogMutations.deleteMedicineIngredient({
+      patientId: 'profile-1',
+      id: ingredient.ingredient_id,
+      expectedRevision: ingredient.revision,
+    });
+    const ingredientRows = await client.execute({
+      sql: `SELECT
+        (SELECT count(*) FROM medicine_ingredient WHERE id = ?) AS ingredients,
+        (SELECT count(*) FROM medicine_catalog_revision
+          WHERE entity_kind = 'ingredient' AND entity_id = ?) AS revisions`,
+      args: [ingredient.ingredient_id, ingredient.ingredient_id],
+    });
+    expect(ingredientRows.rows[0]).toMatchObject({ ingredients: 0, revisions: 0 });
+  });
+});
 
 describe('MCP medicine claims', () => {
   it('uses request IDs for retry safety and keeps every saved revision', async () => {
@@ -206,11 +574,13 @@ describe('MCP medicine claims', () => {
       provider: 'mcp:assistant-client',
     });
 
-    const counts = await client.execute(`
-      SELECT
-        (SELECT count(*) FROM medicine_claim) AS medicines,
-        (SELECT count(*) FROM claim_revision WHERE claim_kind = 'medicine') AS revisions
-    `);
+    const counts = await client.execute({
+      sql: `SELECT
+        (SELECT count(*) FROM medicine_claim WHERE name = ?) AS medicines,
+        (SELECT count(*) FROM claim_revision
+          WHERE claim_kind = 'medicine' AND claim_id = ?) AS revisions`,
+      args: ['Amoxicillin', first.medicine.medicine_id],
+    });
     expect(counts.rows[0]).toMatchObject({ medicines: 1, revisions: 2 });
   });
 
@@ -384,10 +754,14 @@ describe('MCP claim permissions', () => {
       canWriteClaims: false,
     };
     const names = toolsModule.toolsFor(readContext).map((definition) => definition.name);
+    expect(names).toContain('list_medicine_catalog');
+    expect(names).toContain('get_medicine_catalog_history');
+    expect(names).toContain('read_medicine_catalog_source');
     expect(names).toContain('list_medicines');
     expect(names).toContain('list_energy_entries');
     expect(names).toContain('get_claim_history');
     expect(names).not.toContain('create_medicine');
+    expect(names).not.toContain('create_medicine_product');
     expect(names).not.toContain('log_energy_entry');
 
     const measurementNames = toolsModule
@@ -401,6 +775,7 @@ describe('MCP claim permissions', () => {
       .map((definition) => definition.name);
     expect(claimNames).not.toContain('log_measurement');
     expect(claimNames).toContain('create_medicine');
+    expect(claimNames).toContain('create_medicine_product');
 
     const response = (await protocolModule.dispatch(
       { jsonrpc: '2.0', id: 1, method: 'tools/list' },
