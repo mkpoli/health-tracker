@@ -304,3 +304,20 @@ describe('medicine product records', () => {
     )).toThrow(`Missing medicine ingredient: ${product.ingredients[0].ingredientId}`);
   });
 });
+
+describe('composition constraints', () => {
+  it('enforces ingredient uniqueness even when bypassing the parser', async () => {
+    const { product } = await linkedMedicine();
+    await expect(drizzle(client).insert(schema.medicineProductIngredient).values({
+      patientId: 'profile-1', productId: product.id, ingredientId: product.ingredients[0].ingredientId,
+      orderIndex: 1, role: 'inactive',
+    })).rejects.toMatchObject({
+      cause: {
+        message: expect.stringContaining(
+          'UNIQUE constraint failed: medicine_product_ingredient.product_id, medicine_product_ingredient.ingredient_id',
+        ),
+      },
+    });
+    expect((await catalog.getMedicineProductRecord('profile-1', product.id))?.ingredients).toHaveLength(1);
+  });
+});

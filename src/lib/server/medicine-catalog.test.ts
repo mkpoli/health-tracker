@@ -174,3 +174,19 @@ describe('medicine catalog names', () => {
     expect(normalizedMedicineCatalogName('  Ｗｅｇｏｖｙ   0.25 MG ')).toBe('wegovy 0.25 mg');
   });
 });
+
+describe('product composition uniqueness', () => {
+  it('rejects the same ingredient with different row IDs and roles', () => {
+    expect(() => parseMedicineProductInput(form({
+      displayName: 'Product',
+      structure: JSON.stringify({
+        names: [],
+        identifiers: [],
+        ingredients: [
+          { id: 'row-1', ingredientId: 'ingredient-1', role: 'active' },
+          { id: 'row-2', ingredientId: ' ingredient-1 ', role: 'inactive' },
+        ],
+      }),
+    }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_ingredient'));
+  });
+});
