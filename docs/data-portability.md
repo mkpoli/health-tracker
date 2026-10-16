@@ -13,7 +13,8 @@ The archive contains:
 
 - profile details;
 - reports and recorded values;
-- medicine ingredients, packaged products, localized names, identifiers, provenance, saved catalog versions, current medicine plans, and saved plan revisions;
+- medicine ingredients, packaged products, localized names, identifiers, provenance, and saved catalog versions;
+- current medicine plans and saved plan revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
 - exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
 - import records and retained source files, including Hevy workout CSV files;
@@ -47,6 +48,7 @@ Profile replacement stays off by default. The structured import runs in bounded 
 - Repeating the same restore reuses those IDs and fills missing records.
 - Provider and external IDs identify calorie and workout records that already arrived through a connector.
 - Existing current records retain their local values when identities meet. Missing historical revisions are added.
+- Restoring an existing catalog entry keeps its stored names and identifiers.
 - Existing retained files remain in place. A missing storage object can be repaired from the ZIP.
 - A current-format ZIP requires byte counts and SHA-256 checksums for every retained file.
 
@@ -58,7 +60,9 @@ Messages used to prepare Medicine or Calories drafts are copied into the claim's
 
 The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
 
-Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 8 carries medicine ingredients before products and medicine plans. It carries source imports and exercise definitions before workouts. Saved revisions are restored after their current records exist.
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure.
+
+Archive version 8 restores medicine ingredients before products and medicine plans, source imports and exercise definitions before workouts, and saved revisions after their current records.
 
 ## Hevy workout CSV import
 
