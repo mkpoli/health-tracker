@@ -65,6 +65,12 @@ capability. The two creation tools require a `request_id` for retry safety.
 Updates require the current revision so a newer edit cannot be overwritten.
 Laboratory results continue through the uploaded report review flow.
 
+The product catalog adds `list_medicine_catalog`, `get_medicine_catalog_history`
+and `read_medicine_catalog_source` for reading, and `create_medicine_ingredient`,
+`update_medicine_ingredient`, `create_medicine_product` and
+`update_medicine_product` for writing under `health:claims:write`. Medicines
+accept an optional `product_id`.
+
 For dose actions, `record_dose_action` accepts `actual_at: null` when a dose was
 taken at an unknown time. This also clears a previously recorded timestamp.
 Omitting the field preserves an existing record's time, including an unknown

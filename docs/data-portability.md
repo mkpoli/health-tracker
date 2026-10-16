@@ -122,27 +122,40 @@ curl 'https://<host>/mcp' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
+Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicine_catalog`, `get_medicine_catalog_history`, `read_medicine_catalog_source`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
 
 A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
 
-- `create_medicine` creates a medicine together with its first course and dose regimen in one write; a medicine never exists without a rule that says when it is taken. `update_medicine` changes the catalog fields.
+- `create_medicine_ingredient` and `update_medicine_ingredient` manage reusable active ingredients.
+- `create_medicine_product` and `update_medicine_product` manage packaged or compounded products linked to those ingredients.
+- `create_medicine` creates a medicine together with its first course and dose regimen in one write; a medicine never exists without a rule that says when it is taken. `update_medicine` changes the catalog fields. The optional `product_id` links the medicine to an exact product in the product catalog.
 - `set_regimen`, `update_regimen` and `update_course` change the dose plan behind a medicine; `get_medicine_plan` reads it and needs no write scope.
 - `log_energy_entry` and `update_energy_entry` manage food intake and energy expenditure. Exercise can be recorded as `direction: "expenditure"` with optional duration and kilocalories.
 
 The consent screen grants each write scope independently. Connections created before claim writes existed retain their measurement capability and require fresh consent for `health:claims:write`.
 
-`create_medicine`, `set_regimen` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
+`create_medicine_ingredient`, `create_medicine_product`, `create_medicine`, `set_regimen` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
 
 `create_medicine` requires `start_date` and a `regimen`: `fixed_slots` with one to twelve slots anchored to a clock time, waking, a meal or bedtime; `interval` with `interval_hours` and `anchor_at`; or `as_needed`. The regimen takes the profile timezone and the course start date unless the call says otherwise. The response carries the medicine, its course and its regimen, and `list_dose_occurrences` plans from them at once.
 
 `get_medicine_plan` reads one medicine's courses and regimens with their ids and revisions; slots come back in the shape the write tools accept, so a read can be edited and sent back. `set_regimen` starts a new rule on the open course from `regimen.effective_from`, closing the previous rule the day before (a rule starting the same day is corrected with `update_regimen` instead), and gives a medicine without a course its first one, or a restart course after an ended one. `update_regimen` corrects one rule in place under `expected_revision`; a slot keeps its key, and a new slot never receives a key the rule has used before, so recorded doses stay attached to the slot they were taken under. `update_course` changes a course's status and dates under its own `expected_revision`: `ended` needs `end_date`, `active` starts a planned or held course. The catalog status changes separately through `update_medicine`. `get_claim_history` reads the saved versions of courses (`medicine_course`) and regimens (`dose_regimen`) as well as medicines and energy entries.
 
-Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the claim again before proposing another change. Every successful create and update appears in `get_claim_history` with its change source.
+Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the record again before proposing another change. Medicine plan and energy versions appear in `get_claim_history` with their change source. Ingredient and product versions appear in `get_medicine_catalog_history`.
 
 Energy timestamps require ISO form with `Z` or a numeric UTC offset. The profile's IANA timezone is used when the call omits `timezone`. Day filters on `list_energy_entries` use each entry's retained local date. Totals include recorded entries with known kilocalories; drafts and excluded entries remain visible according to the selected filters.
 
 Medicine claims describe the catalog; the dose plan lives on courses and regimens, and dose-taking events on occurrences. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
+
+### Product catalog workflow for agents
+
+1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks canonical names, product display names, and localized names.
+2. Create each reusable ingredient with `create_medicine_ingredient`. `names` may carry BCP 47 language tags, name type, country, preferred status, and source details. `identifiers` may carry RxNorm, YJ, HOT, GS1, Wikidata, or another declared code system.
+3. Create the packaged product with `create_medicine_product`. Each item in `ingredients` uses an `ingredient_id` from step 2. Structured strengths use numerator and denominator values with units. `strength_text` preserves the label wording.
+4. Pass the returned `product_id` to `create_medicine` when a medicine concerns that exact product. The medicine keeps its own editable name, form, strength and route.
+
+Catalog update tools accept selected fields and keep omitted fields unchanged. Updating `names`, `identifiers`, or `ingredients` replaces that collection, so a caller should send the complete desired collection. Every update requires `expected_revision`. The list tool returns the child row IDs needed to preserve a name, identifier, or ingredient component across an update.
+
+`source_data` accepts JSON up to 2 MB on ingredient and product writes. It is suitable for a retained terminology response or regulator payload when the caller has permission to store it. Catalog reads report whether this payload exists and its byte size. `read_medicine_catalog_source` returns bounded JSON chunks with a SHA-256 checksum and continuation offset; an optional `revision` reads the payload saved with that version. Name, identifier, and ingredient-component rows carry their own source type, provider, URL, and retrieval time. Public database labels remain attributed to their source and language.
 
 The MCP endpoint and versioned archive are the supported external integration surfaces. Page actions and retained-file routes serve the web application and may change with its implementation.
 
