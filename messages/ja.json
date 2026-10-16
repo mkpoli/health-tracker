@@ -1135,7 +1135,7 @@
   "medicine_catalog_versions_retry": "再読み込み",
   "medicine_catalog_versions_loading": "保存済みの履歴を読み込み中…",
   "medicine_catalog_invalid_identifier": "識別子にはシステムとコードの両方が必要です。両方を入力するか、その行を削除してください。",
-  "medicine_catalog_invalid_ingredient": "同じ成分を1つの製品に重複して登録することはできません。重複を削除するか、別の成分を選んでください。",
+  "medicine_catalog_invalid_ingredient": "同じ成分が重複しているか、成分が利用できなくなっています。重複を削除するか、別の成分を選んでください。",
   "medicine_catalog_save_failed": "薬剤カタログを保存できませんでした。入力内容を確認して、もう一度お試しください。",
   "medicine_catalog_invalid_strength": "含有量と基準量には正の数を入力し、それぞれ単位を指定してください。基準量を指定する場合は含有量も必要です。",
   "medicine_catalog_invalid_language": "en、ja、zh-Hansなどの有効な言語タグを入力してください。",

@@ -1135,7 +1135,7 @@
   "medicine_catalog_versions_retry": "重试",
   "medicine_catalog_versions_loading": "正在加载已保存的版本…",
   "medicine_catalog_invalid_identifier": "每个标识符都需要同时填写系统和代码。请补全，或删除该行。",
-  "medicine_catalog_invalid_ingredient": "同一产品中每种成分只能列出一次。请删除重复项，或选择其他成分。",
+  "medicine_catalog_invalid_ingredient": "有成分被重复列出，或已不可用。请删除重复项，或选择其他成分。",
   "medicine_catalog_save_failed": "无法保存药品目录条目。请检查内容后重试。",
   "medicine_catalog_invalid_strength": "含量和基准量须为正数，并各自填写单位。填写基准量时，也须填写含量。",
   "medicine_catalog_invalid_language": "请输入有效的语言标签，例如en、ja或zh-Hans。",
