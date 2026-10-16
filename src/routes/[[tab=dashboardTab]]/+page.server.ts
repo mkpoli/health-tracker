@@ -331,6 +331,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 
     return normalized ? [normalized] : [];
   });
+
   return {
     user: locals.user,
     session: locals.session,
