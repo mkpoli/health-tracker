@@ -50,6 +50,16 @@ capability. The two creation tools require a `request_id` for retry safety.
 Updates require the current revision so a newer edit cannot be overwritten.
 Laboratory results continue through the uploaded report review flow.
 
+The product catalog adds `list_medicine_catalog`, `get_medicine_catalog_entry`, `get_medicine_catalog_history`
+and `read_medicine_catalog_source` for reading, and `create_medicine_ingredient`,
+`update_medicine_ingredient`, `create_medicine_product` and
+`update_medicine_product` for writing under `health:claims:write`. Medicines
+accept an optional `product_id`.
+
+`get_medicine_catalog_entry` pages through complete child rows; optional `revision` selects a saved ingredient or product snapshot. Pass each `next_*_offset` back as its collection’s offset. A null offset or zero limit skips that collection and returns a null next offset. Budget trimming sets `truncated: true`; request an emptied collection separately if its offset did not advance. Use the saved revision when recovering children from truncated history snapshots.
+
+Catalog responses use `source_data_summary: {available, byte_size}` for retained payload metadata. Write `source_data` only to replace the payload; omitting it preserves the stored JSON.
+
 For dose actions, `record_dose_action` accepts `actual_at: null` when a dose was
 taken at an unknown time. This also clears a previously recorded timestamp.
 Omitting the field preserves an existing record's time, including an unknown

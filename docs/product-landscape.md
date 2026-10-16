@@ -214,7 +214,7 @@ Each importer should show detected format, profile destination, date range, coun
 
 1. Native workout, exercise, set, and workout-plan records with revisions and archive support — available.
 2. Hevy workout CSV import with review, repeat identity, retained source files, and conflict protection — available.
-3. Medicine product catalog with ingredients, presentations, identifiers, jurisdictions, and sourced locale labels.
+3. Medicine product catalog with ingredients, presentations, identifiers, jurisdictions, and sourced locale labels — available.
 4. Treatment courses, effective-dated regimens, scheduled dose occurrences, and administration records with correction history.
 5. Suspected adverse-effect records, adherence calculations, and medication reminders with delivery history.
 6. Medication inventory transactions and refill projections.

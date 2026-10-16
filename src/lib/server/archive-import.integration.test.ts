@@ -75,6 +75,7 @@ beforeAll(async () => {
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
       display_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
       product_type TEXT NOT NULL DEFAULT 'other',
       status TEXT NOT NULL DEFAULT 'active',
       dose_form_text TEXT,
@@ -1039,9 +1040,9 @@ describe('archive import storage', () => {
           args: [`${patientId}-ingredient-${suffix}`, patientId, name, name.toLowerCase(), updatedAt],
         });
         await client.execute({
-          sql: `INSERT INTO medicine_product (id, patient_id, display_name, updated_at)
-            VALUES (?, ?, ?, ?)`,
-          args: [`${patientId}-product-${suffix}`, patientId, name, updatedAt],
+          sql: `INSERT INTO medicine_product (id, patient_id, display_name, normalized_name, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [`${patientId}-product-${suffix}`, patientId, name, name.toLowerCase(), updatedAt],
         });
       }
 

@@ -80,6 +80,7 @@ export const medicineIngredient = sqliteTable(
 		),
 		uniqueIndex('medicine_ingredient_id_patient_idx').on(table.id, table.patientId),
 		index('medicine_ingredient_patient_name_idx').on(table.patientId, table.normalizedName),
+		index('medicine_ingredient_patient_cursor_idx').on(table.patientId, table.id),
 		index('medicine_ingredient_patient_updated_idx').on(table.patientId, table.updatedAt)
 	]
 );
@@ -92,6 +93,7 @@ export const medicineProduct = sqliteTable(
 			.notNull()
 			.references(() => patient.id, { onDelete: 'cascade' }),
 		displayName: text('display_name').notNull(),
+		normalizedName: text('normalized_name').notNull().default(''),
 		productType: text('product_type').notNull().default('other'),
 		status: text('status').notNull().default('active'),
 		doseFormText: text('dose_form_text'),
@@ -131,7 +133,8 @@ export const medicineProduct = sqliteTable(
 			sql`${table.status} in ('active', 'inactive', 'archived')`
 		),
 		uniqueIndex('medicine_product_id_patient_idx').on(table.id, table.patientId),
-		index('medicine_product_patient_name_idx').on(table.patientId, table.displayName),
+		index('medicine_product_patient_name_idx').on(table.patientId, table.normalizedName),
+		index('medicine_product_patient_cursor_idx').on(table.patientId, table.id),
 		index('medicine_product_patient_status_idx').on(table.patientId, table.status),
 		index('medicine_product_patient_updated_idx').on(table.patientId, table.updatedAt)
 	]
@@ -178,10 +181,12 @@ export const medicineCatalogName = sqliteTable(
 			sql`${table.nameType} in ('preferred', 'brand', 'generic', 'synonym')`
 		),
 		uniqueIndex('medicine_catalog_name_ingredient_order_idx').on(
+			table.patientId,
 			table.ingredientId,
 			table.orderIndex
 		),
 		uniqueIndex('medicine_catalog_name_product_order_idx').on(
+			table.patientId,
 			table.productId,
 			table.orderIndex
 		),
@@ -223,10 +228,12 @@ export const medicineCatalogIdentifier = sqliteTable(
 			sql`(${table.ingredientId} is not null and ${table.productId} is null) or (${table.ingredientId} is null and ${table.productId} is not null)`
 		),
 		uniqueIndex('medicine_catalog_identifier_ingredient_order_idx').on(
+			table.patientId,
 			table.ingredientId,
 			table.orderIndex
 		),
 		uniqueIndex('medicine_catalog_identifier_product_order_idx').on(
+			table.patientId,
 			table.productId,
 			table.orderIndex
 		),
@@ -279,7 +286,7 @@ export const medicineProductIngredient = sqliteTable(
 			table.productId,
 			table.ingredientId
 		),
-		uniqueIndex('medicine_product_ingredient_order_idx').on(table.productId, table.orderIndex),
+		uniqueIndex('medicine_product_ingredient_order_idx').on(table.patientId, table.productId, table.orderIndex),
 		index('medicine_product_ingredient_patient_idx').on(table.patientId),
 		index('medicine_product_ingredient_ingredient_idx').on(table.ingredientId)
 	]

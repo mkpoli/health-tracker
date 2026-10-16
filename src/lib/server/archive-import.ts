@@ -1001,6 +1001,7 @@ async function planMedicineProduct(
       id: snapshot.id,
       patientId,
       displayName: snapshot.displayName,
+      normalizedName: normalizedMedicineCatalogName(snapshot.displayName),
       productType: snapshot.productType,
       status: snapshot.status,
       doseFormText: snapshot.doseFormText,
