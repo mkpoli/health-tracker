@@ -41,7 +41,7 @@ export function capResult<T extends Record<string, unknown>>(payload: T): T & { 
 
   trimmed.truncated = true;
   trimmed.dropped_items = 0;
-  trimmed.hint = 'Narrow the request or request fewer entries. For medicine catalog child collections, use get_medicine_catalog_entry with child offsets and limits. Lists and text may be shortened; do not write truncated records back.';
+  trimmed.hint = 'Narrow the request or request fewer entries. For medicine catalog child collections, use get_medicine_catalog_entry with child offsets and limits; for history snapshots, include the saved revision. Lists and text may be shortened; do not write truncated records back.';
 
   while (measure(trimmed) > MAX_RESULT_BYTES) {
     const arrays = arraysIn(trimmed);
