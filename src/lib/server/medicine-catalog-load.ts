@@ -109,7 +109,7 @@ export async function loadMedicineCatalogRevisions(
             )
           : eq(medicineCatalogRevision.patientId, patientId),
       )
-      .orderBy(desc(medicineCatalogRevision.changedAt)),
+      .orderBy(desc(medicineCatalogRevision.changedAt), desc(medicineCatalogRevision.id)),
   );
   return rows.flatMap((row) => {
     const revision = toMedicineCatalogRevision(row);
