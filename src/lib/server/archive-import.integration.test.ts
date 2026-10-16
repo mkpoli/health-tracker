@@ -55,6 +55,124 @@ beforeAll(async () => {
       status TEXT,
       extra_data TEXT
     );
+    CREATE TABLE medicine_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      canonical_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_product (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      product_type TEXT NOT NULL DEFAULT 'other',
+      status TEXT NOT NULL DEFAULT 'active',
+      dose_form_text TEXT,
+      dose_form_system TEXT,
+      dose_form_code TEXT,
+      route_text TEXT,
+      route_system TEXT,
+      route_code TEXT,
+      strength_text TEXT,
+      manufacturer TEXT,
+      marketing_authorization_holder TEXT,
+      market_country TEXT,
+      package_description TEXT,
+      imprint TEXT,
+      color TEXT,
+      shape TEXT,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_name (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      language_tag TEXT NOT NULL DEFAULT 'und',
+      name_type TEXT NOT NULL DEFAULT 'preferred',
+      jurisdiction TEXT,
+      preferred INTEGER NOT NULL DEFAULT 0,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_catalog_identifier (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      system TEXT NOT NULL,
+      code TEXT NOT NULL,
+      jurisdiction TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_product_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL,
+      ingredient_id TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'active',
+      numerator_value TEXT,
+      numerator_unit TEXT,
+      denominator_value TEXT,
+      denominator_unit TEXT,
+      strength_text TEXT,
+      basis_of_strength_text TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_revision (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      entity_kind TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      snapshot TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      change_origin_kind TEXT NOT NULL DEFAULT 'manual',
+      change_origin_provider TEXT,
+      UNIQUE(entity_kind, entity_id, revision)
+    );
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -262,6 +380,7 @@ afterAll(async () => {
 const medicineCurrent = {
   id: 'source-medicine',
   patientId: 'source-patient',
+  productId: 'source-product',
   name: 'Example medicine',
   genericName: null,
   form: 'tablet',
@@ -285,6 +404,137 @@ const medicineFirst = {
   ...medicineCurrent,
   revision: 1,
   updatedAt: '2026-08-01T00:00:00.000Z',
+};
+
+const catalogSource = {
+  sourceKind: 'manual',
+  sourceProvider: null,
+  sourceUrl: null,
+  sourceRetrievedAt: null,
+};
+
+const medicineIngredientCurrent = {
+  id: 'source-ingredient',
+  patientId: 'source-patient',
+  canonicalName: 'Example ingredient',
+  normalizedName: 'example ingredient',
+  status: 'active',
+  notes: null,
+  originKind: 'manual',
+  originProvider: 'local',
+  originExternalId: null,
+  sourceData: { retained: true },
+  revision: 1,
+  createdAt: '2026-07-31T00:00:00.000Z',
+  updatedAt: '2026-07-31T00:00:00.000Z',
+  names: [
+    {
+      id: 'source-ingredient-name',
+      ingredientId: 'source-ingredient',
+      productId: null,
+      orderIndex: 0,
+      name: 'Example ingredient',
+      normalizedName: 'example ingredient',
+      languageTag: 'en',
+      nameType: 'generic',
+      jurisdiction: null,
+      preferred: true,
+      ...catalogSource,
+    },
+  ],
+  identifiers: [
+    {
+      id: 'source-ingredient-identifier',
+      ingredientId: 'source-ingredient',
+      productId: null,
+      orderIndex: 0,
+      system: 'RxNorm',
+      code: '12345',
+      jurisdiction: null,
+      ...catalogSource,
+    },
+  ],
+};
+
+const medicineProductCurrent = {
+  id: 'source-product',
+  patientId: 'source-patient',
+  displayName: 'Example medicine 10 mg',
+  productType: 'branded',
+  status: 'active',
+  doseFormText: 'tablet',
+  doseFormSystem: null,
+  doseFormCode: null,
+  routeText: 'oral',
+  routeSystem: null,
+  routeCode: null,
+  strengthText: '10 mg',
+  manufacturer: 'Example manufacturer',
+  marketingAuthorizationHolder: null,
+  marketCountry: 'JP',
+  packageDescription: '30 tablets',
+  imprint: 'EX10',
+  color: 'white',
+  shape: 'round',
+  notes: null,
+  originKind: 'manual',
+  originProvider: 'local',
+  originExternalId: null,
+  sourceData: { label: 'retained' },
+  revision: 2,
+  createdAt: '2026-07-31T01:00:00.000Z',
+  updatedAt: '2026-08-01T01:00:00.000Z',
+  names: [
+    {
+      id: 'source-product-name',
+      ingredientId: null,
+      productId: 'source-product',
+      orderIndex: 0,
+      name: 'Example medicine 10 mg',
+      normalizedName: 'example medicine 10 mg',
+      languageTag: 'en',
+      nameType: 'brand',
+      jurisdiction: 'JP',
+      preferred: true,
+      ...catalogSource,
+    },
+  ],
+  identifiers: [
+    {
+      id: 'source-product-identifier',
+      ingredientId: null,
+      productId: 'source-product',
+      orderIndex: 0,
+      system: 'YJ',
+      code: '123456789',
+      jurisdiction: 'JP',
+      ...catalogSource,
+    },
+  ],
+  ingredients: [
+    {
+      id: 'source-product-ingredient',
+      productId: 'source-product',
+      ingredientId: 'source-ingredient',
+      orderIndex: 0,
+      role: 'active',
+      numeratorValue: '10',
+      numeratorUnit: 'mg',
+      denominatorValue: '1',
+      denominatorUnit: 'tablet',
+      strengthText: '10 mg per tablet',
+      basisOfStrengthText: null,
+      ...catalogSource,
+      ingredient: medicineIngredientCurrent,
+    },
+  ],
+};
+
+const medicineProductFirst = {
+  ...medicineProductCurrent,
+  packageDescription: '14 tablets',
+  revision: 1,
+  updatedAt: '2026-07-31T01:00:00.000Z',
 };
 
 const energyCurrent = {
@@ -432,6 +682,43 @@ const workoutFirst = {
 };
 
 describe('archive import storage', () => {
+  it('rejects incomplete medicine-product strengths', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('invalid-destination', 'owner-1', 'Invalid import')`,
+    );
+    try {
+      await archiveModule.importArchiveBatch({
+        patientId: 'invalid-destination',
+        sourcePatientId: 'invalid-source',
+        kind: 'medicineIngredients',
+        items: [medicineIngredientCurrent],
+      });
+      await expect(
+        archiveModule.importArchiveBatch({
+          patientId: 'invalid-destination',
+          sourcePatientId: 'invalid-source',
+          kind: 'medicineProducts',
+          items: [
+            {
+              ...medicineProductCurrent,
+              ingredients: [
+                {
+                  ...medicineProductCurrent.ingredients[0],
+                  numeratorUnit: null,
+                },
+              ],
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_medicine_catalog' });
+    } finally {
+      await client.execute({
+        sql: 'DELETE FROM patient WHERE id = ?',
+        args: ['invalid-destination'],
+      });
+    }
+  });
+
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
     const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
     const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));
@@ -480,6 +767,8 @@ describe('archive import storage', () => {
           },
         ],
       },
+      { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+      { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
       { kind: 'medicines' as const, items: [medicineCurrent] },
       { kind: 'energy' as const, items: [energyCurrent] },
       {
@@ -554,6 +843,44 @@ describe('archive import storage', () => {
           },
         ],
       },
+      {
+        kind: 'medicineCatalogRevisions' as const,
+        items: [
+          {
+            id: 'source-ingredient-revision-1',
+            patientId: 'source-patient',
+            entityKind: 'ingredient',
+            entityId: 'source-ingredient',
+            revision: 1,
+            snapshot: medicineIngredientCurrent,
+            changedAt: medicineIngredientCurrent.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+          {
+            id: 'source-product-revision-1',
+            patientId: 'source-patient',
+            entityKind: 'product',
+            entityId: 'source-product',
+            revision: 1,
+            snapshot: medicineProductFirst,
+            changedAt: medicineProductFirst.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+          {
+            id: 'source-product-revision-2',
+            patientId: 'source-patient',
+            entityKind: 'product',
+            entityId: 'source-product',
+            revision: 2,
+            snapshot: medicineProductCurrent,
+            changedAt: medicineProductCurrent.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+        ],
+      },
     ];
 
     for (const batch of batches) {
@@ -575,6 +902,9 @@ describe('archive import storage', () => {
       SELECT
         (SELECT count(*) FROM report) AS reports,
         (SELECT count(*) FROM record) AS records,
+        (SELECT count(*) FROM medicine_ingredient) AS medicine_ingredients,
+        (SELECT count(*) FROM medicine_product) AS medicine_products,
+        (SELECT count(*) FROM medicine_catalog_revision) AS medicine_catalog_revisions,
         (SELECT count(*) FROM medicine_claim) AS medicines,
         (SELECT count(*) FROM energy_claim) AS energy,
         (SELECT count(*) FROM data_import) AS data_imports,
@@ -587,6 +917,9 @@ describe('archive import storage', () => {
     expect(counts.rows[0]).toMatchObject({
       reports: 1,
       records: 1,
+      medicine_ingredients: 1,
+      medicine_products: 1,
+      medicine_catalog_revisions: 3,
       medicines: 1,
       energy: 1,
       data_imports: 1,
@@ -603,6 +936,23 @@ describe('archive import storage', () => {
       JOIN report ON report.id = record.report_id
     `);
     expect(relationship.rows[0]?.patient_id).toBe('destination-patient');
+
+    const medicineRelationship = await client.execute(`
+      SELECT medicine_claim.patient_id AS patient_id,
+        medicine_product.display_name AS product_name,
+        medicine_ingredient.canonical_name AS ingredient_name
+      FROM medicine_claim
+      JOIN medicine_product ON medicine_product.id = medicine_claim.product_id
+      JOIN medicine_product_ingredient
+        ON medicine_product_ingredient.product_id = medicine_product.id
+      JOIN medicine_ingredient
+        ON medicine_ingredient.id = medicine_product_ingredient.ingredient_id
+    `);
+    expect(medicineRelationship.rows[0]).toMatchObject({
+      patient_id: 'destination-patient',
+      product_name: 'Example medicine 10 mg',
+      ingredient_name: 'Example ingredient',
+    });
 
     const revisions = await client.execute(`
       SELECT claim_kind, revision,
