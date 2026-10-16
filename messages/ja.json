@@ -1137,6 +1137,8 @@
   "medicine_catalog_product_link": "カタログ製品",
   "medicine_catalog_no_product_link": "製品を関連付けない",
   "medicine_catalog_product_link_hint": "製品を選ぶと、現在の名称、成分、剤形、含量、投与経路を入力します。服薬計画の各項目は編集できます。",
+  "medicine_catalog_pick_overwrite_confirm": "入力済みの名前、一般名、剤形、含量・濃度、投与経路を、この製品の内容に置き換えますか？",
+  "medicine_catalog_pick_shortened": "一部の内容は、服薬計画の項目に収まるよう短くしました。",
   "medicine_catalog_linked_product": "カタログ: {name}",
   "edit": "編集",
   "dose_plan_title": "服薬コースと用法",

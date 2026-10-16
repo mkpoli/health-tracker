@@ -7,7 +7,12 @@
   import { getLocale } from '$lib/paraglide/runtime';
   import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
   import type { MedicineCaptureProposal } from '$lib/health-capture';
-  import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
+  import {
+    fitMedicineField,
+    medicineFieldLimits,
+    type MedicineClaimRecord,
+    type MedicineStatus,
+  } from '$lib/medicine';
   import {
     localizedMedicineCatalogName,
     type MedicineCatalogRevisionRecord,
@@ -235,6 +240,8 @@
   }
 
   function openCreate() {
+    lastPick = {};
+    pickShortened = false;
     draft = emptyDraft();
     regimenDraft = emptyRegimenDraft(patientTimeZone);
     saveError = '';
@@ -243,6 +250,8 @@
   }
 
   function openEdit(medicine: MedicineClaimRecord) {
+    lastPick = {};
+    pickShortened = false;
     draft = {
       id: medicine.id,
       revision: medicine.revision,
@@ -350,24 +359,54 @@
     return productId ? products.find((product) => product.id === productId) || null : null;
   }
 
+  let pickShortened = $state(false);
+  /** What the last product pick wrote, so only the person's own text counts as typed. */
+  let lastPick: Partial<Record<'name' | 'genericName' | 'form' | 'strength' | 'route', string>> = {};
+
   function chooseProduct(productId: string) {
-    draft.productId = productId;
+    pickShortened = false;
     const product = selectedProduct(productId);
-    if (!product) return;
+    if (!product) {
+      draft.productId = productId;
+      return;
+    }
     const activeIngredients = product.ingredients.filter((component) => component.role === 'active');
-    draft.name = localizedMedicineCatalogName(product.names, getLocale(), product.displayName);
-    draft.genericName = activeIngredients
-      .map((component) =>
-        localizedMedicineCatalogName(
-          component.ingredient.names,
-          getLocale(),
-          component.ingredient.canonicalName,
-        ),
-      )
-      .join(' / ');
-    draft.form = product.doseFormText || '';
-    draft.strength = product.strengthText || '';
-    draft.route = product.routeText || '';
+    const picked = {
+      name: localizedMedicineCatalogName(product.names, getLocale(), product.displayName),
+      genericName: activeIngredients
+        .map((component) =>
+          localizedMedicineCatalogName(
+            component.ingredient.names,
+            getLocale(),
+            component.ingredient.canonicalName,
+          ),
+        )
+        .join(' / '),
+      form: product.doseFormText || '',
+      strength: product.strengthText || '',
+      route: product.routeText || '',
+    };
+    const fitted = {
+      name: fitMedicineField(picked.name, medicineFieldLimits.name),
+      genericName: fitMedicineField(picked.genericName, medicineFieldLimits.genericName),
+      form: fitMedicineField(picked.form, medicineFieldLimits.form),
+      strength: fitMedicineField(picked.strength, medicineFieldLimits.strength),
+      route: fitMedicineField(picked.route, medicineFieldLimits.route),
+    };
+    draft.productId = productId;
+    const typed = (Object.keys(fitted) as Array<keyof typeof fitted>).some(
+      (key) =>
+        draft[key].trim() !== '' &&
+        draft[key].trim() !== fitted[key] &&
+        draft[key] !== lastPick[key],
+    );
+    // Details the person wrote stay unless they agree to replace them.
+    if (typed && !confirm(m.medicine_catalog_pick_overwrite_confirm())) return;
+    Object.assign(draft, fitted);
+    lastPick = fitted;
+    pickShortened = (Object.keys(fitted) as Array<keyof typeof fitted>).some(
+      (key) => fitted[key] !== picked[key],
+    );
   }
 
   /** The dose rule in force, if any. */
@@ -775,6 +814,9 @@
                   {/each}
                 </select>
                 <span class="mt-1 block text-xs text-slate-500">{m.medicine_catalog_product_link_hint()}</span>
+                {#if pickShortened}
+                  <span class="mt-1 block text-xs font-medium text-amber-700" role="status">{m.medicine_catalog_pick_shortened()}</span>
+                {/if}
               </label>
 
               <label class="sm:col-span-2">
@@ -784,7 +826,7 @@
                   type="text"
                   bind:value={draft.name}
                   required
-                  maxlength="200"
+                  maxlength={medicineFieldLimits.name}
                   autocomplete="off"
                   placeholder={m.medicine_name_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -797,7 +839,7 @@
                   name="genericName"
                   type="text"
                   bind:value={draft.genericName}
-                  maxlength="200"
+                  maxlength={medicineFieldLimits.genericName}
                   autocomplete="off"
                   placeholder={m.medicine_generic_name_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -810,7 +852,7 @@
                   name="strength"
                   type="text"
                   bind:value={draft.strength}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.strength}
                   placeholder={m.medicine_strength_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -822,7 +864,7 @@
                   name="form"
                   type="text"
                   bind:value={draft.form}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.form}
                   placeholder={m.medicine_form_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -834,7 +876,7 @@
                   name="route"
                   type="text"
                   bind:value={draft.route}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.route}
                   placeholder={m.medicine_route_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />

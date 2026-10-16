@@ -1,16 +1,5 @@
-import { isMedicineStatus, type MedicineStatus } from '$lib/medicine';
+import { isMedicineStatus, medicineFieldLimits as fieldLimits, type MedicineStatus } from '$lib/medicine';
 
-const fieldLimits = {
-  productId: 128,
-  name: 200,
-  genericName: 200,
-  form: 120,
-  strength: 120,
-  route: 120,
-  purpose: 500,
-  prescriber: 200,
-  notes: 4000,
-} as const;
 
 export type MedicineInput = {
   productId: string | null;

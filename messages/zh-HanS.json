@@ -1137,6 +1137,8 @@
   "medicine_catalog_product_link": "目录产品",
   "medicine_catalog_no_product_link": "不关联目录产品",
   "medicine_catalog_product_link_hint": "选择产品后会填入当前名称、成分、剂型、规格和给药途径。用药计划字段仍可编辑。",
+  "medicine_catalog_pick_overwrite_confirm": "要用该产品的信息替换已填写的名称、通用名、剂型、规格或浓度和给药途径吗？",
+  "medicine_catalog_pick_shortened": "部分内容已缩短，以符合用药计划字段的长度。",
   "medicine_catalog_linked_product": "目录：{name}",
   "edit": "编辑",
   "dose_plan_title": "疗程与用法",

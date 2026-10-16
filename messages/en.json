@@ -1137,6 +1137,8 @@
   "medicine_catalog_product_link": "Catalog product",
   "medicine_catalog_no_product_link": "No catalog product",
   "medicine_catalog_product_link_hint": "Selecting a product fills its current name, ingredients, form, strength, and route. The plan fields remain editable.",
+  "medicine_catalog_pick_overwrite_confirm": "Replace the name, generic name, form, strength, and route you entered with the details of this product?",
+  "medicine_catalog_pick_shortened": "Some details were shortened to fit the plan fields.",
   "medicine_catalog_linked_product": "Catalog: {name}",
   "edit": "Edit",
   "dose_plan_title": "Courses and doses",
