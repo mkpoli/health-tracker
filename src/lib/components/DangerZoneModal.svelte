@@ -4,6 +4,7 @@
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { downloadPatientArchive } from '$lib/export';
+  import { fetchMedicineCatalogArchive } from '$lib/medicine-catalog-client';
 
   let {
     patient,
@@ -21,7 +22,6 @@
     exerciseDefinitions = [],
     workouts = [],
     claimRevisions = [],
-    medicineCatalogRevisions = [],
     onClose,
   }: {
     patient: { id: string; name: string; [key: string]: unknown };
@@ -39,7 +39,6 @@
     exerciseDefinitions?: unknown[];
     workouts?: unknown[];
     claimRevisions?: unknown[];
-    medicineCatalogRevisions?: unknown[];
     onClose: () => void;
   } = $props();
 
@@ -75,13 +74,14 @@
     exportError = '';
 
     try {
+      const catalog = await fetchMedicineCatalogArchive(patient.id);
       await downloadPatientArchive(
         {
           patient,
           reports,
           records,
-          medicineIngredients,
-          medicineProducts,
+          medicineIngredients: catalog.medicineIngredients,
+          medicineProducts: catalog.medicineProducts,
           medicines,
           medicineCourses,
           doseRegimens,
@@ -92,7 +92,7 @@
           exerciseDefinitions,
           workouts,
           claimRevisions,
-          medicineCatalogRevisions,
+          medicineCatalogRevisions: catalog.medicineCatalogRevisions,
         },
         patient?.name,
       );

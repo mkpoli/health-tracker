@@ -6,6 +6,7 @@
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
   import { downloadPatientArchive } from '$lib/export';
+  import { fetchMedicineCatalogArchive } from '$lib/medicine-catalog-client';
   import { tick } from 'svelte';
   import {
     normalizeComparableMeasurement,
@@ -549,13 +550,14 @@
     exportingPatientData = true;
 
     try {
+      const catalog = await fetchMedicineCatalogArchive(data.currentPatient.id);
       await downloadPatientArchive(
         {
           patient: data.currentPatient,
           reports: data.reports,
           records: data.records,
-          medicineIngredients: data.medicineIngredients,
-          medicineProducts: data.medicineProducts,
+          medicineIngredients: catalog.medicineIngredients,
+          medicineProducts: catalog.medicineProducts,
           medicines: data.medicines,
           medicineCourses: data.medicineCourses,
           doseRegimens: data.doseRegimens,
@@ -566,7 +568,7 @@
           exerciseDefinitions: data.exerciseDefinitions,
           workouts: data.workouts,
           claimRevisions: data.claimRevisions,
-          medicineCatalogRevisions: data.medicineCatalogRevisions,
+          medicineCatalogRevisions: catalog.medicineCatalogRevisions,
         },
         data.currentPatient.name,
       );
@@ -1775,7 +1777,6 @@
         exerciseDefinitions={data.exerciseDefinitions}
         workouts={data.workouts}
         claimRevisions={data.claimRevisions}
-        medicineCatalogRevisions={data.medicineCatalogRevisions}
         onClose={() => (showDeleteModal = false)}
       />
     {/if}

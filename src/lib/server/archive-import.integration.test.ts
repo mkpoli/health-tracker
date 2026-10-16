@@ -746,6 +746,29 @@ describe('archive import storage', () => {
     }
   });
 
+  it('loads catalogue source payloads only when asked', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('payload-destination', 'owner-1', 'Payload import')`,
+    );
+    try {
+      await archiveModule.importArchiveBatch({
+        patientId: 'payload-destination',
+        sourcePatientId: 'payload-source',
+        kind: 'medicineIngredients',
+        items: [medicineIngredientCurrent],
+      });
+      const loader = await import('./medicine-catalog-load');
+      const light = await loader.loadMedicineCatalog('payload-destination', { sourceData: false });
+      const full = await loader.loadMedicineCatalog('payload-destination', { sourceData: true });
+      expect(light.ingredients).toHaveLength(1);
+      expect(light.ingredients[0].sourceData).toBeNull();
+      expect(light.ingredients[0].names).toHaveLength(1);
+      expect(full.ingredients[0].sourceData).toEqual({ retained: true });
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: ['payload-destination'] });
+    }
+  });
+
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
     const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
     const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));
