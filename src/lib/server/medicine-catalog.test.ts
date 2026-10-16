@@ -174,3 +174,42 @@ describe('medicine catalog names', () => {
     expect(normalizedMedicineCatalogName('  Ｗｅｇｏｖｙ   0.25 MG ')).toBe('wegovy 0.25 mg');
   });
 });
+
+describe('product composition uniqueness', () => {
+  it('rejects the same ingredient with different row IDs and roles', () => {
+    expect(() => parseMedicineProductInput(form({
+      displayName: 'Product',
+      structure: JSON.stringify({
+        names: [],
+        identifiers: [],
+        ingredients: [
+          { id: 'row-1', ingredientId: 'ingredient-1', role: 'active' },
+          { id: 'row-2', ingredientId: ' ingredient-1 ', role: 'inactive' },
+        ],
+      }),
+    }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_ingredient'));
+  });
+});
+
+describe('country validation', () => {
+  it.each(['USA', 'J', '123', 'United States'])(
+    'reports invalid_country for %s in every country field',
+    (country) => {
+      for (const structure of [
+        { names: [{ name: 'Ingredient', jurisdiction: country }], identifiers: [] },
+        { names: [], identifiers: [{ system: 'local', code: '1', jurisdiction: country }] },
+      ]) {
+        expect(() => parseMedicineIngredientInput(form({
+          canonicalName: 'Ingredient', structure: JSON.stringify(structure),
+        }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+        expect(() => parseMedicineProductInput(form({
+          displayName: 'Product', structure: JSON.stringify({ ...structure, ingredients: [] }),
+        }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+      }
+      expect(() => parseMedicineProductInput(form({
+        displayName: 'Product', marketCountry: country,
+        structure: JSON.stringify({ names: [], identifiers: [], ingredients: [] }),
+      }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+    },
+  );
+});
