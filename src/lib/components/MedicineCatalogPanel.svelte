@@ -400,6 +400,17 @@
     }),
   );
 
+  function validationMessage(code: string) {
+    switch (code) {
+      case 'medicine_catalog_invalid_strength': return m.medicine_catalog_invalid_strength();
+      case 'medicine_catalog_invalid_language': return m.medicine_catalog_invalid_language();
+      case 'medicine_catalog_invalid_country': return m.medicine_catalog_invalid_country();
+      case 'medicine_catalog_invalid_source': return m.medicine_catalog_invalid_source();
+      case 'medicine_catalog_field_too_long': return m.medicine_catalog_field_too_long();
+      default: return m.medicine_catalog_save_failed();
+    }
+  }
+
   const submitCatalog: SubmitFunction = ({ cancel }) => {
     if (saving || staleRevision) { cancel(); return; }
     saving = true;
@@ -419,7 +430,7 @@
             : m.claim_revision_stale();
           await invalidateAll();
         } else {
-          saveError = m.medicine_catalog_save_failed();
+          saveError = validationMessage(result.type === 'failure' ? String(result.data?.code ?? '') : '');
         }
       } catch {
         if (!saveError) saveError = m.medicine_catalog_save_failed();
