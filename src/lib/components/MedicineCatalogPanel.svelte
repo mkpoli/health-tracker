@@ -470,7 +470,7 @@
   }
 
   // Saved versions are read when a product's list is opened, not with the page.
-  let loadedVersions = $state<Record<string, MedicineCatalogRevisionRecord[] | 'failed'>>({});
+  let loadedVersions = $state<Record<string, MedicineCatalogRevisionRecord[] | 'loading' | 'failed'>>({});
 
   $effect(() => {
     void versionCounts;
@@ -499,8 +499,9 @@
     return Array.isArray(rows) ? rows : [];
   }
 
-  async function loadVersions(event: Event, id: string) {
-    if (!(event.currentTarget as HTMLDetailsElement).open || loadedVersions[id]) return;
+  async function loadVersions(id: string) {
+    if (loadedVersions[id] && loadedVersions[id] !== 'failed') return;
+    loadedVersions[id] = 'loading';
     try {
       const rows = await fetchMedicineCatalogRevisions(patientId, 'product', id);
       loadedVersions[id] = rows.sort((left, right) => right.revision - left.revision);
@@ -580,11 +581,16 @@
               {/if}
               <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                 <span class="text-xs font-medium text-slate-500">{statusLabel(product.status)}</span>
-                <details class="text-right" ontoggle={(event) => loadVersions(event, product.id)}>
+                <details class="text-right" ontoggle={(event) => { if (event.currentTarget.open) void loadVersions(product.id); }}>
                   <summary class="cursor-pointer text-xs font-medium text-slate-500">
                     {versionsLabel(versionCounts[`product:${product.id}`] ?? 0)}
                   </summary>
-                  {#if versionRows(product.id).length}
+                  {#if loadedVersions[product.id] === 'failed'}
+                    <div class="mt-2 text-left text-xs text-rose-700" role="alert">
+                      <p>{m.medicine_catalog_versions_failed()}</p>
+                      <button type="button" onclick={() => loadVersions(product.id)} class="mt-1 font-semibold text-blue-700 hover:text-blue-800">{m.medicine_catalog_versions_retry()}</button>
+                    </div>
+                  {:else if versionRows(product.id).length}
                     <ol class="mt-2 space-y-1 text-left text-[11px] text-slate-500">
                       {#each versionRows(product.id) as revision (revision.id)}
                         <li>{m.medicine_catalog_version_entry({ revision: revision.revision, date: formatDateTime(revision.changedAt) })}</li>

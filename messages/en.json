@@ -1130,6 +1130,8 @@
   "medicine_catalog_versions_one": "{count} saved version",
   "medicine_catalog_versions_other": "{count} saved versions",
   "medicine_catalog_version_entry": "Version {revision} · {date}",
+  "medicine_catalog_versions_failed": "Saved versions could not be loaded.",
+  "medicine_catalog_versions_retry": "Try again",
   "medicine_catalog_save_failed": "The catalog entry could not be saved. Check the fields and try again.",
   "medicine_catalog_invalid_strength": "Enter positive decimal amounts with a unit for each amount. A per amount also needs an ingredient amount.",
   "medicine_catalog_invalid_language": "Enter a valid language tag, such as en, ja or zh-Hans.",

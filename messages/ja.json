@@ -1130,6 +1130,8 @@
   "medicine_catalog_versions_one": "保存済みの版: {count}件",
   "medicine_catalog_versions_other": "保存済みの版: {count}件",
   "medicine_catalog_version_entry": "版{revision} · {date}",
+  "medicine_catalog_versions_failed": "保存済みの履歴を読み込めませんでした。",
+  "medicine_catalog_versions_retry": "再読み込み",
   "medicine_catalog_save_failed": "薬剤カタログを保存できませんでした。入力内容を確認して、もう一度お試しください。",
   "medicine_catalog_invalid_strength": "含有量と基準量には正の数を入力し、それぞれ単位を指定してください。基準量を指定する場合は含有量も必要です。",
   "medicine_catalog_invalid_language": "en、ja、zh-Hansなどの有効な言語タグを入力してください。",
