@@ -750,49 +750,115 @@ describe('archive import storage', () => {
     }
   });
 
-  it('rejects a medicine revision naming an unknown product without inserting the batch', async () => {
-    const patientId = 'missing-revision-product-destination';
-    await client.execute({
-      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
-      args: [patientId, 'owner-1', patientId],
-    });
+  it('restores medicine history after deleting its product and exporting', async () => {
+    const patientId = 'deleted-product-source';
+    const restoredPatientId = 'deleted-product-destination';
+    for (const id of [patientId, restoredPatientId]) {
+      await client.execute({
+        sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+        args: [id, 'owner-1', id],
+      });
+    }
     try {
-      await archiveModule.importArchiveBatch({
-        patientId,
-        sourcePatientId: 'source-patient',
-        kind: 'medicines',
-        items: [{ ...medicineCurrent, productId: null }],
-      });
-      const revisionsBefore = await client.execute({
-        sql: 'SELECT * FROM claim_revision WHERE patient_id = ?',
-        args: [patientId],
-      });
-      await expect(
-        archiveModule.importArchiveBatch({
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+        { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
+        { kind: 'medicines' as const, items: [medicineCurrent] },
+      ]) {
+        await archiveModule.importArchiveBatch({
           patientId,
           sourcePatientId: 'source-patient',
-          kind: 'revisions',
-          items: [
-            { ...medicineFirst, revision: 3, productId: null },
-            { ...medicineFirst, productId: 'unknown-product' },
-          ].map((snapshot) => ({
-            claimKind: 'medicine',
-            claimId: snapshot.id,
-            revision: snapshot.revision,
-            snapshot,
-            changedAt: snapshot.updatedAt,
-            changeOriginKind: 'manual',
-            changeOriginProvider: 'local',
-          })),
-        }),
-      ).rejects.toMatchObject({ code: 'missing_medicine_catalog_reference' });
-      const revisionsAfter = await client.execute({
-        sql: 'SELECT * FROM claim_revision WHERE patient_id = ?',
-        args: [patientId],
+          ...batch,
+        });
+      }
+      const loader = await import('./medicine-catalog-load');
+      const { deleteMedicineProduct } = await import('./medicine-catalog-mutations');
+      const catalogBefore = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      const product = catalogBefore.products[0];
+      await deleteMedicineProduct({
+        patientId,
+        id: product.id,
+        expectedRevision: product.revision,
+        source: { kind: 'manual', provider: 'local' },
+        changedAt: '2026-08-03T00:00:00.000Z',
       });
-      expect(revisionsAfter.rows).toEqual(revisionsBefore.rows);
+
+      const { db } = await import('./db');
+      const schema = await import('./db/schema');
+      const { eq } = await import('drizzle-orm');
+      const { buildPatientExport } = await import('$lib/export');
+      const { parseHealthTrackerExport } = await import('$lib/health-archive');
+      const medicines = await db.select().from(schema.medicineClaim)
+        .where(eq(schema.medicineClaim.patientId, patientId));
+      const claimRevisions = await db.select().from(schema.claimRevision)
+        .where(eq(schema.claimRevision.patientId, patientId))
+        .orderBy(schema.claimRevision.revision);
+      const catalog = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      expect(catalog.products).toEqual([]);
+      expect(medicines[0]).toMatchObject({ productId: null, revision: 3 });
+      expect(claimRevisions.map(({ snapshot }) => snapshot)).toMatchObject([
+        { productId: product.id, revision: 2 },
+        { productId: null, revision: 3 },
+      ]);
+      const exported = parseHealthTrackerExport(JSON.parse(JSON.stringify(buildPatientExport({
+        patient: { id: patientId, name: patientId },
+        reports: [],
+        records: [],
+        medicineIngredients: catalog.ingredients,
+        medicineProducts: catalog.products,
+        medicineCatalogRevisions: await loader.loadMedicineCatalogRevisions(patientId),
+        medicines,
+        claimRevisions,
+        medicineCourses: [],
+        doseRegimens: [],
+        doseOccurrences: [],
+        energyEntries: [],
+        energySources: [],
+        dataImports: [],
+        exerciseDefinitions: [],
+        workouts: [],
+      }))));
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: exported.medicineIngredients },
+        { kind: 'medicineProducts' as const, items: exported.medicineProducts },
+        { kind: 'medicineCatalogRevisions' as const, items: exported.medicineCatalogRevisions },
+        { kind: 'medicines' as const, items: exported.medicines },
+        { kind: 'revisions' as const, items: exported.claimRevisions },
+      ]) {
+        if (!batch.items.length) continue;
+        await archiveModule.importArchiveBatch({
+          patientId: restoredPatientId,
+          sourcePatientId: patientId,
+          ...batch,
+        });
+      }
+      const restoredMedicineId = await archiveModule.resolveArchiveEntityId(
+        restoredPatientId, patientId, 'medicine', medicines[0].id,
+      );
+      const restoredProductId = await archiveModule.resolveArchiveEntityId(
+        restoredPatientId, patientId, 'medicine-product', product.id,
+      );
+      const restoredMedicines = await db.select().from(schema.medicineClaim)
+        .where(eq(schema.medicineClaim.patientId, restoredPatientId));
+      expect(restoredMedicines).toEqual([
+        { ...medicines[0], id: restoredMedicineId, patientId: restoredPatientId },
+      ]);
+      const restoredRevisions = await db.select().from(schema.claimRevision)
+        .where(eq(schema.claimRevision.patientId, restoredPatientId))
+        .orderBy(schema.claimRevision.revision);
+      expect(restoredRevisions.map(({ snapshot }) => snapshot)).toEqual(
+        claimRevisions.map(({ snapshot }) => ({
+          ...snapshot,
+          id: restoredMedicineId,
+          patientId: restoredPatientId,
+          productId: 'productId' in snapshot && snapshot.productId ? restoredProductId : null,
+        })),
+      );
+      expect((await loader.loadMedicineCatalog(restoredPatientId, { sourceData: true })).products).toEqual([]);
     } finally {
-      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+      for (const id of [patientId, restoredPatientId]) {
+        await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [id] });
+      }
     }
   });
 
@@ -996,6 +1062,44 @@ describe('archive import storage', () => {
       expect(exported.medicineProducts.map(({ id }) => id)).toEqual(
         ['z', 'a', 'b'].map((suffix) => `${patientId}-product-${suffix}`),
       );
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('loads catalogue revisions ordered by changedAt then id descending', async () => {
+    const patientId = 'catalog-revision-order';
+    const entityId = `${patientId}-ingredient`;
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      for (const [index, [suffix, changedAt]] of [
+        ['b', '2026-01-02T00:00:00.000Z'],
+        ['c', '2026-01-02T00:00:00.000Z'],
+        ['z', '2026-01-01T00:00:00.000Z'],
+        ['a', '2026-01-02T00:00:00.000Z'],
+      ].entries()) {
+        const revision = index + 1;
+        await client.execute({
+          sql: `INSERT INTO medicine_catalog_revision
+            (id, patient_id, entity_kind, entity_id, revision, snapshot, changed_at)
+            VALUES (?, ?, 'ingredient', ?, ?, ?, ?)`,
+          args: [
+            `${patientId}-${suffix}`, patientId, entityId, revision,
+            JSON.stringify({ ...medicineIngredientCurrent, id: entityId, patientId, revision }),
+            changedAt,
+          ],
+        });
+      }
+
+      const { loadMedicineCatalogRevisions } = await import('./medicine-catalog-load');
+      const expectedIds = ['c', 'b', 'a', 'z'].map((suffix) => `${patientId}-${suffix}`);
+      expect((await loadMedicineCatalogRevisions(patientId)).map(({ id }) => id)).toEqual(expectedIds);
+      expect((await loadMedicineCatalogRevisions(patientId, {
+        kind: 'ingredient', id: entityId,
+      })).map(({ id }) => id)).toEqual(expectedIds);
     } finally {
       await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
     }

@@ -126,7 +126,7 @@ curl 'https://<host>/mcp' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicine_catalog`, `get_medicine_catalog_history`, `read_medicine_catalog_source`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
+Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicine_catalog`, `get_medicine_catalog_entry`, `get_medicine_catalog_history`, `read_medicine_catalog_source`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
 
 An existing `health:claims:write` grant also permits creating and updating catalogue ingredients and products for its selected profiles, including names, identifiers, composition, and retained source data. No new consent is requested for these catalogue tools.
 
@@ -154,14 +154,14 @@ Medicine claims describe the catalog; the dose plan lives on courses and regimen
 
 ### Product catalog workflow for agents
 
-1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks normalized canonical names, product display names, and localized names within a bounded page. Pass `next_ingredient_id` and `next_product_id` back as `after_ingredient_id` and `after_product_id` until both are null, including after empty search pages. Counts describe the current page.
+1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks normalized canonical names, product display names, and localized names within a bounded page. Pass `next_ingredient_id` and `next_product_id` back as `after_ingredient_id` and `after_product_id` until both are null, including after empty search pages. Counts describe the current page. For entry identity, revision, and complete child rows, call `get_medicine_catalog_entry` with `entity_kind` and `entity_id`. Each collection accepts `names_offset`/`names_limit`, `identifiers_offset`/`identifiers_limit`, or `ingredients_offset`/`ingredients_limit` (default 5, maximum 30; zero skips it). Pass each `next_*_offset` back until null; offsets refer to stored child positions. Assemble pages only while `entry.revision` stays unchanged.
 2. Create each reusable ingredient with `create_medicine_ingredient`. `names` may carry BCP 47 language tags, name type, country, preferred status, and source details. `identifiers` may carry RxNorm, YJ, HOT, GS1, Wikidata, or another declared code system.
 3. Create the packaged product with `create_medicine_product`. Each item in `ingredients` uses an `ingredient_id` from step 2. Structured strengths use numerator and denominator values with units. `strength_text` preserves the label wording.
 4. Pass the returned `product_id` to `create_medicine` when a medicine concerns that exact product. The medicine keeps its own editable name, form, strength and route.
 
 Catalog update tools accept selected fields and keep omitted fields unchanged. Updating `names`, `identifiers`, or `ingredients` replaces that collection, so a caller should send the complete desired collection. Every update requires `expected_revision`. The list tool returns the child row IDs needed to preserve a name, identifier, or ingredient component across an update.
 
-`source_data` accepts JSON up to 2 MB on ingredient and product writes. It is suitable for a retained terminology response or regulator payload when the caller has permission to store it. Catalog reads report whether this payload exists and its byte size. `read_medicine_catalog_source` returns bounded JSON chunks with a SHA-256 checksum and continuation offset; an optional `revision` reads the payload saved with that version. Name, identifier, and ingredient-component rows carry their own source type, provider, URL, and retrieval time. Public database labels remain attributed to their source and language.
+`source_data` accepts JSON up to 2 MB on ingredient and product writes. It is suitable for a retained terminology response or regulator payload when the caller has permission to store it. Catalog reads return `source_data_summary: {available, byte_size}`; `source_data` is reserved for write payloads. `read_medicine_catalog_source` returns bounded JSON chunks with a SHA-256 checksum and continuation offset; an optional `revision` reads the payload saved with that version. Name, identifier, and ingredient-component rows carry their own source type, provider, URL, and retrieval time. Public database labels remain attributed to their source and language.
 
 History pages return `next_before_revision`; pass it as `before_revision` to read older versions. A response marked `truncated` may omit list entries or shorten text. Read the needed entry with a narrower request before using it in an update.
 
