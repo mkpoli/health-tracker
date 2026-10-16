@@ -112,6 +112,7 @@
   let productDraft = $state<ProductDraft>(emptyProduct());
   let saving = $state(false);
   let saveError = $state('');
+  let staleRevision = $state(false);
 
   const sortedProducts = $derived(
     [...products].sort((left, right) => left.displayName.localeCompare(right.displayName, getLocale())),
@@ -268,6 +269,7 @@
         }
       : emptyIngredient();
     saveError = '';
+    staleRevision = false;
     editorKind = 'ingredient';
   }
 
@@ -312,6 +314,7 @@
         }
       : emptyProduct();
     saveError = '';
+    staleRevision = false;
     editorKind = 'product';
   }
 
@@ -398,7 +401,7 @@
   );
 
   const submitCatalog: SubmitFunction = ({ cancel }) => {
-    if (saving) { cancel(); return; }
+    if (saving || staleRevision) { cancel(); return; }
     saving = true;
     saveError = '';
     return async ({ result, update }) => {
@@ -409,16 +412,17 @@
           return;
         }
         if (result.type === 'failure' && result.status === 409) {
-          await invalidateAll();
           const code = String(result.data?.code ?? '');
+          staleRevision = code !== 'medicine_catalog_ingredient_in_use';
           saveError = code === 'medicine_catalog_ingredient_in_use'
             ? m.medicine_catalog_ingredient_in_use()
             : m.claim_revision_stale();
+          await invalidateAll();
         } else {
           saveError = m.medicine_catalog_save_failed();
         }
       } catch {
-        saveError = m.medicine_catalog_save_failed();
+        if (!saveError) saveError = m.medicine_catalog_save_failed();
       } finally {
         saving = false;
       }
@@ -426,7 +430,7 @@
   };
 
   const submitDelete: SubmitFunction = (submission) => {
-    if (saving) { submission.cancel(); return; }
+    if (saving || staleRevision) { submission.cancel(); return; }
     const message = editorKind === 'ingredient'
       ? m.medicine_catalog_delete_ingredient_confirm({ name: ingredientDraft.canonicalName })
       : m.medicine_catalog_delete_product_confirm({ name: productDraft.displayName });
@@ -708,7 +712,7 @@
           <input type="hidden" name="patientId" value={patientId} />
           <input type="hidden" name="id" value={editorKind === 'ingredient' ? ingredientDraft.id : productDraft.id} />
           <input type="hidden" name="revision" value={editorKind === 'ingredient' ? ingredientDraft.revision : productDraft.revision} />
-          <button type="submit" disabled={saving} class="text-sm font-semibold text-rose-600 hover:text-rose-700 disabled:opacity-50">{m.delete()}</button>
+          <button type="submit" disabled={saving || staleRevision} class="text-sm font-semibold text-rose-600 hover:text-rose-700 disabled:opacity-50">{m.delete()}</button>
         </form>
       {/if}
     </div>
@@ -793,7 +797,7 @@
 {#snippet editorFooter()}
   <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-6">
     <button type="button" onclick={editorModal.requestClose} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
-    <button type="submit" disabled={saving} class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-400">{saving ? m.saving() : m.save()}</button>
+    <button type="submit" disabled={saving || staleRevision} class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-400">{saving ? m.saving() : m.save()}</button>
   </footer>
 {/snippet}
 
