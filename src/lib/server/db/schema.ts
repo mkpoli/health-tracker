@@ -282,6 +282,10 @@ export const medicineProductIngredient = sqliteTable(
 			'medicine_product_ingredient_role_check',
 			sql`${table.role} in ('active', 'inactive', 'unknown')`
 		),
+		uniqueIndex('medicine_product_ingredient_product_ingredient_idx').on(
+			table.productId,
+			table.ingredientId
+		),
 		uniqueIndex('medicine_product_ingredient_order_idx').on(table.patientId, table.productId, table.orderIndex),
 		index('medicine_product_ingredient_patient_idx').on(table.patientId),
 		index('medicine_product_ingredient_ingredient_idx').on(table.ingredientId)

@@ -353,6 +353,9 @@ export function parseMedicineProductInput(data: FormData): MedicineProductInput 
     throw new InvalidMedicineCatalogInputError('invalid_structure');
   }
   const ingredients = parsedStructure.ingredients.map(parseProductIngredient);
+  if (new Set(ingredients.map((item) => item.ingredientId)).size !== ingredients.length) {
+    throw new InvalidMedicineCatalogInputError('invalid_ingredient');
+  }
   const ingredientRowIds = ingredients.flatMap((item) => (item.id ? [item.id] : []));
   if (new Set(ingredientRowIds).size !== ingredientRowIds.length) {
     throw new InvalidMedicineCatalogInputError('invalid_structure');

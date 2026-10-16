@@ -1192,8 +1192,11 @@ describe('MCP catalog review regressions', () => {
       notes: '語'.repeat(4_000), source_data: { secret_payload: 'x'.repeat(100_000) },
     });
     expect(bytes(first)).toBeLessThanOrEqual(40_000);
+    const others = [];
+    for (let i = 1; i < 30; i += 1) others.push(await ingredient(`large-linked-ingredient-${i}`));
+    const ingredientIds = [first, ...others].map((value) => value.ingredient.ingredient_id);
     const created = await product('large-single-product', {
-      ingredients: Array.from({ length: 30 }, () => ({ ingredient_id: first.ingredient.ingredient_id,
+      ingredients: ingredientIds.map((ingredient_id) => ({ ingredient_id,
         strength_text: '語'.repeat(300), source_url: 'https://example.com/' + 'a'.repeat(1_900) })),
       notes: '語'.repeat(4_000), source_data: { secret_product_payload: 'x'.repeat(100_000) },
     });

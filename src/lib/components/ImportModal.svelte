@@ -4,6 +4,7 @@
   import { planMeasurementImport, type ImportCounts, type ImportReport, type ImportRecord } from '$lib/import/measurement-plan';
   import type { ImportResult } from '$lib/server/measurement-import';
   import { invalidateAll } from '$app/navigation';
+  import { MAX_ARCHIVE_BATCH_BYTES } from '$lib/archive-format';
   import * as m from '$lib/paraglide/messages.js';
   import { readAppleHealthFile, isSupportedAppleType, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
   import {
@@ -338,15 +339,15 @@
     if (!healthArchive) return [] as ArchiveBatch[];
 
     const batches: ArchiveBatch[] = [];
-    const add = (kind: ArchiveBatch['kind'], items: unknown[], size: number) => {
-      for (const batch of chunkArchiveItems(items, size)) batches.push({ kind, items: batch });
+    const add = (kind: ArchiveBatch['kind'], items: unknown[], size: number, maxBytes = Infinity) => {
+      for (const batch of chunkArchiveItems(items, size, maxBytes)) batches.push({ kind, items: batch });
     };
 
     if (restoreProfile) add('profile', [healthArchive.data.patient], 1);
     add('reports', healthArchive.data.reports, 100);
     add('records', healthArchive.data.records, 200);
-    add('medicineIngredients', healthArchive.data.medicineIngredients, 50);
-    add('medicineProducts', healthArchive.data.medicineProducts, 25);
+    add('medicineIngredients', healthArchive.data.medicineIngredients, 50, MAX_ARCHIVE_BATCH_BYTES);
+    add('medicineProducts', healthArchive.data.medicineProducts, 25, MAX_ARCHIVE_BATCH_BYTES);
     add('medicines', healthArchive.data.medicines, 100);
     add(
       'medicineCourses',
@@ -382,7 +383,7 @@
       5,
     );
     add('revisions', healthArchive.data.claimRevisions, 200);
-    add('medicineCatalogRevisions', healthArchive.data.medicineCatalogRevisions, 25);
+    add('medicineCatalogRevisions', healthArchive.data.medicineCatalogRevisions, 25, MAX_ARCHIVE_BATCH_BYTES);
     return batches;
   }
 
@@ -456,7 +457,6 @@
     errorMessage = '';
     progress = 0;
 
-    const batches = archiveBatches();
     const linkedMedia = mediaWithSourceLinks();
     mediaMissing =
       healthArchive.missingMediaPaths.length +
@@ -468,10 +468,11 @@
             ? !archiveEnergySources.has(media.sourceId)
             : !archiveDataImports.has(media.sourceId)),
       ).length;
-    const totalSteps = Math.max(1, batches.length + linkedMedia.length);
     let completedSteps = 0;
 
     try {
+      const batches = archiveBatches();
+      const totalSteps = Math.max(1, batches.length + linkedMedia.length);
       for (const batch of batches) {
         await postArchiveBatch(batch);
         importedCount += batch.items.length;
@@ -495,7 +496,11 @@
       progress = 1;
       stage = 'done';
     } catch (error) {
-      errorMessage = error instanceof HealthArchiveError ? m.import_archive_invalid() : m.import_archive_failed();
+      errorMessage = error instanceof HealthArchiveError
+        ? error.code === 'item_too_large'
+          ? m.import_archive_item_too_large()
+          : m.import_archive_invalid()
+        : m.import_archive_failed();
       stage = 'review';
     }
   }

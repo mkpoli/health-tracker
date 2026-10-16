@@ -188,7 +188,7 @@ function instant(value: unknown, fallback: number) {
 
 function medicineForm(args: Record<string, unknown>, current?: MedicineClaimRecord) {
   const data = new FormData();
-  data.set('productId', optionalTextField(args, 'product_id', current?.productId ?? null));
+  if (owns(args, 'product_id')) data.set('productId', optionalTextField(args, 'product_id'));
   data.set('name', optionalTextField(args, 'name', current?.name ?? null));
   data.set('genericName', optionalTextField(args, 'generic_name', current?.genericName ?? null));
   data.set('form', optionalTextField(args, 'form', current?.form ?? null));
