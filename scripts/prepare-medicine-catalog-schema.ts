@@ -43,7 +43,7 @@ try {
         nextCommand: !tableExists
           ? 'bun run db:push'
           : after
-            ? 'bun run db:push -- --force'
+            ? 'bun run db:push'
             : 'bun run db:prepare:medicine-catalog -- --apply',
       },
       null,

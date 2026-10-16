@@ -32,12 +32,20 @@ the schema so the `mcp_client`, `mcp_grant` and `mcp_auth_code` tables exist:
 bun run db:push
 ```
 
-When upgrading a database that already has `medicine_claim`, create a backup and prepare its nullable catalog link before Drizzle rebuilds the table:
+When upgrading a database that already has `medicine_claim`, migrate before deploying the new code. Code that reads `medicine_claim.product_id` fails with `no such column` on an unmigrated database, and every dashboard tab, including the archive export, returns an error until the schema catches up. In order:
+
+1. On the old code, export a Health Archive for each profile ([Data portability](docs/data-portability.md)) and copy the database with the host's own backup tool.
+2. Add the nullable catalogue link, then push the schema.
+3. Deploy the new code.
 
 ```bash
 bun run db:prepare:medicine-catalog -- --apply
-bun run db:push -- --force
+bun run db:push
 ```
+
+`db:push` lists every statement before running it. Drizzle rebuilds each table whose `CHECK` constraints it reads as changed, so the list is long. Read it, then confirm. `--force` skips that review and also approves statements that drop data if the live schema has drifted, so use it only after reading the list once.
+
+There is no reverse migration. Rolling the code back works against the migrated database, because the old queries ignore the new column and tables. Pushing the old schema instead drops the catalogue tables and `product_id`.
 
 In the assistant, add `https://<host>/mcp` as a connector. It opens the consent
 screen, where the account holder picks the profiles it may read, demographic
