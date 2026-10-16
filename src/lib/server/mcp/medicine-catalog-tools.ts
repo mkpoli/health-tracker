@@ -585,6 +585,35 @@ async function loadProductRecords(
   return buildMedicineProductRecords(roots, names, identifiers, components, ingredients);
 }
 
+function isPair(value: string, index: number) {
+  const high = value.charCodeAt(index);
+  if (high < 0xd800 || high > 0xdbff || index + 1 >= value.length) return false;
+  const low = value.charCodeAt(index + 1);
+  return low >= 0xdc00 && low <= 0xdfff;
+}
+
+/** Counts code points in one pass without allocating an array of them. */
+function countCodePoints(value: string) {
+  let total = 0;
+  for (let index = 0; index < value.length; index += isPair(value, index) ? 2 : 1) total += 1;
+  return total;
+}
+
+/** Slices by code point, reading only up to the end of the requested range. */
+function sliceCodePoints(value: string, offset: number, limit: number) {
+  let index = 0;
+  for (let skipped = 0; skipped < offset && index < value.length; skipped += 1) {
+    index += isPair(value, index) ? 2 : 1;
+  }
+  const start = index;
+  let length = 0;
+  while (length < limit && index < value.length) {
+    index += isPair(value, index) ? 2 : 1;
+    length += 1;
+  }
+  return { chunk: value.slice(start, index), length };
+}
+
 const listMedicineCatalog: ToolDefinition = {
   name: 'list_medicine_catalog',
   title: 'List medicine catalog entries',
@@ -816,10 +845,10 @@ const readMedicineCatalogSource: ToolDefinition = {
       throw new ToolError('limit must be an integer from 1 through 10000');
     }
     const serialized = JSON.stringify(selected.sourceData ?? null);
-    const characters = Array.from(serialized);
-    if (offset > characters.length) throw new ToolError('offset is past the source payload');
-    const chunk = characters.slice(offset, offset + limit).join('');
-    const nextOffset = offset + Array.from(chunk).length;
+    const totalCharacters = countCodePoints(serialized);
+    if (offset > totalCharacters) throw new ToolError('offset is past the source payload');
+    const { chunk, length: chunkLength } = sliceCodePoints(serialized, offset, limit);
+    const nextOffset = offset + chunkLength;
     const digest = new Uint8Array(
       await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized)),
     );
@@ -831,11 +860,11 @@ const readMedicineCatalogSource: ToolDefinition = {
       encoding: 'json',
       offset_unit: 'unicode_code_point',
       sha256: [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
-      total_characters: characters.length,
+      total_characters: totalCharacters,
       offset,
       chunk,
-      next_offset: nextOffset < characters.length ? nextOffset : null,
-      complete: nextOffset >= characters.length,
+      next_offset: nextOffset < totalCharacters ? nextOffset : null,
+      complete: nextOffset >= totalCharacters,
     };
   },
 };

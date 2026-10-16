@@ -554,6 +554,34 @@ describe('MCP medicine catalog', () => {
     });
     expect(ingredientRows.rows[0]).toMatchObject({ ingredients: 0, revisions: 0 });
   });
+
+  it('folds non-ASCII display names when searching and slices source payloads by code point', async () => {
+    const created = (await catalogTool('create_medicine_product').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'product-unicode',
+      display_name: 'Ärzteprobe Tablette',
+      source_data: { mark: '😀😀😀' },
+    })) as any;
+    const found = (await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1',
+      query: 'ärzteprobe',
+    })) as any;
+    expect(found.products.map((row: any) => row.product_id)).toEqual([created.product.product_id]);
+
+    const read = async (offset: number, limit: number) =>
+      (await catalogTool('read_medicine_catalog_source').handler(context, {
+        patient_id: 'profile-1',
+        entity_kind: 'product',
+        entity_id: created.product.product_id,
+        offset,
+        limit,
+      })) as any;
+    // {"mark":"😀😀😀"} is 9 + 3 + 2 = 14 code points.
+    const head = await read(0, 10);
+    expect(head).toMatchObject({ total_characters: 14, chunk: '{"mark":"😀', next_offset: 10 });
+    const tail = await read(10, 10);
+    expect(tail).toMatchObject({ chunk: '😀😀"}', next_offset: null, complete: true });
+  });
 });
 
 describe('MCP medicine claims', () => {
