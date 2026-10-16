@@ -749,6 +749,52 @@ describe('archive import storage', () => {
     }
   });
 
+  it('rejects a medicine revision naming an unknown product without inserting the batch', async () => {
+    const patientId = 'missing-revision-product-destination';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      await archiveModule.importArchiveBatch({
+        patientId,
+        sourcePatientId: 'source-patient',
+        kind: 'medicines',
+        items: [{ ...medicineCurrent, productId: null }],
+      });
+      const revisionsBefore = await client.execute({
+        sql: 'SELECT * FROM claim_revision WHERE patient_id = ?',
+        args: [patientId],
+      });
+      await expect(
+        archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: 'source-patient',
+          kind: 'revisions',
+          items: [
+            { ...medicineFirst, revision: 3, productId: null },
+            { ...medicineFirst, productId: 'unknown-product' },
+          ].map((snapshot) => ({
+            claimKind: 'medicine',
+            claimId: snapshot.id,
+            revision: snapshot.revision,
+            snapshot,
+            changedAt: snapshot.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          })),
+        }),
+      ).rejects.toMatchObject({ code: 'missing_medicine_catalog_reference' });
+      const revisionsAfter = await client.execute({
+        sql: 'SELECT * FROM claim_revision WHERE patient_id = ?',
+        args: [patientId],
+      });
+      expect(revisionsAfter.rows).toEqual(revisionsBefore.rows);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
   it.each([
     { kind: 'medicineProducts' as const, item: medicineProductCurrent },
     { kind: 'medicines' as const, item: medicineCurrent },
