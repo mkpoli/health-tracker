@@ -564,6 +564,55 @@ export const energyClaim = sqliteTable(
 	]
 );
 
+// Meal food items, already present in production. No code reads them yet; declaring the table keeps `db:push` from dropping it.
+export const energyFoodItem = sqliteTable(
+	'energy_food_item',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		energyClaimId: text('energy_claim_id').notNull(),
+		orderIndex: integer('order_index').notNull(),
+		name: text('name').notNull(),
+		quantityValue: real('quantity_value'),
+		quantityUnit: text('quantity_unit'),
+		energyKcal: real('energy_kcal'),
+		energyKcalMin: real('energy_kcal_min'),
+		energyKcalMax: real('energy_kcal_max'),
+		proteinG: real('protein_g'),
+		carbohydrateG: real('carbohydrate_g'),
+		fatG: real('fat_g'),
+		fiberG: real('fiber_g'),
+		sodiumMg: real('sodium_mg'),
+		dataSource: text('data_source').notNull().default('unknown'),
+		notes: text('notes'),
+		originExternalId: text('origin_external_id'),
+		nutritionData: text('nutrition_data', { mode: 'json' }).$type<Record<string, number> | null>(),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		foreignKey({
+			name: 'energy_food_item_claim_patient_fk',
+			columns: [table.energyClaimId, table.patientId],
+			foreignColumns: [energyClaim.id, energyClaim.patientId]
+		}).onDelete('cascade'),
+		check(
+			'energy_food_item_data_source_check',
+			sql`${table.dataSource} in ('label', 'database', 'estimated', 'unknown')`
+		),
+		uniqueIndex('energy_food_item_order_idx').on(table.energyClaimId, table.orderIndex),
+		uniqueIndex('energy_food_item_external_idx').on(table.energyClaimId, table.originExternalId),
+		index('energy_food_item_patient_idx').on(table.patientId),
+		index('energy_food_item_claim_idx').on(table.energyClaimId)
+	]
+);
+
 export const energySource = sqliteTable(
 	'energy_source',
 	{
