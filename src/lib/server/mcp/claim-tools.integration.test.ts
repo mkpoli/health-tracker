@@ -163,9 +163,11 @@ beforeAll(async () => {
       snapshot TEXT NOT NULL,
       changed_at TEXT NOT NULL,
       change_origin_kind TEXT NOT NULL DEFAULT 'manual',
-      change_origin_provider TEXT,
-      UNIQUE(entity_kind, entity_id, revision)
+      change_origin_provider TEXT
     );
+    CREATE UNIQUE INDEX medicine_catalog_revision_entity_idx ON medicine_catalog_revision(entity_kind, entity_id, revision);
+    CREATE INDEX medicine_catalog_revision_patient_idx ON medicine_catalog_revision(patient_id);
+    CREATE INDEX medicine_catalog_revision_patient_changed_idx ON medicine_catalog_revision(patient_id, changed_at);
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
