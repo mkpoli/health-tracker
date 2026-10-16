@@ -537,6 +537,8 @@
           patient: data.currentPatient,
           reports: data.reports,
           records: data.records,
+          medicineIngredients: data.medicineIngredients,
+          medicineProducts: data.medicineProducts,
           medicines: data.medicines,
           energyEntries: data.energyEntries,
           energySources: data.energySources,
@@ -544,6 +546,7 @@
           exerciseDefinitions: data.exerciseDefinitions,
           workouts: data.workouts,
           claimRevisions: data.claimRevisions,
+          medicineCatalogRevisions: data.medicineCatalogRevisions,
         },
         data.currentPatient.name,
       );
@@ -1748,6 +1751,8 @@
         patient={data.currentPatient}
         reports={data.reports}
         records={data.records}
+        medicineIngredients={data.medicineIngredients}
+        medicineProducts={data.medicineProducts}
         medicines={data.medicines}
         energyEntries={data.energyEntries}
         energySources={data.energySources}
@@ -1755,6 +1760,7 @@
         exerciseDefinitions={data.exerciseDefinitions}
         workouts={data.workouts}
         claimRevisions={data.claimRevisions}
+        medicineCatalogRevisions={data.medicineCatalogRevisions}
         onClose={() => (showDeleteModal = false)}
       />
     {/if}
@@ -2902,6 +2908,9 @@
             patientId={data.currentPatient.id}
             medicines={data.medicines}
             revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
+            ingredients={data.medicineIngredients}
+            products={data.medicineProducts}
+            catalogRevisions={data.medicineCatalogRevisions}
           />
         </div>
 

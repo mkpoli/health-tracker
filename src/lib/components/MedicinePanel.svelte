@@ -7,22 +7,36 @@
   import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
   import type { MedicineCaptureProposal } from '$lib/health-capture';
   import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
+  import {
+    localizedMedicineCatalogName,
+    type MedicineCatalogRevisionRecord,
+    type MedicineIngredientRecord,
+    type MedicineProductRecord,
+  } from '$lib/medicine-catalog';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
   import HealthCapture from './HealthCapture.svelte';
+  import MedicineCatalogPanel from './MedicineCatalogPanel.svelte';
 
   let {
     patientId,
     medicines = [],
     revisions = [],
+    ingredients = [],
+    products = [],
+    catalogRevisions = [],
   }: {
     patientId: string;
     medicines: MedicineClaimRecord[];
     revisions: MedicineClaimRevisionRecord[];
+    ingredients: MedicineIngredientRecord[];
+    products: MedicineProductRecord[];
+    catalogRevisions: MedicineCatalogRevisionRecord[];
   } = $props();
 
   type Draft = {
     id: string;
     revision: number;
+    productId: string;
     name: string;
     genericName: string;
     form: string;
@@ -72,6 +86,7 @@
     return {
       id: '',
       revision: 0,
+      productId: '',
       name: '',
       genericName: '',
       form: '',
@@ -98,6 +113,7 @@
     draft = {
       id: medicine.id,
       revision: medicine.revision,
+      productId: medicine.productId || '',
       name: medicine.name,
       genericName: medicine.genericName || '',
       form: medicine.form || '',
@@ -121,6 +137,7 @@
     draft = {
       id: '',
       revision: 0,
+      productId: '',
       name: proposal.name || '',
       genericName: proposal.genericName || '',
       form: proposal.form || '',
@@ -190,6 +207,30 @@
     return [medicine.strength, medicine.form].filter(Boolean).join(' · ');
   }
 
+  function selectedProduct(productId: string | null) {
+    return productId ? products.find((product) => product.id === productId) || null : null;
+  }
+
+  function chooseProduct(productId: string) {
+    draft.productId = productId;
+    const product = selectedProduct(productId);
+    if (!product) return;
+    const activeIngredients = product.ingredients.filter((component) => component.role === 'active');
+    draft.name = localizedMedicineCatalogName(product.names, getLocale(), product.displayName);
+    draft.genericName = activeIngredients
+      .map((component) =>
+        localizedMedicineCatalogName(
+          component.ingredient.names,
+          getLocale(),
+          component.ingredient.canonicalName,
+        ),
+      )
+      .join(' / ');
+    draft.form = product.doseFormText || '';
+    draft.strength = product.strengthText || '';
+    draft.route = product.routeText || '';
+  }
+
   function formatDateOnly(value: string) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     if (!match) return value;
@@ -219,6 +260,7 @@
 
   function medicineFieldLabel(field: string) {
     if (field === 'name') return m.medicine_name();
+    if (field === 'productId') return m.medicine_catalog_product_link();
     if (field === 'genericName') return m.medicine_generic_name();
     if (field === 'form') return m.medicine_form();
     if (field === 'strength') return m.medicine_strength();
@@ -307,6 +349,13 @@
     />
   </div>
 
+  <MedicineCatalogPanel
+    {patientId}
+    {ingredients}
+    {products}
+    revisions={catalogRevisions}
+  />
+
   {#if medicines.length === 0}
     <div class="flex flex-col items-center px-6 py-16 text-center">
       <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
@@ -364,6 +413,17 @@
         </div>
         {#if medicine.genericName}
           <p class="mt-1 text-sm text-slate-500">{medicine.genericName}</p>
+        {/if}
+        {#if selectedProduct(medicine.productId)}
+          <p class="mt-1 text-xs font-medium text-blue-600">
+            {m.medicine_catalog_linked_product({
+              name: localizedMedicineCatalogName(
+                selectedProduct(medicine.productId)?.names || [],
+                getLocale(),
+                selectedProduct(medicine.productId)?.displayName || '',
+              ),
+            })}
+          </p>
         {/if}
         {#if medicineSummary(medicine)}
           <p class="mt-2 text-sm font-medium text-slate-700">{medicineSummary(medicine)}</p>
@@ -498,6 +558,27 @@
               {m.medicine_details()}
             </legend>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
+              <label class="sm:col-span-2">
+                <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_catalog_product_link()}</span>
+                <select
+                  name="productId"
+                  value={draft.productId}
+                  onchange={(event) => chooseProduct(event.currentTarget.value)}
+                  class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="">{m.medicine_catalog_no_product_link()}</option>
+                  {#each products.filter(
+                    (product) => product.status !== 'archived' || product.id === draft.productId
+                  ) as product (product.id)}
+                    <option value={product.id}>
+                      {localizedMedicineCatalogName(product.names, getLocale(), product.displayName)}
+                      {product.strengthText ? ` · ${product.strengthText}` : ''}
+                    </option>
+                  {/each}
+                </select>
+                <span class="mt-1 block text-xs text-slate-500">{m.medicine_catalog_product_link_hint()}</span>
+              </label>
+
               <label class="sm:col-span-2">
                 <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_name()}</span>
                 <input

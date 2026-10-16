@@ -78,9 +78,12 @@ import {
 import {
   createMedicineIngredient,
   createMedicineProduct,
+  deleteMedicineIngredient,
+  deleteMedicineProduct,
   getMedicineIngredientRecord,
   getMedicineProductRecord,
   InvalidMedicineCatalogReferenceError,
+  MedicineCatalogIngredientInUseError,
   updateMedicineIngredient,
   updateMedicineProduct,
 } from '$lib/server/medicine-catalog-mutations';
@@ -443,41 +446,29 @@ export const actions: Actions = {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
     if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
     const current = await getOwnedMedicineIngredient(userId, id);
     if (!current) return fail(404, { code: 'medicine_catalog_ingredient_not_found' });
-    const used = await db
-      .select({ id: medicineProductIngredient.id })
-      .from(medicineProductIngredient)
-      .where(
-        and(
-          eq(medicineProductIngredient.patientId, current.patientId),
-          eq(medicineProductIngredient.ingredientId, current.id),
-        ),
-      )
-      .limit(1);
-    if (used[0]) return fail(409, { code: 'medicine_catalog_ingredient_in_use' });
-
-    await db.transaction(async (tx) => {
-      await tx
-        .delete(medicineCatalogRevision)
-        .where(
-          and(
-            eq(medicineCatalogRevision.patientId, current.patientId),
-            eq(medicineCatalogRevision.entityKind, 'ingredient'),
-            eq(medicineCatalogRevision.entityId, current.id),
-          ),
-        );
-      await tx
-        .delete(medicineIngredient)
-        .where(
-          and(
-            eq(medicineIngredient.id, current.id),
-            eq(medicineIngredient.patientId, current.patientId),
-          ),
-        );
-    });
-    return { success: true };
+    try {
+      await deleteMedicineIngredient({
+        patientId: current.patientId,
+        id: current.id,
+        expectedRevision,
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof MedicineCatalogIngredientInUseError) {
+        return fail(409, { code: 'medicine_catalog_ingredient_in_use' });
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
   },
 
   createMedicineProduct: async ({ request, locals }) => {
@@ -546,30 +537,27 @@ export const actions: Actions = {
     const userId = requireUserId(locals);
     const data = await request.formData();
     const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
     if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
     const current = await getOwnedMedicineProduct(userId, id);
     if (!current) return fail(404, { code: 'medicine_catalog_product_not_found' });
-
-    await db.transaction(async (tx) => {
-      await tx
-        .delete(medicineCatalogRevision)
-        .where(
-          and(
-            eq(medicineCatalogRevision.patientId, current.patientId),
-            eq(medicineCatalogRevision.entityKind, 'product'),
-            eq(medicineCatalogRevision.entityId, current.id),
-          ),
-        );
-      await tx
-        .delete(medicineProduct)
-        .where(
-          and(
-            eq(medicineProduct.id, current.id),
-            eq(medicineProduct.patientId, current.patientId),
-          ),
-        );
-    });
-    return { success: true };
+    try {
+      await deleteMedicineProduct({
+        patientId: current.patientId,
+        id: current.id,
+        expectedRevision,
+        source: manualClaimSource,
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
   },
 
   createMedicine: async ({ request, locals }) => {
