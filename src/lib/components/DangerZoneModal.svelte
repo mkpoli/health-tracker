@@ -8,6 +8,8 @@
     patient,
     reports = [],
     records,
+    medicineIngredients = [],
+    medicineProducts = [],
     medicines = [],
     energyEntries = [],
     energySources = [],
@@ -15,11 +17,14 @@
     exerciseDefinitions = [],
     workouts = [],
     claimRevisions = [],
+    medicineCatalogRevisions = [],
     onClose,
   }: {
     patient: { id: string; name: string; [key: string]: unknown };
     reports?: unknown[];
     records: unknown[];
+    medicineIngredients?: unknown[];
+    medicineProducts?: unknown[];
     medicines?: unknown[];
     energyEntries?: unknown[];
     energySources?: unknown[];
@@ -27,6 +32,7 @@
     exerciseDefinitions?: unknown[];
     workouts?: unknown[];
     claimRevisions?: unknown[];
+    medicineCatalogRevisions?: unknown[];
     onClose: () => void;
   } = $props();
 
@@ -36,6 +42,8 @@
     () =>
       records.length +
         reports.length +
+        medicineIngredients.length +
+        medicineProducts.length +
         medicines.length +
         energyEntries.length +
         energySources.length +
@@ -62,6 +70,8 @@
           patient,
           reports,
           records,
+          medicineIngredients,
+          medicineProducts,
           medicines,
           energyEntries,
           energySources,
@@ -69,6 +79,7 @@
           exerciseDefinitions,
           workouts,
           claimRevisions,
+          medicineCatalogRevisions,
         },
         patient?.name,
       );

@@ -8,6 +8,8 @@ describe('buildPatientExport', () => {
       patient: { id: 'patient-1' },
       reports: [{ id: 'report-1' }],
       records: [{ id: 'record-1' }],
+      medicineIngredients: [{ id: 'ingredient-1', canonicalName: 'amoxicillin' }],
+      medicineProducts: [{ id: 'product-1', displayName: 'Amoxicillin 500 mg' }],
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
@@ -15,12 +17,15 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
+      medicineCatalogRevisions: [{ entityKind: 'product', entityId: 'product-1', revision: 1 }],
     });
 
     expect(payload).toMatchObject({
       format: 'health-tracker-export',
-      version: 7,
+      version: 8,
       patient: { id: 'patient-1' },
+      medicineIngredients: [{ id: 'ingredient-1', canonicalName: 'amoxicillin' }],
+      medicineProducts: [{ id: 'product-1', displayName: 'Amoxicillin 500 mg' }],
       medicines: [{ id: 'medicine-1', revision: 2 }],
       energyEntries: [{ id: 'energy-1', energyKcal: 540 }],
       energySources: [{ id: 'source-1', energyClaimId: 'energy-1' }],
@@ -28,6 +33,7 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [{ id: 'exercise-1', name: 'Squat' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'medicine', claimId: 'medicine-1', revision: 1 }],
+      medicineCatalogRevisions: [{ entityKind: 'product', entityId: 'product-1', revision: 1 }],
     });
     expect(Number.isNaN(Date.parse(payload.exportedAt))).toBe(false);
   });
@@ -47,6 +53,8 @@ describe('buildPatientExport', () => {
         },
       ],
       records: [],
+      medicineIngredients: [],
+      medicineProducts: [],
       medicines: [],
       energyEntries: [],
       energySources: [
@@ -68,6 +76,7 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
+      medicineCatalogRevisions: [],
     };
 
     expect(listPatientArchiveMedia(input)).toEqual([
@@ -91,6 +100,8 @@ describe('buildPatientExport', () => {
       patient: { id: 'patient-1' },
       reports: [],
       records: [],
+      medicineIngredients: [],
+      medicineProducts: [],
       medicines: [],
       energyEntries: [{ id: 'energy-1' }],
       energySources: [
@@ -105,6 +116,7 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
+      medicineCatalogRevisions: [],
     };
     const requested: string[] = [];
     const archive = await buildPatientArchiveBytes(input, 'https://health.example', async (request) => {
@@ -117,7 +129,7 @@ describe('buildPatientExport', () => {
     expect(Array.from(files['media/calories/1-source-1-meal.jpg'])).toEqual([1, 2, 3]);
     expect(JSON.parse(strFromU8(files['health-data.json']))).toMatchObject({
       format: 'health-tracker-export',
-      version: 7,
+      version: 8,
       energyEntries: [{ id: 'energy-1' }],
       workouts: [{ id: 'workout-1', kind: 'session' }],
       claimRevisions: [{ claimKind: 'energy', claimId: 'energy-1', revision: 1 }],
@@ -136,6 +148,8 @@ describe('buildPatientExport', () => {
       patient: {},
       reports: [],
       records: [],
+      medicineIngredients: [],
+      medicineProducts: [],
       medicines: [],
       energyEntries: [],
       energySources: [{ id: 'source-1', sourceUrl: 'https://other.example/source' }],
@@ -143,6 +157,7 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
+      medicineCatalogRevisions: [],
     };
 
     await expect(buildPatientArchiveBytes(input, 'https://health.example')).rejects.toThrow(
@@ -155,6 +170,8 @@ describe('buildPatientExport', () => {
       patient: { id: 'patient-1' },
       reports: [],
       records: [],
+      medicineIngredients: [],
+      medicineProducts: [],
       medicines: [],
       energyEntries: [],
       energySources: [
@@ -175,6 +192,7 @@ describe('buildPatientExport', () => {
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
+      medicineCatalogRevisions: [],
     });
 
     expect(media.map((item) => item.sourceId)).toEqual(['source/a', 'source:a']);

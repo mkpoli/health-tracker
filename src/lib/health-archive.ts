@@ -20,6 +20,8 @@ export interface HealthTrackerExport {
   patient: Record<string, unknown>;
   reports: unknown[];
   records: unknown[];
+  medicineIngredients: unknown[];
+  medicineProducts: unknown[];
   medicines: unknown[];
   energyEntries: unknown[];
   energySources: unknown[];
@@ -27,6 +29,7 @@ export interface HealthTrackerExport {
   exerciseDefinitions: unknown[];
   workouts: unknown[];
   claimRevisions: unknown[];
+  medicineCatalogRevisions: unknown[];
   mediaFiles: HealthArchiveMediaFile[];
 }
 
@@ -166,6 +169,8 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     patient,
     reports: data.reports,
     records: data.records,
+    medicineIngredients: arrayOrEmpty(data.medicineIngredients),
+    medicineProducts: arrayOrEmpty(data.medicineProducts),
     medicines: arrayOrEmpty(data.medicines),
     energyEntries: arrayOrEmpty(data.energyEntries),
     energySources: arrayOrEmpty(data.energySources),
@@ -173,6 +178,7 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     exerciseDefinitions: arrayOrEmpty(data.exerciseDefinitions),
     workouts: arrayOrEmpty(data.workouts),
     claimRevisions: arrayOrEmpty(data.claimRevisions),
+    medicineCatalogRevisions: arrayOrEmpty(data.medicineCatalogRevisions),
     mediaFiles,
   };
 }

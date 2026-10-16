@@ -5,7 +5,13 @@ import {
   dataImport,
   energyClaim,
   exerciseDefinition,
+  medicineCatalogIdentifier,
+  medicineCatalogName,
+  medicineCatalogRevision,
   medicineClaim,
+  medicineIngredient,
+  medicineProduct,
+  medicineProductIngredient,
   patient,
   record,
   report,
@@ -15,6 +21,20 @@ import {
 } from '$lib/server/db/schema';
 import { isEnergyDirection, isEnergyStatus, type EnergyClaimRecord } from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
+import {
+  isMedicineCatalogEntityKind,
+  isMedicineCatalogNameType,
+  isMedicineCatalogStatus,
+  isMedicineIngredientRole,
+  isMedicineProductType,
+  normalizedMedicineCatalogName,
+  type MedicineCatalogIdentifierRecord,
+  type MedicineCatalogNameRecord,
+  type MedicineCatalogRevisionSnapshot,
+  type MedicineIngredientRecord,
+  type MedicineProductIngredientRecord,
+  type MedicineProductRecord,
+} from '$lib/medicine-catalog';
 import { claimRevisionValues } from '$lib/server/claim-revisions';
 import { isValidTimeZone, toDateTimeLocal, utcOffsetMinutesAt } from '$lib/time-zone';
 import {
@@ -33,18 +53,27 @@ export const archiveEntityKinds = [
   'profile',
   'reports',
   'records',
+  'medicineIngredients',
+  'medicineProducts',
   'medicines',
   'energy',
   'dataImports',
   'exerciseDefinitions',
   'workouts',
   'revisions',
+  'medicineCatalogRevisions',
 ] as const;
 
 export type ArchiveEntityKind = (typeof archiveEntityKinds)[number];
 type ArchiveIdKind =
   | 'report'
   | 'record'
+  | 'medicine-ingredient'
+  | 'medicine-product'
+  | 'medicine-catalog-name'
+  | 'medicine-catalog-identifier'
+  | 'medicine-product-ingredient'
+  | 'medicine-catalog-revision'
   | 'medicine'
   | 'energy'
   | 'energy-source'
@@ -62,6 +91,8 @@ export type ArchiveImportErrorCode =
   | 'invalid_energy'
   | 'invalid_data_import'
   | 'invalid_exercise_definition'
+  | 'invalid_medicine_catalog'
+  | 'invalid_medicine_catalog_revision'
   | 'invalid_medicine'
   | 'invalid_profile'
   | 'invalid_record'
@@ -69,6 +100,7 @@ export type ArchiveImportErrorCode =
   | 'invalid_workout'
   | 'missing_claim'
   | 'missing_exercise_definition'
+  | 'missing_medicine_catalog_reference'
   | 'missing_report';
 
 export class ArchiveImportError extends Error {
@@ -514,7 +546,471 @@ function parseRecord(value: unknown) {
   };
 }
 
-function parseMedicine(value: unknown, patientId: string, id: string): MedicineClaimRecord {
+const CATALOG_ERROR = 'invalid_medicine_catalog' as const;
+const CATALOG_REVISION_ERROR = 'invalid_medicine_catalog_revision' as const;
+
+function catalogOrderIndex(value: unknown, code: ArchiveImportErrorCode) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 1_000_000) {
+    throw new ArchiveImportError(code);
+  }
+  return Number(value);
+}
+
+function catalogBoolean(value: unknown, code: ArchiveImportErrorCode) {
+  if (typeof value !== 'boolean') throw new ArchiveImportError(code);
+  return value;
+}
+
+function catalogDecimal(value: unknown, code: ArchiveImportErrorCode) {
+  const raw = optionalText(value, code, 64);
+  if (!raw) return null;
+  const number = Number(raw);
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw) || !Number.isFinite(number) || number <= 0) {
+    throw new ArchiveImportError(code);
+  }
+  return raw;
+}
+
+function catalogLanguageTag(value: unknown, code: ArchiveImportErrorCode) {
+  const raw = requiredText(value, code, 100);
+  try {
+    const locales = Intl.getCanonicalLocales(raw);
+    if (locales.length !== 1) throw new Error('invalid language tag');
+    return locales[0];
+  } catch {
+    throw new ArchiveImportError(code);
+  }
+}
+
+function catalogJurisdiction(value: unknown, code: ArchiveImportErrorCode) {
+  const country = optionalText(value, code, 2);
+  if (!country) return null;
+  if (!/^[A-Za-z]{2}$/.test(country)) throw new ArchiveImportError(code);
+  return country.toUpperCase();
+}
+
+function catalogSource(row: Record<string, unknown>, code: ArchiveImportErrorCode) {
+  const sourceUrl = optionalText(row.sourceUrl, code, 2_000);
+  if (sourceUrl) {
+    try {
+      const parsed = new URL(sourceUrl);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        throw new Error('invalid source URL');
+      }
+    } catch {
+      throw new ArchiveImportError(code);
+    }
+  }
+
+  const retrieved = optionalText(row.sourceRetrievedAt, code, 64);
+  return {
+    sourceKind: optionalText(row.sourceKind, code, 80) || 'manual',
+    sourceProvider: optionalText(row.sourceProvider, code, 200),
+    sourceUrl,
+    sourceRetrievedAt: retrieved ? validDateText(retrieved, code) : null,
+  };
+}
+
+async function planCatalogName(options: {
+  value: unknown;
+  patientId: string;
+  sourcePatientId: string;
+  ownerKind: 'ingredient' | 'product';
+  sourceOwnerId: string;
+  ownerId: string;
+  code: ArchiveImportErrorCode;
+}) {
+  const row = asRecord(options.value, options.code);
+  const sourceNameId = sourceId(row, options.code);
+  const sourceIngredientId = optionalText(row.ingredientId, options.code, 512);
+  const sourceProductId = optionalText(row.productId, options.code, 512);
+  if (
+    (options.ownerKind === 'ingredient' &&
+      (sourceIngredientId !== options.sourceOwnerId || sourceProductId !== null)) ||
+    (options.ownerKind === 'product' &&
+      (sourceProductId !== options.sourceOwnerId || sourceIngredientId !== null))
+  ) {
+    throw new ArchiveImportError(options.code);
+  }
+  const nameType = requiredText(row.nameType, options.code, 40);
+  if (!isMedicineCatalogNameType(nameType)) throw new ArchiveImportError(options.code);
+  const name = requiredText(row.name, options.code, 300).normalize('NFKC').trim();
+  if (!name) throw new ArchiveImportError(options.code);
+
+  const id = await resolveArchiveEntityId(
+    options.patientId,
+    options.sourcePatientId,
+    'medicine-catalog-name',
+    sourceNameId,
+  );
+  const record: MedicineCatalogNameRecord = {
+    id,
+    ingredientId: options.ownerKind === 'ingredient' ? options.ownerId : null,
+    productId: options.ownerKind === 'product' ? options.ownerId : null,
+    orderIndex: catalogOrderIndex(row.orderIndex, options.code),
+    name,
+    normalizedName: normalizedMedicineCatalogName(name),
+    languageTag: catalogLanguageTag(row.languageTag, options.code),
+    nameType,
+    jurisdiction: catalogJurisdiction(row.jurisdiction, options.code),
+    preferred: catalogBoolean(row.preferred, options.code),
+    ...catalogSource(row, options.code),
+  };
+  return record;
+}
+
+async function planCatalogIdentifier(options: {
+  value: unknown;
+  patientId: string;
+  sourcePatientId: string;
+  ownerKind: 'ingredient' | 'product';
+  sourceOwnerId: string;
+  ownerId: string;
+  code: ArchiveImportErrorCode;
+}) {
+  const row = asRecord(options.value, options.code);
+  const sourceIdentifierId = sourceId(row, options.code);
+  const sourceIngredientId = optionalText(row.ingredientId, options.code, 512);
+  const sourceProductId = optionalText(row.productId, options.code, 512);
+  if (
+    (options.ownerKind === 'ingredient' &&
+      (sourceIngredientId !== options.sourceOwnerId || sourceProductId !== null)) ||
+    (options.ownerKind === 'product' &&
+      (sourceProductId !== options.sourceOwnerId || sourceIngredientId !== null))
+  ) {
+    throw new ArchiveImportError(options.code);
+  }
+  const id = await resolveArchiveEntityId(
+    options.patientId,
+    options.sourcePatientId,
+    'medicine-catalog-identifier',
+    sourceIdentifierId,
+  );
+  const record: MedicineCatalogIdentifierRecord = {
+    id,
+    ingredientId: options.ownerKind === 'ingredient' ? options.ownerId : null,
+    productId: options.ownerKind === 'product' ? options.ownerId : null,
+    orderIndex: catalogOrderIndex(row.orderIndex, options.code),
+    system: requiredText(row.system, options.code, 300),
+    code: requiredText(row.code, options.code, 500),
+    jurisdiction: catalogJurisdiction(row.jurisdiction, options.code),
+    ...catalogSource(row, options.code),
+  };
+  return record;
+}
+
+function assertCatalogRows(value: unknown, limit: number, code: ArchiveImportErrorCode) {
+  if (!Array.isArray(value) || value.length > limit) throw new ArchiveImportError(code);
+  return value;
+}
+
+function assertCatalogOrder(rows: Array<{ orderIndex: number }>, code: ArchiveImportErrorCode) {
+  if (new Set(rows.map((row) => row.orderIndex)).size !== rows.length) {
+    throw new ArchiveImportError(code);
+  }
+}
+
+async function planMedicineIngredient(
+  value: unknown,
+  patientId: string,
+  sourcePatientId: string,
+  code: ArchiveImportErrorCode = CATALOG_ERROR,
+) {
+  const row = asRecord(value, code);
+  const sourceIngredientId = sourceId(row, code);
+  const id = await resolveArchiveEntityId(
+    patientId,
+    sourcePatientId,
+    'medicine-ingredient',
+    sourceIngredientId,
+  );
+  const canonicalName = requiredText(row.canonicalName, code, 300).normalize('NFKC').trim();
+  const status = requiredText(row.status, code, 40);
+  if (!canonicalName || !isMedicineCatalogStatus(status)) throw new ArchiveImportError(code);
+  const nameValues = assertCatalogRows(row.names, 30, code);
+  const identifierValues = assertCatalogRows(row.identifiers, 30, code);
+  const names = await Promise.all(
+    nameValues.map((name) =>
+      planCatalogName({
+        value: name,
+        patientId,
+        sourcePatientId,
+        ownerKind: 'ingredient',
+        sourceOwnerId: sourceIngredientId,
+        ownerId: id,
+        code,
+      }),
+    ),
+  );
+  const identifiers = await Promise.all(
+    identifierValues.map((identifier) =>
+      planCatalogIdentifier({
+        value: identifier,
+        patientId,
+        sourcePatientId,
+        ownerKind: 'ingredient',
+        sourceOwnerId: sourceIngredientId,
+        ownerId: id,
+        code,
+      }),
+    ),
+  );
+  assertCatalogOrder(names, code);
+  assertCatalogOrder(identifiers, code);
+  assertSerializedSize(row.sourceData ?? null, 2 * 1024 * 1024, code);
+
+  const snapshot: MedicineIngredientRecord = {
+    id,
+    patientId,
+    canonicalName,
+    normalizedName: normalizedMedicineCatalogName(canonicalName),
+    status,
+    notes: optionalText(row.notes, code, 4_000),
+    originKind: optionalText(row.originKind, code, 120) || 'manual',
+    originProvider: optionalText(row.originProvider, code, 300),
+    originExternalId: optionalText(row.originExternalId, code, 1_000),
+    sourceData: jsonValue(row.sourceData ?? null, code),
+    revision: positiveRevision(row.revision, code),
+    createdAt: validDateText(row.createdAt, code),
+    updatedAt: validDateText(row.updatedAt, code),
+    names,
+    identifiers,
+  };
+
+  return {
+    sourceId: sourceIngredientId,
+    snapshot,
+    root: {
+      id: snapshot.id,
+      patientId,
+      canonicalName: snapshot.canonicalName,
+      normalizedName: snapshot.normalizedName,
+      status: snapshot.status,
+      notes: snapshot.notes,
+      originKind: snapshot.originKind,
+      originProvider: snapshot.originProvider,
+      originExternalId: snapshot.originExternalId,
+      sourceData: snapshot.sourceData,
+      revision: snapshot.revision,
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt,
+    },
+    names: names.map((name) => ({ ...name, patientId })),
+    identifiers: identifiers.map((identifier) => ({ ...identifier, patientId })),
+  };
+}
+
+async function planProductIngredient(options: {
+  value: unknown;
+  patientId: string;
+  sourcePatientId: string;
+  sourceProductId: string;
+  productId: string;
+  code: ArchiveImportErrorCode;
+}) {
+  const row = asRecord(options.value, options.code);
+  if (requiredText(row.productId, options.code, 512) !== options.sourceProductId) {
+    throw new ArchiveImportError(options.code);
+  }
+  const sourceComponentId = sourceId(row, options.code);
+  const sourceIngredientId = requiredText(row.ingredientId, options.code, 512);
+  const ingredientId = await resolveArchiveEntityId(
+    options.patientId,
+    options.sourcePatientId,
+    'medicine-ingredient',
+    sourceIngredientId,
+  );
+  const role = requiredText(row.role, options.code, 40);
+  if (!isMedicineIngredientRole(role)) throw new ArchiveImportError(options.code);
+  const nestedIngredient = await planMedicineIngredient(
+    row.ingredient,
+    options.patientId,
+    options.sourcePatientId,
+    options.code,
+  );
+  if (nestedIngredient.sourceId !== sourceIngredientId) throw new ArchiveImportError(options.code);
+
+  const numeratorValue = catalogDecimal(row.numeratorValue, options.code);
+  const numeratorUnit = optionalText(row.numeratorUnit, options.code, 80);
+  const denominatorValue = catalogDecimal(row.denominatorValue, options.code);
+  const denominatorUnit = optionalText(row.denominatorUnit, options.code, 80);
+  if (
+    Boolean(numeratorValue) !== Boolean(numeratorUnit) ||
+    Boolean(denominatorValue) !== Boolean(denominatorUnit) ||
+    (denominatorValue && !numeratorValue)
+  ) {
+    throw new ArchiveImportError(options.code);
+  }
+
+  const record: MedicineProductIngredientRecord = {
+    id: await resolveArchiveEntityId(
+      options.patientId,
+      options.sourcePatientId,
+      'medicine-product-ingredient',
+      sourceComponentId,
+    ),
+    productId: options.productId,
+    ingredientId,
+    orderIndex: catalogOrderIndex(row.orderIndex, options.code),
+    role,
+    numeratorValue,
+    numeratorUnit,
+    denominatorValue,
+    denominatorUnit,
+    strengthText: optionalText(row.strengthText, options.code, 300),
+    basisOfStrengthText: optionalText(row.basisOfStrengthText, options.code, 300),
+    ...catalogSource(row, options.code),
+    ingredient: nestedIngredient.snapshot,
+  };
+  return record;
+}
+
+async function planMedicineProduct(
+  value: unknown,
+  patientId: string,
+  sourcePatientId: string,
+  code: ArchiveImportErrorCode = CATALOG_ERROR,
+) {
+  const row = asRecord(value, code);
+  const sourceProductId = sourceId(row, code);
+  const id = await resolveArchiveEntityId(
+    patientId,
+    sourcePatientId,
+    'medicine-product',
+    sourceProductId,
+  );
+  const displayName = requiredText(row.displayName, code, 300).normalize('NFKC').trim();
+  const productType = requiredText(row.productType, code, 40);
+  const status = requiredText(row.status, code, 40);
+  if (!displayName || !isMedicineProductType(productType) || !isMedicineCatalogStatus(status)) {
+    throw new ArchiveImportError(code);
+  }
+  const nameValues = assertCatalogRows(row.names, 30, code);
+  const identifierValues = assertCatalogRows(row.identifiers, 30, code);
+  const ingredientValues = assertCatalogRows(row.ingredients, 30, code);
+  const names = await Promise.all(
+    nameValues.map((name) =>
+      planCatalogName({
+        value: name,
+        patientId,
+        sourcePatientId,
+        ownerKind: 'product',
+        sourceOwnerId: sourceProductId,
+        ownerId: id,
+        code,
+      }),
+    ),
+  );
+  const identifiers = await Promise.all(
+    identifierValues.map((identifier) =>
+      planCatalogIdentifier({
+        value: identifier,
+        patientId,
+        sourcePatientId,
+        ownerKind: 'product',
+        sourceOwnerId: sourceProductId,
+        ownerId: id,
+        code,
+      }),
+    ),
+  );
+  const ingredients = await Promise.all(
+    ingredientValues.map((ingredient) =>
+      planProductIngredient({
+        value: ingredient,
+        patientId,
+        sourcePatientId,
+        sourceProductId,
+        productId: id,
+        code,
+      }),
+    ),
+  );
+  assertCatalogOrder(names, code);
+  assertCatalogOrder(identifiers, code);
+  assertCatalogOrder(ingredients, code);
+  assertSerializedSize(row.sourceData ?? null, 2 * 1024 * 1024, code);
+
+  const snapshot: MedicineProductRecord = {
+    id,
+    patientId,
+    displayName,
+    productType,
+    status,
+    doseFormText: optionalText(row.doseFormText, code, 300),
+    doseFormSystem: optionalText(row.doseFormSystem, code, 300),
+    doseFormCode: optionalText(row.doseFormCode, code, 500),
+    routeText: optionalText(row.routeText, code, 300),
+    routeSystem: optionalText(row.routeSystem, code, 300),
+    routeCode: optionalText(row.routeCode, code, 500),
+    strengthText: optionalText(row.strengthText, code, 300),
+    manufacturer: optionalText(row.manufacturer, code, 300),
+    marketingAuthorizationHolder: optionalText(row.marketingAuthorizationHolder, code, 300),
+    marketCountry: catalogJurisdiction(row.marketCountry, code),
+    packageDescription: optionalText(row.packageDescription, code, 1_000),
+    imprint: optionalText(row.imprint, code, 200),
+    color: optionalText(row.color, code, 200),
+    shape: optionalText(row.shape, code, 200),
+    notes: optionalText(row.notes, code, 4_000),
+    originKind: optionalText(row.originKind, code, 120) || 'manual',
+    originProvider: optionalText(row.originProvider, code, 300),
+    originExternalId: optionalText(row.originExternalId, code, 1_000),
+    sourceData: jsonValue(row.sourceData ?? null, code),
+    revision: positiveRevision(row.revision, code),
+    createdAt: validDateText(row.createdAt, code),
+    updatedAt: validDateText(row.updatedAt, code),
+    names,
+    identifiers,
+    ingredients,
+  };
+
+  return {
+    sourceId: sourceProductId,
+    snapshot,
+    root: {
+      id: snapshot.id,
+      patientId,
+      displayName: snapshot.displayName,
+      productType: snapshot.productType,
+      status: snapshot.status,
+      doseFormText: snapshot.doseFormText,
+      doseFormSystem: snapshot.doseFormSystem,
+      doseFormCode: snapshot.doseFormCode,
+      routeText: snapshot.routeText,
+      routeSystem: snapshot.routeSystem,
+      routeCode: snapshot.routeCode,
+      strengthText: snapshot.strengthText,
+      manufacturer: snapshot.manufacturer,
+      marketingAuthorizationHolder: snapshot.marketingAuthorizationHolder,
+      marketCountry: snapshot.marketCountry,
+      packageDescription: snapshot.packageDescription,
+      imprint: snapshot.imprint,
+      color: snapshot.color,
+      shape: snapshot.shape,
+      notes: snapshot.notes,
+      originKind: snapshot.originKind,
+      originProvider: snapshot.originProvider,
+      originExternalId: snapshot.originExternalId,
+      sourceData: snapshot.sourceData,
+      revision: snapshot.revision,
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt,
+    },
+    names: names.map((name) => ({ ...name, patientId })),
+    identifiers: identifiers.map((identifier) => ({ ...identifier, patientId })),
+    ingredients: ingredients.map(({ ingredient: _ingredient, ...ingredient }) => ({
+      ...ingredient,
+      patientId,
+    })),
+  };
+}
+
+function parseMedicine(
+  value: unknown,
+  patientId: string,
+  id: string,
+  productId: string | null = null,
+): MedicineClaimRecord {
   const row = asRecord(value, 'invalid_medicine');
   const status = requiredText(row.status, 'invalid_medicine', 32);
   if (!isMedicineStatus(status)) throw new ArchiveImportError('invalid_medicine');
@@ -525,7 +1021,7 @@ function parseMedicine(value: unknown, patientId: string, id: string): MedicineC
   return {
     id,
     patientId,
-    productId: null,
+    productId,
     name: requiredText(row.name, 'invalid_medicine', 200),
     genericName: optionalText(row.genericName, 'invalid_medicine', 200),
     form: optionalText(row.form, 'invalid_medicine', 120),
@@ -991,6 +1487,79 @@ async function importRecords(patientId: string, sourcePatientId: string, items: 
   return insertResult(items.length, inserted.length);
 }
 
+async function importMedicineIngredients(
+  patientId: string,
+  sourcePatientId: string,
+  items: unknown[],
+) {
+  const planned = await Promise.all(
+    items.map((value) => planMedicineIngredient(value, patientId, sourcePatientId)),
+  );
+  assertUniqueSourceIds(planned);
+
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(medicineIngredient)
+      .values(planned.map((item) => item.root))
+      .onConflictDoNothing()
+      .returning({ id: medicineIngredient.id });
+    const names = planned.flatMap((item) => item.names);
+    const identifiers = planned.flatMap((item) => item.identifiers);
+    if (names.length) await tx.insert(medicineCatalogName).values(names).onConflictDoNothing();
+    if (identifiers.length) {
+      await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
+    }
+    return insertResult(items.length, inserted.length);
+  });
+}
+
+async function importMedicineProducts(
+  patientId: string,
+  sourcePatientId: string,
+  items: unknown[],
+) {
+  const planned = await Promise.all(
+    items.map((value) => planMedicineProduct(value, patientId, sourcePatientId)),
+  );
+  assertUniqueSourceIds(planned);
+  const ingredientIds = [
+    ...new Set(planned.flatMap((item) => item.ingredients.map((ingredient) => ingredient.ingredientId))),
+  ];
+  const storedIngredients = ingredientIds.length
+    ? await db
+        .select({ id: medicineIngredient.id })
+        .from(medicineIngredient)
+        .where(
+          and(
+            eq(medicineIngredient.patientId, patientId),
+            inArray(medicineIngredient.id, ingredientIds),
+          ),
+        )
+    : [];
+  if (storedIngredients.length !== ingredientIds.length) {
+    throw new ArchiveImportError('missing_medicine_catalog_reference');
+  }
+
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(medicineProduct)
+      .values(planned.map((item) => item.root))
+      .onConflictDoNothing()
+      .returning({ id: medicineProduct.id });
+    const names = planned.flatMap((item) => item.names);
+    const identifiers = planned.flatMap((item) => item.identifiers);
+    const ingredients = planned.flatMap((item) => item.ingredients);
+    if (names.length) await tx.insert(medicineCatalogName).values(names).onConflictDoNothing();
+    if (identifiers.length) {
+      await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
+    }
+    if (ingredients.length) {
+      await tx.insert(medicineProductIngredient).values(ingredients).onConflictDoNothing();
+    }
+    return insertResult(items.length, inserted.length);
+  });
+}
+
 async function importDataImports(patientId: string, sourcePatientId: string, items: unknown[]) {
   const parsed = items.map(parseDataImport);
   assertUniqueSourceIds(parsed);
@@ -1040,10 +1609,32 @@ async function importMedicines(patientId: string, sourcePatientId: string, items
     sourceRows.map(async ({ value, row }) => {
       const sourceIdValue = sourceId(row, 'invalid_medicine');
       const id = await resolveArchiveEntityId(patientId, sourcePatientId, 'medicine', sourceIdValue);
-      return { sourceId: sourceIdValue, snapshot: parseMedicine(value, patientId, id) };
+      const sourceProductId = optionalText(row.productId, 'invalid_medicine', 512);
+      const productId = sourceProductId
+        ? await resolveArchiveEntityId(
+            patientId,
+            sourcePatientId,
+            'medicine-product',
+            sourceProductId,
+          )
+        : null;
+      return { sourceId: sourceIdValue, snapshot: parseMedicine(value, patientId, id, productId) };
     }),
   );
   assertUniqueSourceIds(planned);
+
+  const productIds = [
+    ...new Set(planned.flatMap(({ snapshot }) => (snapshot.productId ? [snapshot.productId] : []))),
+  ];
+  const storedProducts = productIds.length
+    ? await db
+        .select({ id: medicineProduct.id })
+        .from(medicineProduct)
+        .where(and(eq(medicineProduct.patientId, patientId), inArray(medicineProduct.id, productIds)))
+    : [];
+  if (storedProducts.length !== productIds.length) {
+    throw new ArchiveImportError('missing_medicine_catalog_reference');
+  }
 
   return db.transaction(async (tx) => {
     const inserted = await tx
@@ -1344,10 +1935,21 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
               originExternalId: optionalText(snapshotRow.originExternalId, 'invalid_claim_revision', 1000),
             })
           : await resolveArchiveEntityId(patientId, sourcePatientId, claimKind, sourceClaimId);
+      const medicineProductId = claimKind === 'medicine'
+        ? optionalText(snapshotRow.productId, 'invalid_claim_revision', 512)
+        : null;
+      const localMedicineProductId = medicineProductId
+        ? await resolveArchiveEntityId(
+            patientId,
+            sourcePatientId,
+            'medicine-product',
+            medicineProductId,
+          )
+        : null;
       const snapshot = workoutPlan
         ? workoutPlan.snapshot
         : claimKind === 'medicine'
-          ? parseMedicine(snapshotRow, patientId, localClaimId)
+          ? parseMedicine(snapshotRow, patientId, localClaimId, localMedicineProductId)
           : parseEnergy(snapshotRow, patientId, localClaimId);
 
       return {
@@ -1395,6 +1997,114 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
   return insertResult(items.length, inserted.length, planned.length - eligible.length);
 }
 
+async function importMedicineCatalogRevisions(
+  patientId: string,
+  sourcePatientId: string,
+  items: unknown[],
+) {
+  const planned = await Promise.all(
+    items.map(async (value) => {
+      const row = asRecord(value, CATALOG_REVISION_ERROR);
+      const sourceRevisionId = sourceId(row, CATALOG_REVISION_ERROR);
+      const entityKind = requiredText(row.entityKind, CATALOG_REVISION_ERROR, 40);
+      if (!isMedicineCatalogEntityKind(entityKind)) {
+        throw new ArchiveImportError(CATALOG_REVISION_ERROR);
+      }
+      const sourceEntityId = requiredText(row.entityId, CATALOG_REVISION_ERROR, 512);
+      const revision = positiveRevision(row.revision, CATALOG_REVISION_ERROR);
+      const entityPlan = entityKind === 'ingredient'
+        ? await planMedicineIngredient(
+            row.snapshot,
+            patientId,
+            sourcePatientId,
+            CATALOG_REVISION_ERROR,
+          )
+        : await planMedicineProduct(
+            row.snapshot,
+            patientId,
+            sourcePatientId,
+            CATALOG_REVISION_ERROR,
+          );
+      if (entityPlan.sourceId !== sourceEntityId || entityPlan.snapshot.revision !== revision) {
+        throw new ArchiveImportError(CATALOG_REVISION_ERROR);
+      }
+      const snapshot: MedicineCatalogRevisionSnapshot = entityPlan.snapshot;
+      return {
+        sourceId: sourceRevisionId,
+        value: {
+          id: await resolveArchiveEntityId(
+            patientId,
+            sourcePatientId,
+            'medicine-catalog-revision',
+            sourceRevisionId,
+          ),
+          patientId,
+          entityKind,
+          entityId: snapshot.id,
+          revision,
+          snapshot,
+          changedAt: validDateText(row.changedAt, CATALOG_REVISION_ERROR),
+          changeOriginKind:
+            optionalText(row.changeOriginKind, CATALOG_REVISION_ERROR, 120) || 'manual',
+          changeOriginProvider: optionalText(
+            row.changeOriginProvider,
+            CATALOG_REVISION_ERROR,
+            300,
+          ),
+        },
+      };
+    }),
+  );
+  assertUniqueSourceIds(planned);
+
+  const ingredientIds = [
+    ...new Set(
+      planned
+        .filter((item) => item.value.entityKind === 'ingredient')
+        .map((item) => item.value.entityId),
+    ),
+  ];
+  const productIds = [
+    ...new Set(
+      planned
+        .filter((item) => item.value.entityKind === 'product')
+        .map((item) => item.value.entityId),
+    ),
+  ];
+  const storedIngredients = ingredientIds.length
+    ? await db
+        .select({ id: medicineIngredient.id })
+        .from(medicineIngredient)
+        .where(
+          and(
+            eq(medicineIngredient.patientId, patientId),
+            inArray(medicineIngredient.id, ingredientIds),
+          ),
+        )
+    : [];
+  const storedProducts = productIds.length
+    ? await db
+        .select({ id: medicineProduct.id })
+        .from(medicineProduct)
+        .where(and(eq(medicineProduct.patientId, patientId), inArray(medicineProduct.id, productIds)))
+    : [];
+  const storedKeys = new Set([
+    ...storedIngredients.map((item) => `ingredient:${item.id}`),
+    ...storedProducts.map((item) => `product:${item.id}`),
+  ]);
+  const eligible = planned.filter((item) =>
+    storedKeys.has(`${item.value.entityKind}:${item.value.entityId}`),
+  );
+  const inserted = eligible.length
+    ? await db
+        .insert(medicineCatalogRevision)
+        .values(eligible.map((item) => item.value))
+        .onConflictDoNothing()
+        .returning({ id: medicineCatalogRevision.id })
+    : [];
+  return insertResult(items.length, inserted.length, planned.length - eligible.length);
+}
+
 export async function importArchiveBatch(input: {
   patientId: string;
   sourcePatientId: string;
@@ -1412,6 +2122,12 @@ export async function importArchiveBatch(input: {
   if (input.kind === 'profile') return importProfile(input.patientId, input.items);
   if (input.kind === 'reports') return importReports(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'records') return importRecords(input.patientId, input.sourcePatientId, input.items);
+  if (input.kind === 'medicineIngredients') {
+    return importMedicineIngredients(input.patientId, input.sourcePatientId, input.items);
+  }
+  if (input.kind === 'medicineProducts') {
+    return importMedicineProducts(input.patientId, input.sourcePatientId, input.items);
+  }
   if (input.kind === 'medicines') return importMedicines(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'energy') return importEnergy(input.patientId, input.sourcePatientId, input.items);
   if (input.kind === 'dataImports') {
@@ -1422,6 +2138,9 @@ export async function importArchiveBatch(input: {
   }
   if (input.kind === 'workouts') {
     return importWorkouts(input.patientId, input.sourcePatientId, input.items);
+  }
+  if (input.kind === 'medicineCatalogRevisions') {
+    return importMedicineCatalogRevisions(input.patientId, input.sourcePatientId, input.items);
   }
   return importRevisions(input.patientId, input.sourcePatientId, input.items);
 }
