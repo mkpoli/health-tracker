@@ -273,3 +273,21 @@ describe('medicine reference errors', () => {
     },
   );
 });
+
+describe('medicine claim normalization', () => {
+  it.each([undefined, null, 123, {}, 'product-1'])(
+    'normalizes productId %j consistently with revisions',
+    async (productId) => {
+      const { claim } = await linkedMedicine();
+      const value = { ...claim, productId } as typeof schema.medicineClaim.$inferSelect;
+      const normalized = claims.normalizeMedicineClaim(value);
+      const revision = revisions.toMedicineClaimRevision({
+        id: 'revision', patientId: claim.patientId, claimKind: 'medicine', claimId: claim.id,
+        revision: 1, snapshot: value, changedAt: claim.updatedAt,
+        changeOriginKind: 'manual', changeOriginProvider: 'local',
+      });
+      expect(normalized.productId).toBe(typeof productId === 'string' ? productId : null);
+      expect(normalized.productId).toBe(revision?.snapshot.productId);
+    },
+  );
+});

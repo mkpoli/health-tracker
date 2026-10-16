@@ -55,6 +55,7 @@ export function normalizeMedicineClaim(
 ): MedicineClaimRecord {
   return {
     ...value,
+    productId: typeof value.productId === 'string' ? value.productId : null,
     status: isMedicineStatus(value.status) ? value.status : 'active',
   };
 }
