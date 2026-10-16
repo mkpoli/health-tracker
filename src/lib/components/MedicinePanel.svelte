@@ -7,7 +7,18 @@
   import { getLocale } from '$lib/paraglide/runtime';
   import { changedClaimFields, type MedicineClaimRevisionRecord } from '$lib/claim-revision';
   import type { MedicineCaptureProposal } from '$lib/health-capture';
-  import type { MedicineClaimRecord, MedicineStatus } from '$lib/medicine';
+  import {
+    fitMedicineField,
+    medicineFieldLimits,
+    type MedicineClaimRecord,
+    type MedicineStatus,
+  } from '$lib/medicine';
+  import {
+    localizedMedicineCatalogName,
+    type MedicineCatalogRevisionRecord,
+    type MedicineIngredientRecord,
+    type MedicineProductRecord,
+  } from '$lib/medicine-catalog';
   import {
     activeCourseOf,
     addDays,
@@ -25,6 +36,7 @@
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
   import DoseChecklist from './DoseChecklist.svelte';
   import HealthCapture from './HealthCapture.svelte';
+  import MedicineCatalogPanel from './MedicineCatalogPanel.svelte';
   import MedicineDosePlan from './MedicineDosePlan.svelte';
   import RegimenFields from './RegimenFields.svelte';
   import { emptyRegimenDraft, REGIMEN_FORM_PREFIX } from '$lib/regimen-draft';
@@ -33,6 +45,9 @@
     patientId,
     medicines = [],
     revisions = [],
+    ingredients = [],
+    products = [],
+    catalogVersionCounts = {},
     courses = [],
     regimens = [],
     occurrences = [],
@@ -41,6 +56,9 @@
     patientId: string;
     medicines: MedicineClaimRecord[];
     revisions: MedicineClaimRevisionRecord[];
+    ingredients: MedicineIngredientRecord[];
+    products: MedicineProductRecord[];
+    catalogVersionCounts: Record<string, number>;
     courses: MedicineCourseRecord[];
     regimens: DoseRegimenRecord[];
     occurrences: DoseOccurrenceRecord[];
@@ -110,6 +128,7 @@
   type Draft = {
     id: string;
     revision: number;
+    productId: string;
     name: string;
     genericName: string;
     form: string;
@@ -205,6 +224,7 @@
     return {
       id: '',
       revision: 0,
+      productId: '',
       name: '',
       genericName: '',
       form: '',
@@ -220,6 +240,8 @@
   }
 
   function openCreate() {
+    lastPick = {};
+    pickShortened = false;
     draft = emptyDraft();
     regimenDraft = emptyRegimenDraft(patientTimeZone);
     saveError = '';
@@ -228,9 +250,12 @@
   }
 
   function openEdit(medicine: MedicineClaimRecord) {
+    lastPick = {};
+    pickShortened = false;
     draft = {
       id: medicine.id,
       revision: medicine.revision,
+      productId: medicine.productId || '',
       name: medicine.name,
       genericName: medicine.genericName || '',
       form: medicine.form || '',
@@ -253,6 +278,7 @@
     draft = {
       id: '',
       revision: 0,
+      productId: '',
       name: proposal.name || '',
       genericName: proposal.genericName || '',
       form: proposal.form || '',
@@ -329,6 +355,60 @@
     return [medicine.strength, medicine.form].filter(Boolean).join(' · ');
   }
 
+  function selectedProduct(productId: string | null) {
+    return productId ? products.find((product) => product.id === productId) || null : null;
+  }
+
+  let pickShortened = $state(false);
+  /** What the last product pick wrote, so only the person's own text counts as typed. */
+  let lastPick: Partial<Record<'name' | 'genericName' | 'form' | 'strength' | 'route', string>> = {};
+
+  function chooseProduct(productId: string) {
+    pickShortened = false;
+    const product = selectedProduct(productId);
+    if (!product) {
+      draft.productId = productId;
+      return;
+    }
+    const activeIngredients = product.ingredients.filter((component) => component.role === 'active');
+    const picked = {
+      name: localizedMedicineCatalogName(product.names, getLocale(), product.displayName),
+      genericName: activeIngredients
+        .map((component) =>
+          localizedMedicineCatalogName(
+            component.ingredient.names,
+            getLocale(),
+            component.ingredient.canonicalName,
+          ),
+        )
+        .join(' / '),
+      form: product.doseFormText || '',
+      strength: product.strengthText || '',
+      route: product.routeText || '',
+    };
+    const fitted = {
+      name: fitMedicineField(picked.name, medicineFieldLimits.name),
+      genericName: fitMedicineField(picked.genericName, medicineFieldLimits.genericName),
+      form: fitMedicineField(picked.form, medicineFieldLimits.form),
+      strength: fitMedicineField(picked.strength, medicineFieldLimits.strength),
+      route: fitMedicineField(picked.route, medicineFieldLimits.route),
+    };
+    draft.productId = productId;
+    const typed = (Object.keys(fitted) as Array<keyof typeof fitted>).some(
+      (key) =>
+        draft[key].trim() !== '' &&
+        draft[key].trim() !== fitted[key] &&
+        draft[key] !== lastPick[key],
+    );
+    // Details the person wrote stay unless they agree to replace them.
+    if (typed && !confirm(m.medicine_catalog_pick_overwrite_confirm())) return;
+    Object.assign(draft, fitted);
+    lastPick = fitted;
+    pickShortened = (Object.keys(fitted) as Array<keyof typeof fitted>).some(
+      (key) => fitted[key] !== picked[key],
+    );
+  }
+
   /** The dose rule in force, if any. */
   function doseLine(medicine: MedicineClaimRecord) {
     const course = activeCourseOf(coursesByMedicine.get(medicine.id) || []);
@@ -381,6 +461,7 @@
 
   function medicineFieldLabel(field: string) {
     if (field === 'name') return m.medicine_name();
+    if (field === 'productId') return m.medicine_catalog_product_link();
     if (field === 'genericName') return m.medicine_generic_name();
     if (field === 'form') return m.medicine_form();
     if (field === 'strength') return m.medicine_strength();
@@ -475,6 +556,13 @@
     />
   </div>
 
+  <MedicineCatalogPanel
+    {patientId}
+    {ingredients}
+    {products}
+    versionCounts={catalogVersionCounts}
+  />
+
   {#if medicines.length === 0}
     <div class="flex flex-col items-center px-6 py-16 text-center">
       <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
@@ -540,6 +628,17 @@
         </div>
         {#if subtitle}
           <p class="mt-0.5 truncate text-sm text-slate-500">{subtitle}</p>
+        {/if}
+        {#if selectedProduct(medicine.productId)}
+          <p class="mt-1 text-xs font-medium text-blue-600">
+            {m.medicine_catalog_linked_product({
+              name: localizedMedicineCatalogName(
+                selectedProduct(medicine.productId)?.names || [],
+                getLocale(),
+                selectedProduct(medicine.productId)?.displayName || '',
+              ),
+            })}
+          </p>
         {/if}
         {#if detail}
           <p class="mt-1 line-clamp-2 text-sm text-slate-700">{detail}</p>
@@ -697,13 +796,37 @@
             </legend>
             <div class="mt-4 grid gap-4 sm:grid-cols-2">
               <label class="sm:col-span-2">
+                <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_catalog_product_link()}</span>
+                <select
+                  name="productId"
+                  value={draft.productId}
+                  onchange={(event) => chooseProduct(event.currentTarget.value)}
+                  class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="">{m.medicine_catalog_no_product_link()}</option>
+                  {#each products.filter(
+                    (product) => product.status !== 'archived' || product.id === draft.productId
+                  ) as product (product.id)}
+                    <option value={product.id}>
+                      {localizedMedicineCatalogName(product.names, getLocale(), product.displayName)}
+                      {product.strengthText ? ` · ${product.strengthText}` : ''}
+                    </option>
+                  {/each}
+                </select>
+                <span class="mt-1 block text-xs text-slate-500">{m.medicine_catalog_product_link_hint()}</span>
+                {#if pickShortened}
+                  <span class="mt-1 block text-xs font-medium text-amber-700" role="status">{m.medicine_catalog_pick_shortened()}</span>
+                {/if}
+              </label>
+
+              <label class="sm:col-span-2">
                 <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.medicine_name()}</span>
                 <input
                   name="name"
                   type="text"
                   bind:value={draft.name}
                   required
-                  maxlength="200"
+                  maxlength={medicineFieldLimits.name}
                   autocomplete="off"
                   placeholder={m.medicine_name_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -716,7 +839,7 @@
                   name="genericName"
                   type="text"
                   bind:value={draft.genericName}
-                  maxlength="200"
+                  maxlength={medicineFieldLimits.genericName}
                   autocomplete="off"
                   placeholder={m.medicine_generic_name_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -729,7 +852,7 @@
                   name="strength"
                   type="text"
                   bind:value={draft.strength}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.strength}
                   placeholder={m.medicine_strength_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -741,7 +864,7 @@
                   name="form"
                   type="text"
                   bind:value={draft.form}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.form}
                   placeholder={m.medicine_form_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
@@ -753,7 +876,7 @@
                   name="route"
                   type="text"
                   bind:value={draft.route}
-                  maxlength="120"
+                  maxlength={medicineFieldLimits.route}
                   placeholder={m.medicine_route_placeholder()}
                   class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />

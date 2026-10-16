@@ -21,7 +21,7 @@ function serverIdentity(origin: string) {
     name: 'health-tracker',
     title: 'Health Tracker',
     version: '1.2.0',
-    description: "Lab results, measurements, medicine claims and energy records owned by this account holder.",
+    description: "Lab results, measurements, medicine catalog records, medicine claims and energy records owned by this account holder.",
     websiteUrl: origin,
     icons: [
       { src: `${origin}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },

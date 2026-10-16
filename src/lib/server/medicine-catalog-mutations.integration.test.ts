@@ -68,7 +68,7 @@ afterAll(async () => {
 
 describe('medicine catalog mutations', () => {
   it('creates, updates and deletes catalogue records and detaches claims with revisions', async () => {
-    const ingredient = await catalog.createMedicineIngredient({
+    const { ingredient: ingredient } = await catalog.createMedicineIngredient({
       patientId: 'profile-1', input: ingredientInput(), origin,
     });
     const updatedIngredient = await catalog.updateMedicineIngredient({
@@ -77,7 +77,7 @@ describe('medicine catalog mutations', () => {
     expect(updatedIngredient).toMatchObject({ canonicalName: 'Renamed ingredient', revision: 2 });
     expect(updatedIngredient.names).toHaveLength(1);
     expect(updatedIngredient.identifiers[0].code).toBe('Renamed ingredient');
-    const product = await catalog.createMedicineProduct({
+    const { product: product } = await catalog.createMedicineProduct({
       patientId: 'profile-1', input: productInput(ingredient.id), origin,
     });
     const updatedProduct = await catalog.updateMedicineProduct({
@@ -123,10 +123,10 @@ describe('medicine catalog mutations', () => {
   });
 
   it('rejects references and deletion across profiles without changing existing records', async () => {
-    const ingredient = await catalog.createMedicineIngredient({
+    const { ingredient: ingredient } = await catalog.createMedicineIngredient({
       patientId: 'profile-2', input: ingredientInput(), origin,
     });
-    const product = await catalog.createMedicineProduct({
+    const { product: product } = await catalog.createMedicineProduct({
       patientId: 'profile-2', input: productInput(ingredient.id), origin,
     });
     await expect(catalog.createMedicineProduct({
@@ -145,10 +145,10 @@ describe('medicine catalog mutations', () => {
     expect(await catalog.getMedicineProductRecord('profile-1', product.id)).toBeNull();
     expect(await catalog.getMedicineIngredientRecord('profile-1', ingredient.id)).toBeNull();
     expect(await catalog.getMedicineProductRecord('profile-2', product.id)).toEqual(product);
-    const ownIngredient = await catalog.createMedicineIngredient({
+    const { ingredient: ownIngredient } = await catalog.createMedicineIngredient({
       patientId: 'profile-1', input: ingredientInput(), origin,
     });
-    const ownProduct = await catalog.createMedicineProduct({
+    const { product: ownProduct } = await catalog.createMedicineProduct({
       patientId: 'profile-1', input: productInput(ownIngredient.id), origin,
     });
     await expect(catalog.updateMedicineProduct({
@@ -178,10 +178,10 @@ async function medicineTool(name: string, args: Record<string, unknown>) {
 }
 
 async function linkedMedicine(patientId = 'profile-1') {
-  const ingredient = await catalog.createMedicineIngredient({
+  const { ingredient: ingredient } = await catalog.createMedicineIngredient({
     patientId, input: ingredientInput(), origin,
   });
-  const product = await catalog.createMedicineProduct({
+  const { product: product } = await catalog.createMedicineProduct({
     patientId, input: productInput(ingredient.id), origin,
   });
   const { claim } = await claims.createMedicineClaim({
@@ -268,7 +268,7 @@ describe('medicine reference errors', () => {
         regimen: { rule: 'as_needed' },
       });
       await expect(result).rejects.toBeInstanceOf(ToolError);
-      await expect(result).rejects.toThrow('The medicine product is outside this profile');
+      await expect(result).rejects.toThrow('product_id does not identify a catalog product in this profile');
       expect((await client.execute('SELECT count(*) AS count FROM claim_revision')).rows).toEqual(before.rows);
     },
   );
@@ -301,7 +301,7 @@ describe('medicine product records', () => {
     expect(() => buildMedicineProductRecords(
       roots.filter((row) => row.id === product.id), [], [],
       components.filter((row) => row.productId === product.id), [],
-    )).toThrow(`Missing medicine ingredient: ${product.ingredients[0].ingredientId}`);
+    )).toThrow(`Missing ingredient ${product.ingredients[0].ingredientId}`);
   });
 });
 

@@ -4,11 +4,14 @@
   import { enhance } from '$app/forms';
   import * as m from '$lib/paraglide/messages.js';
   import { downloadPatientArchive } from '$lib/export';
+  import { fetchMedicineCatalogArchive } from '$lib/medicine-catalog-client';
 
   let {
     patient,
     reports = [],
     records,
+    medicineIngredients = [],
+    medicineProducts = [],
     medicines = [],
     medicineCourses = [],
     doseRegimens = [],
@@ -24,6 +27,8 @@
     patient: { id: string; name: string; [key: string]: unknown };
     reports?: unknown[];
     records: unknown[];
+    medicineIngredients?: unknown[];
+    medicineProducts?: unknown[];
     medicines?: unknown[];
     medicineCourses?: unknown[];
     doseRegimens?: unknown[];
@@ -43,6 +48,8 @@
     () =>
       records.length +
         reports.length +
+        medicineIngredients.length +
+        medicineProducts.length +
         medicines.length +
         energyEntries.length +
         energySources.length +
@@ -67,11 +74,14 @@
     exportError = '';
 
     try {
+      const catalog = await fetchMedicineCatalogArchive(patient.id);
       await downloadPatientArchive(
         {
           patient,
           reports,
           records,
+          medicineIngredients: catalog.medicineIngredients,
+          medicineProducts: catalog.medicineProducts,
           medicines,
           medicineCourses,
           doseRegimens,
@@ -82,6 +92,7 @@
           exerciseDefinitions,
           workouts,
           claimRevisions,
+          medicineCatalogRevisions: catalog.medicineCatalogRevisions,
         },
         patient?.name,
       );

@@ -4,6 +4,7 @@
   import { planMeasurementImport, type ImportCounts, type ImportReport, type ImportRecord } from '$lib/import/measurement-plan';
   import type { ImportResult } from '$lib/server/measurement-import';
   import { invalidateAll } from '$app/navigation';
+  import { MAX_ARCHIVE_BATCH_BYTES } from '$lib/archive-format';
   import * as m from '$lib/paraglide/messages.js';
   import { readAppleHealthFile, isSupportedAppleType, type ImportSession, type ImportSummary } from '$lib/import/apple-health';
   import {
@@ -103,6 +104,8 @@
     healthArchive
       ? healthArchive.data.reports.length +
           healthArchive.data.records.length +
+          healthArchive.data.medicineIngredients.length +
+          healthArchive.data.medicineProducts.length +
           healthArchive.data.medicines.length +
           healthArchive.data.medicineCourses.length +
           healthArchive.data.doseRegimens.length +
@@ -111,7 +114,8 @@
           healthArchive.data.dataImports.length +
           healthArchive.data.exerciseDefinitions.length +
           healthArchive.data.workouts.length +
-          healthArchive.data.claimRevisions.length
+          healthArchive.data.claimRevisions.length +
+          healthArchive.data.medicineCatalogRevisions.length
       : 0,
   );
   const archiveSelectedCount = $derived(archiveStructuredCount + (restoreProfile ? 1 : 0));
@@ -316,6 +320,8 @@
       | 'profile'
       | 'reports'
       | 'records'
+      | 'medicineIngredients'
+      | 'medicineProducts'
       | 'medicines'
       | 'medicineCourses'
       | 'doseRegimens'
@@ -324,7 +330,8 @@
       | 'dataImports'
       | 'exerciseDefinitions'
       | 'workouts'
-      | 'revisions';
+      | 'revisions'
+      | 'medicineCatalogRevisions';
     items: unknown[];
   };
 
@@ -332,13 +339,15 @@
     if (!healthArchive) return [] as ArchiveBatch[];
 
     const batches: ArchiveBatch[] = [];
-    const add = (kind: ArchiveBatch['kind'], items: unknown[], size: number) => {
-      for (const batch of chunkArchiveItems(items, size)) batches.push({ kind, items: batch });
+    const add = (kind: ArchiveBatch['kind'], items: unknown[], size: number, maxBytes = Infinity) => {
+      for (const batch of chunkArchiveItems(items, size, maxBytes)) batches.push({ kind, items: batch });
     };
 
     if (restoreProfile) add('profile', [healthArchive.data.patient], 1);
     add('reports', healthArchive.data.reports, 100);
     add('records', healthArchive.data.records, 200);
+    add('medicineIngredients', healthArchive.data.medicineIngredients, 50, MAX_ARCHIVE_BATCH_BYTES);
+    add('medicineProducts', healthArchive.data.medicineProducts, 25, MAX_ARCHIVE_BATCH_BYTES);
     add('medicines', healthArchive.data.medicines, 100);
     add(
       'medicineCourses',
@@ -374,6 +383,7 @@
       5,
     );
     add('revisions', healthArchive.data.claimRevisions, 200);
+    add('medicineCatalogRevisions', healthArchive.data.medicineCatalogRevisions, 25, MAX_ARCHIVE_BATCH_BYTES);
     return batches;
   }
 
@@ -447,7 +457,6 @@
     errorMessage = '';
     progress = 0;
 
-    const batches = archiveBatches();
     const linkedMedia = mediaWithSourceLinks();
     mediaMissing =
       healthArchive.missingMediaPaths.length +
@@ -459,10 +468,11 @@
             ? !archiveEnergySources.has(media.sourceId)
             : !archiveDataImports.has(media.sourceId)),
       ).length;
-    const totalSteps = Math.max(1, batches.length + linkedMedia.length);
     let completedSteps = 0;
 
     try {
+      const batches = archiveBatches();
+      const totalSteps = Math.max(1, batches.length + linkedMedia.length);
       for (const batch of batches) {
         await postArchiveBatch(batch);
         importedCount += batch.items.length;
@@ -486,7 +496,11 @@
       progress = 1;
       stage = 'done';
     } catch (error) {
-      errorMessage = error instanceof HealthArchiveError ? m.import_archive_invalid() : m.import_archive_failed();
+      errorMessage = error instanceof HealthArchiveError
+        ? error.code === 'item_too_large'
+          ? m.import_archive_item_too_large()
+          : m.import_archive_invalid()
+        : m.import_archive_failed();
       stage = 'review';
     }
   }
@@ -702,7 +716,11 @@
             </div>
             <div class="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
               <p class="text-xs font-medium text-blue-700">{m.tab_medicine()}</p>
-              <p class="mt-1 text-2xl font-semibold text-blue-950">{healthArchive.data.medicines.length}</p>
+              <p class="mt-1 text-2xl font-semibold text-blue-950">
+                {healthArchive.data.medicines.length +
+                  healthArchive.data.medicineProducts.length +
+                  healthArchive.data.medicineIngredients.length}
+              </p>
             </div>
             <div class="rounded-xl border border-orange-200 bg-orange-50/60 p-3">
               <p class="text-xs font-medium text-orange-700">{m.tab_calories()}</p>
@@ -718,7 +736,10 @@
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-3">
               <p class="text-xs font-medium text-slate-500">{m.import_archive_versions()}</p>
-              <p class="mt-1 text-2xl font-semibold text-slate-900">{healthArchive.data.claimRevisions.length}</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-900">
+                {healthArchive.data.claimRevisions.length +
+                  healthArchive.data.medicineCatalogRevisions.length}
+              </p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-3">
               <p class="text-xs font-medium text-slate-500">{m.import_archive_media()}</p>

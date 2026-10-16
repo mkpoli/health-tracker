@@ -1,4 +1,5 @@
-export const CURRENT_HEALTH_ARCHIVE_VERSION = 7;
+export const CURRENT_HEALTH_ARCHIVE_VERSION = 8;
+export const MAX_ARCHIVE_BATCH_BYTES = 12 * 1024 * 1024;
 
 export type ArchiveMediaKind = 'energy-photo' | 'import-file' | 'report-source';
 

@@ -55,6 +55,125 @@ beforeAll(async () => {
       status TEXT,
       extra_data TEXT
     );
+    CREATE TABLE medicine_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      canonical_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_product (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      product_type TEXT NOT NULL DEFAULT 'other',
+      status TEXT NOT NULL DEFAULT 'active',
+      dose_form_text TEXT,
+      dose_form_system TEXT,
+      dose_form_code TEXT,
+      route_text TEXT,
+      route_system TEXT,
+      route_code TEXT,
+      strength_text TEXT,
+      manufacturer TEXT,
+      marketing_authorization_holder TEXT,
+      market_country TEXT,
+      package_description TEXT,
+      imprint TEXT,
+      color TEXT,
+      shape TEXT,
+      notes TEXT,
+      origin_kind TEXT NOT NULL DEFAULT 'manual',
+      origin_provider TEXT,
+      origin_external_id TEXT,
+      source_data TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_name (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      language_tag TEXT NOT NULL DEFAULT 'und',
+      name_type TEXT NOT NULL DEFAULT 'preferred',
+      jurisdiction TEXT,
+      preferred INTEGER NOT NULL DEFAULT 0,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_catalog_identifier (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      ingredient_id TEXT,
+      product_id TEXT,
+      order_index INTEGER NOT NULL,
+      system TEXT NOT NULL,
+      code TEXT NOT NULL,
+      jurisdiction TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(ingredient_id, order_index),
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE
+    );
+    CREATE TABLE medicine_product_ingredient (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL,
+      ingredient_id TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'active',
+      numerator_value TEXT,
+      numerator_unit TEXT,
+      denominator_value TEXT,
+      denominator_unit TEXT,
+      strength_text TEXT,
+      basis_of_strength_text TEXT,
+      source_kind TEXT NOT NULL DEFAULT 'manual',
+      source_provider TEXT,
+      source_url TEXT,
+      source_retrieved_at TEXT,
+      UNIQUE(product_id, order_index),
+      FOREIGN KEY(product_id, patient_id) REFERENCES medicine_product(id, patient_id) ON DELETE CASCADE,
+      FOREIGN KEY(ingredient_id, patient_id) REFERENCES medicine_ingredient(id, patient_id)
+    );
+    CREATE TABLE medicine_catalog_revision (
+      id TEXT PRIMARY KEY NOT NULL,
+      patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      entity_kind TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      snapshot TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      change_origin_kind TEXT NOT NULL DEFAULT 'manual',
+      change_origin_provider TEXT,
+      UNIQUE(entity_kind, entity_id, revision)
+    );
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
@@ -262,6 +381,7 @@ afterAll(async () => {
 const medicineCurrent = {
   id: 'source-medicine',
   patientId: 'source-patient',
+  productId: 'source-product',
   name: 'Example medicine',
   genericName: null,
   form: 'tablet',
@@ -285,6 +405,137 @@ const medicineFirst = {
   ...medicineCurrent,
   revision: 1,
   updatedAt: '2026-08-01T00:00:00.000Z',
+};
+
+const catalogSource = {
+  sourceKind: 'manual',
+  sourceProvider: null,
+  sourceUrl: null,
+  sourceRetrievedAt: null,
+};
+
+const medicineIngredientCurrent = {
+  id: 'source-ingredient',
+  patientId: 'source-patient',
+  canonicalName: 'Example ingredient',
+  normalizedName: 'example ingredient',
+  status: 'active',
+  notes: null,
+  originKind: 'manual',
+  originProvider: 'local',
+  originExternalId: null,
+  sourceData: { retained: true },
+  revision: 1,
+  createdAt: '2026-07-31T00:00:00.000Z',
+  updatedAt: '2026-07-31T00:00:00.000Z',
+  names: [
+    {
+      id: 'source-ingredient-name',
+      ingredientId: 'source-ingredient',
+      productId: null,
+      orderIndex: 0,
+      name: 'Example ingredient',
+      normalizedName: 'example ingredient',
+      languageTag: 'en',
+      nameType: 'generic',
+      jurisdiction: null,
+      preferred: true,
+      ...catalogSource,
+    },
+  ],
+  identifiers: [
+    {
+      id: 'source-ingredient-identifier',
+      ingredientId: 'source-ingredient',
+      productId: null,
+      orderIndex: 0,
+      system: 'RxNorm',
+      code: '12345',
+      jurisdiction: null,
+      ...catalogSource,
+    },
+  ],
+};
+
+const medicineProductCurrent = {
+  id: 'source-product',
+  patientId: 'source-patient',
+  displayName: 'Example medicine 10 mg',
+  productType: 'branded',
+  status: 'active',
+  doseFormText: 'tablet',
+  doseFormSystem: null,
+  doseFormCode: null,
+  routeText: 'oral',
+  routeSystem: null,
+  routeCode: null,
+  strengthText: '10 mg',
+  manufacturer: 'Example manufacturer',
+  marketingAuthorizationHolder: null,
+  marketCountry: 'JP',
+  packageDescription: '30 tablets',
+  imprint: 'EX10',
+  color: 'white',
+  shape: 'round',
+  notes: null,
+  originKind: 'manual',
+  originProvider: 'local',
+  originExternalId: null,
+  sourceData: { label: 'retained' },
+  revision: 2,
+  createdAt: '2026-07-31T01:00:00.000Z',
+  updatedAt: '2026-08-01T01:00:00.000Z',
+  names: [
+    {
+      id: 'source-product-name',
+      ingredientId: null,
+      productId: 'source-product',
+      orderIndex: 0,
+      name: 'Example medicine 10 mg',
+      normalizedName: 'example medicine 10 mg',
+      languageTag: 'en',
+      nameType: 'brand',
+      jurisdiction: 'JP',
+      preferred: true,
+      ...catalogSource,
+    },
+  ],
+  identifiers: [
+    {
+      id: 'source-product-identifier',
+      ingredientId: null,
+      productId: 'source-product',
+      orderIndex: 0,
+      system: 'YJ',
+      code: '123456789',
+      jurisdiction: 'JP',
+      ...catalogSource,
+    },
+  ],
+  ingredients: [
+    {
+      id: 'source-product-ingredient',
+      productId: 'source-product',
+      ingredientId: 'source-ingredient',
+      orderIndex: 0,
+      role: 'active',
+      numeratorValue: '10',
+      numeratorUnit: 'mg',
+      denominatorValue: '1',
+      denominatorUnit: 'tablet',
+      strengthText: '10 mg per tablet',
+      basisOfStrengthText: null,
+      ...catalogSource,
+      ingredient: medicineIngredientCurrent,
+    },
+  ],
+};
+
+const medicineProductFirst = {
+  ...medicineProductCurrent,
+  packageDescription: '14 tablets',
+  revision: 1,
+  updatedAt: '2026-07-31T01:00:00.000Z',
 };
 
 const energyCurrent = {
@@ -432,6 +683,535 @@ const workoutFirst = {
 };
 
 describe('archive import storage', () => {
+  it('rejects a medicine product before its ingredient is imported', async () => {
+    const patientId = 'missing-ingredient-destination';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      const batch = {
+        patientId,
+        sourcePatientId: 'source-patient',
+        kind: 'medicineProducts' as const,
+        items: [medicineProductCurrent],
+      };
+      await expect(archiveModule.importArchiveBatch(batch)).rejects.toMatchObject({
+        code: 'missing_medicine_catalog_reference',
+      });
+      const products = await client.execute({
+        sql: 'SELECT id FROM medicine_product WHERE patient_id = ?',
+        args: [patientId],
+      });
+      expect(products.rows).toEqual([]);
+
+      await archiveModule.importArchiveBatch({
+        patientId,
+        sourcePatientId: 'source-patient',
+        kind: 'medicineIngredients',
+        items: [medicineIngredientCurrent],
+      });
+      await expect(archiveModule.importArchiveBatch(batch)).resolves.toMatchObject({ inserted: 1 });
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('rejects a medicine naming an unknown product without inserting the batch', async () => {
+    const patientId = 'missing-product-destination';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      await expect(
+        archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: 'source-patient',
+          kind: 'medicines',
+          items: [
+            { ...medicineCurrent, id: 'unlinked-medicine', productId: null },
+            { ...medicineCurrent, productId: 'unknown-product' },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'missing_medicine_catalog_reference' });
+      const medicines = await client.execute({
+        sql: 'SELECT id FROM medicine_claim WHERE patient_id = ?',
+        args: [patientId],
+      });
+      const revisions = await client.execute({
+        sql: 'SELECT id FROM claim_revision WHERE patient_id = ?',
+        args: [patientId],
+      });
+      expect(medicines.rows).toEqual([]);
+      expect(revisions.rows).toEqual([]);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('restores medicine history after deleting its product and exporting', async () => {
+    const patientId = 'deleted-product-source';
+    const restoredPatientId = 'deleted-product-destination';
+    for (const id of [patientId, restoredPatientId]) {
+      await client.execute({
+        sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+        args: [id, 'owner-1', id],
+      });
+    }
+    try {
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+        { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
+        { kind: 'medicines' as const, items: [medicineCurrent] },
+      ]) {
+        await archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: 'source-patient',
+          ...batch,
+        });
+      }
+      const loader = await import('./medicine-catalog-load');
+      const { deleteMedicineProduct } = await import('./medicine-catalog-mutations');
+      const catalogBefore = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      const product = catalogBefore.products[0];
+      await deleteMedicineProduct({
+        patientId,
+        id: product.id,
+        expectedRevision: product.revision,
+        source: { kind: 'manual', provider: 'local' },
+        changedAt: '2026-08-03T00:00:00.000Z',
+      });
+
+      const { db } = await import('./db');
+      const schema = await import('./db/schema');
+      const { eq } = await import('drizzle-orm');
+      const { buildPatientExport } = await import('$lib/export');
+      const { parseHealthTrackerExport } = await import('$lib/health-archive');
+      const medicines = await db.select().from(schema.medicineClaim)
+        .where(eq(schema.medicineClaim.patientId, patientId));
+      const claimRevisions = await db.select().from(schema.claimRevision)
+        .where(eq(schema.claimRevision.patientId, patientId))
+        .orderBy(schema.claimRevision.revision);
+      const catalog = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      expect(catalog.products).toEqual([]);
+      expect(medicines[0]).toMatchObject({ productId: null, revision: 3 });
+      expect(claimRevisions.map(({ snapshot }) => snapshot)).toMatchObject([
+        { productId: product.id, revision: 2 },
+        { productId: null, revision: 3 },
+      ]);
+      const exported = parseHealthTrackerExport(JSON.parse(JSON.stringify(buildPatientExport({
+        patient: { id: patientId, name: patientId },
+        reports: [],
+        records: [],
+        medicineIngredients: catalog.ingredients,
+        medicineProducts: catalog.products,
+        medicineCatalogRevisions: await loader.loadMedicineCatalogRevisions(patientId),
+        medicines,
+        claimRevisions,
+        medicineCourses: [],
+        doseRegimens: [],
+        doseOccurrences: [],
+        energyEntries: [],
+        energySources: [],
+        dataImports: [],
+        exerciseDefinitions: [],
+        workouts: [],
+      }))));
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: exported.medicineIngredients },
+        { kind: 'medicineProducts' as const, items: exported.medicineProducts },
+        { kind: 'medicineCatalogRevisions' as const, items: exported.medicineCatalogRevisions },
+        { kind: 'medicines' as const, items: exported.medicines },
+        { kind: 'revisions' as const, items: exported.claimRevisions },
+      ]) {
+        if (!batch.items.length) continue;
+        await archiveModule.importArchiveBatch({
+          patientId: restoredPatientId,
+          sourcePatientId: patientId,
+          ...batch,
+        });
+      }
+      const restoredMedicineId = await archiveModule.resolveArchiveEntityId(
+        restoredPatientId, patientId, 'medicine', medicines[0].id,
+      );
+      const restoredProductId = await archiveModule.resolveArchiveEntityId(
+        restoredPatientId, patientId, 'medicine-product', product.id,
+      );
+      const restoredMedicines = await db.select().from(schema.medicineClaim)
+        .where(eq(schema.medicineClaim.patientId, restoredPatientId));
+      expect(restoredMedicines).toEqual([
+        { ...medicines[0], id: restoredMedicineId, patientId: restoredPatientId },
+      ]);
+      const restoredRevisions = await db.select().from(schema.claimRevision)
+        .where(eq(schema.claimRevision.patientId, restoredPatientId))
+        .orderBy(schema.claimRevision.revision);
+      expect(restoredRevisions.map(({ snapshot }) => snapshot)).toEqual(
+        claimRevisions.map(({ snapshot }) => ({
+          ...snapshot,
+          id: restoredMedicineId,
+          patientId: restoredPatientId,
+          productId: 'productId' in snapshot && snapshot.productId ? restoredProductId : null,
+        })),
+      );
+      expect((await loader.loadMedicineCatalog(restoredPatientId, { sourceData: true })).products).toEqual([]);
+    } finally {
+      for (const id of [patientId, restoredPatientId]) {
+        await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [id] });
+      }
+    }
+  });
+
+  it.each([
+    { kind: 'medicineProducts' as const, item: medicineProductCurrent },
+    { kind: 'medicines' as const, item: medicineCurrent },
+  ])('rejects $kind referencing another profile\'s catalogue IDs', async ({ kind, item }) => {
+    const patientId = 'catalog-reference-destination';
+    const otherPatientId = 'catalog-reference-other';
+    for (const id of [patientId, otherPatientId]) {
+      await client.execute({
+        sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+        args: [id, 'owner-1', id],
+      });
+    }
+    try {
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+        { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
+      ]) {
+        await archiveModule.importArchiveBatch({
+          patientId: otherPatientId,
+          sourcePatientId: otherPatientId,
+          ...batch,
+        });
+      }
+      // Restoring to the source profile keeps IDs, so the references exist only
+      // in the other profile rather than being remapped to unknown IDs.
+      await expect(
+        archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: patientId,
+          kind,
+          items: [item],
+        }),
+      ).rejects.toMatchObject({ code: 'missing_medicine_catalog_reference' });
+      const products = await client.execute({
+        sql: 'SELECT id FROM medicine_product WHERE patient_id = ?',
+        args: [patientId],
+      });
+      const medicines = await client.execute({
+        sql: 'SELECT id FROM medicine_claim WHERE patient_id = ?',
+        args: [patientId],
+      });
+      expect(products.rows).toEqual([]);
+      expect(medicines.rows).toEqual([]);
+    } finally {
+      for (const id of [patientId, otherPatientId]) {
+        await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [id] });
+      }
+    }
+  });
+
+  it.each([
+    { view: 'catalogue', query: '' },
+    { view: 'revisions', query: '&entityKind=product&entityId=source-product' },
+  ])('returns 404 for another owner\'s medicine $view', async ({ query }) => {
+    const patientId = 'catalog-other-owner';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-2', patientId],
+    });
+    try {
+      const { GET } = await import('../../routes/api/medicine-catalog/+server');
+      await expect(
+        GET({
+          url: new URL(`https://health.example/api/medicine-catalog?patientId=${patientId}${query}`),
+          locals: { user: { sub: 'owner-1' } },
+        } as Parameters<typeof GET>[0]),
+      ).rejects.toMatchObject({ status: 404, body: { message: 'Profile not found' } });
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('rejects incomplete medicine-product strengths', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('invalid-destination', 'owner-1', 'Invalid import')`,
+    );
+    try {
+      await archiveModule.importArchiveBatch({
+        patientId: 'invalid-destination',
+        sourcePatientId: 'invalid-source',
+        kind: 'medicineIngredients',
+        items: [medicineIngredientCurrent],
+      });
+      await expect(
+        archiveModule.importArchiveBatch({
+          patientId: 'invalid-destination',
+          sourcePatientId: 'invalid-source',
+          kind: 'medicineProducts',
+          items: [
+            {
+              ...medicineProductCurrent,
+              ingredients: [
+                {
+                  ...medicineProductCurrent.ingredients[0],
+                  numeratorUnit: null,
+                },
+              ],
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_medicine_catalog' });
+    } finally {
+      await client.execute({
+        sql: 'DELETE FROM patient WHERE id = ?',
+        args: ['invalid-destination'],
+      });
+    }
+  });
+
+  it('does not restore catalogue children removed after an earlier restore', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('repeat-destination', 'owner-1', 'Repeat import')`,
+    );
+    try {
+      const batch = {
+        patientId: 'repeat-destination',
+        sourcePatientId: 'repeat-source',
+        kind: 'medicineIngredients' as const,
+        items: [medicineIngredientCurrent],
+      };
+      await archiveModule.importArchiveBatch(batch);
+      await client.execute({
+        sql: 'DELETE FROM medicine_catalog_identifier WHERE patient_id = ?',
+        args: ['repeat-destination'],
+      });
+      await archiveModule.importArchiveBatch(batch);
+      const left = await client.execute({
+        sql: 'SELECT count(*) AS n FROM medicine_catalog_identifier WHERE patient_id = ?',
+        args: ['repeat-destination'],
+      });
+      expect(Number(left.rows[0].n)).toBe(0);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: ['repeat-destination'] });
+    }
+  });
+
+  it('loads catalogue source payloads only when asked', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('payload-destination', 'owner-1', 'Payload import')`,
+    );
+    try {
+      await archiveModule.importArchiveBatch({
+        patientId: 'payload-destination',
+        sourcePatientId: 'payload-source',
+        kind: 'medicineIngredients',
+        items: [medicineIngredientCurrent],
+      });
+      const loader = await import('./medicine-catalog-load');
+      const light = await loader.loadMedicineCatalog('payload-destination', { sourceData: false });
+      const full = await loader.loadMedicineCatalog('payload-destination', { sourceData: true });
+      expect(light.ingredients).toHaveLength(1);
+      expect(light.ingredients[0].sourceData).toBeNull();
+      expect(light.ingredients[0].names).toHaveLength(1);
+      expect(full.ingredients[0].sourceData).toEqual({ retained: true });
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: ['payload-destination'] });
+    }
+  });
+
+  it('exports catalogue entries ordered by updatedAt then id', async () => {
+    const patientId = 'catalog-export-order';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      for (const [suffix, name, updatedAt] of [
+        ['b', 'Alpha', '2026-01-02T00:00:00.000Z'],
+        ['z', 'Beta', '2026-01-01T00:00:00.000Z'],
+        ['a', 'Gamma', '2026-01-02T00:00:00.000Z'],
+      ]) {
+        await client.execute({
+          sql: `INSERT INTO medicine_ingredient
+            (id, patient_id, canonical_name, normalized_name, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [`${patientId}-ingredient-${suffix}`, patientId, name, name.toLowerCase(), updatedAt],
+        });
+        await client.execute({
+          sql: `INSERT INTO medicine_product (id, patient_id, display_name, normalized_name, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [`${patientId}-product-${suffix}`, patientId, name, name.toLowerCase(), updatedAt],
+        });
+      }
+
+      const { GET } = await import('../../routes/api/medicine-catalog/+server');
+      const response = await GET({
+        url: new URL(`https://health.example/api/medicine-catalog?patientId=${patientId}`),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(response.status).toBe(200);
+      const exported = await response.json() as {
+        medicineIngredients: Array<{ id: string }>;
+        medicineProducts: Array<{ id: string }>;
+      };
+      expect(exported.medicineIngredients.map(({ id }) => id)).toEqual(
+        ['z', 'a', 'b'].map((suffix) => `${patientId}-ingredient-${suffix}`),
+      );
+      expect(exported.medicineProducts.map(({ id }) => id)).toEqual(
+        ['z', 'a', 'b'].map((suffix) => `${patientId}-product-${suffix}`),
+      );
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('loads catalogue revisions ordered by changedAt then id descending', async () => {
+    const patientId = 'catalog-revision-order';
+    const entityId = `${patientId}-ingredient`;
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      for (const [index, [suffix, changedAt]] of [
+        ['b', '2026-01-02T00:00:00.000Z'],
+        ['c', '2026-01-02T00:00:00.000Z'],
+        ['z', '2026-01-01T00:00:00.000Z'],
+        ['a', '2026-01-02T00:00:00.000Z'],
+      ].entries()) {
+        const revision = index + 1;
+        await client.execute({
+          sql: `INSERT INTO medicine_catalog_revision
+            (id, patient_id, entity_kind, entity_id, revision, snapshot, changed_at)
+            VALUES (?, ?, 'ingredient', ?, ?, ?, ?)`,
+          args: [
+            `${patientId}-${suffix}`, patientId, entityId, revision,
+            JSON.stringify({ ...medicineIngredientCurrent, id: entityId, patientId, revision }),
+            changedAt,
+          ],
+        });
+      }
+
+      const { loadMedicineCatalogRevisions } = await import('./medicine-catalog-load');
+      const expectedIds = ['c', 'b', 'a', 'z'].map((suffix) => `${patientId}-${suffix}`);
+      expect((await loadMedicineCatalogRevisions(patientId)).map(({ id }) => id)).toEqual(expectedIds);
+      expect((await loadMedicineCatalogRevisions(patientId, {
+        kind: 'ingredient', id: entityId,
+      })).map(({ id }) => id)).toEqual(expectedIds);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
+  it('exports nested ingredients without source payloads and restores the catalogue', async () => {
+    const patientId = 'catalog-export';
+    const restoredPatientId = 'catalog-restored';
+    for (const id of [patientId, restoredPatientId]) {
+      await client.execute({
+        sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+        args: [id, 'owner-1', id],
+      });
+    }
+    try {
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+        { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
+        {
+          kind: 'medicineCatalogRevisions' as const,
+          items: [medicineIngredientCurrent, medicineProductFirst, medicineProductCurrent].map(
+            (snapshot) => ({
+              id: `revision-${snapshot.id}-${snapshot.revision}`,
+              patientId: snapshot.patientId,
+              entityKind: 'canonicalName' in snapshot ? 'ingredient' : 'product',
+              entityId: snapshot.id,
+              revision: snapshot.revision,
+              snapshot,
+              changedAt: snapshot.updatedAt,
+              changeOriginKind: 'manual',
+              changeOriginProvider: null,
+            }),
+          ),
+        },
+      ]) {
+        await archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: 'source-patient',
+          ...batch,
+        });
+      }
+
+      const { GET } = await import('../../routes/api/medicine-catalog/+server');
+      const response = await GET({
+        url: new URL(`https://health.example/api/medicine-catalog?patientId=${patientId}`),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(response.status).toBe(200);
+      const exported = await response.json() as {
+        medicineIngredients: unknown[];
+        medicineProducts: unknown[];
+        medicineCatalogRevisions: unknown[];
+      };
+      const loader = await import('./medicine-catalog-load');
+      const catalog = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      const revisions = await loader.loadMedicineCatalogRevisions(patientId);
+      const expected = {
+        medicineIngredients: structuredClone(catalog.ingredients),
+        medicineProducts: structuredClone(catalog.products),
+        medicineCatalogRevisions: structuredClone(revisions),
+      };
+      const products = [
+        ...expected.medicineProducts,
+        ...expected.medicineCatalogRevisions.flatMap(({ snapshot }) =>
+          'ingredients' in snapshot ? [snapshot] : [],
+        ),
+      ];
+      expect(products).toHaveLength(3);
+      for (const product of products) {
+        expect(product.ingredients).toHaveLength(1);
+        for (const component of product.ingredients) {
+          expect(component.ingredient.sourceData).toEqual({ retained: true });
+          Reflect.deleteProperty(component.ingredient, 'sourceData');
+        }
+      }
+      expect(exported).toEqual(expected);
+      expect(exported.medicineIngredients[0]).toMatchObject({ sourceData: { retained: true } });
+      expect(exported.medicineCatalogRevisions).toHaveLength(3);
+
+      const versions = await GET({
+        url: new URL(
+          `https://health.example/api/medicine-catalog?patientId=${patientId}&entityKind=product&entityId=${catalog.products[0].id}`,
+        ),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(await versions.json()).toEqual({
+        medicineCatalogRevisions: revisions.filter((revision) => revision.entityKind === 'product'),
+      });
+
+      for (const kind of ['medicineIngredients', 'medicineProducts', 'medicineCatalogRevisions'] as const) {
+        await archiveModule.importArchiveBatch({
+          patientId: restoredPatientId,
+          sourcePatientId: patientId,
+          kind,
+          items: exported[kind],
+        });
+      }
+      const restored = await loader.loadMedicineCatalog(restoredPatientId, { sourceData: true });
+      expect(restored.ingredients[0].sourceData).toEqual({ retained: true });
+      expect(restored.products[0].sourceData).toEqual({ label: 'retained' });
+      expect(restored.products[0].ingredients[0].ingredientId).toBe(restored.ingredients[0].id);
+      expect(await loader.loadMedicineCatalogRevisionCounts(restoredPatientId)).toEqual({
+        [`ingredient:${restored.ingredients[0].id}`]: 1,
+        [`product:${restored.products[0].id}`]: 2,
+      });
+    } finally {
+      for (const id of [patientId, restoredPatientId]) {
+        await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [id] });
+      }
+    }
+  });
+
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
     const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
     const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));
@@ -480,6 +1260,8 @@ describe('archive import storage', () => {
           },
         ],
       },
+      { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+      { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
       { kind: 'medicines' as const, items: [medicineCurrent] },
       { kind: 'energy' as const, items: [energyCurrent] },
       {
@@ -554,6 +1336,44 @@ describe('archive import storage', () => {
           },
         ],
       },
+      {
+        kind: 'medicineCatalogRevisions' as const,
+        items: [
+          {
+            id: 'source-ingredient-revision-1',
+            patientId: 'source-patient',
+            entityKind: 'ingredient',
+            entityId: 'source-ingredient',
+            revision: 1,
+            snapshot: medicineIngredientCurrent,
+            changedAt: medicineIngredientCurrent.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+          {
+            id: 'source-product-revision-1',
+            patientId: 'source-patient',
+            entityKind: 'product',
+            entityId: 'source-product',
+            revision: 1,
+            snapshot: medicineProductFirst,
+            changedAt: medicineProductFirst.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+          {
+            id: 'source-product-revision-2',
+            patientId: 'source-patient',
+            entityKind: 'product',
+            entityId: 'source-product',
+            revision: 2,
+            snapshot: medicineProductCurrent,
+            changedAt: medicineProductCurrent.updatedAt,
+            changeOriginKind: 'manual',
+            changeOriginProvider: 'local',
+          },
+        ],
+      },
     ];
 
     for (const batch of batches) {
@@ -575,6 +1395,9 @@ describe('archive import storage', () => {
       SELECT
         (SELECT count(*) FROM report) AS reports,
         (SELECT count(*) FROM record) AS records,
+        (SELECT count(*) FROM medicine_ingredient) AS medicine_ingredients,
+        (SELECT count(*) FROM medicine_product) AS medicine_products,
+        (SELECT count(*) FROM medicine_catalog_revision) AS medicine_catalog_revisions,
         (SELECT count(*) FROM medicine_claim) AS medicines,
         (SELECT count(*) FROM energy_claim) AS energy,
         (SELECT count(*) FROM data_import) AS data_imports,
@@ -587,6 +1410,9 @@ describe('archive import storage', () => {
     expect(counts.rows[0]).toMatchObject({
       reports: 1,
       records: 1,
+      medicine_ingredients: 1,
+      medicine_products: 1,
+      medicine_catalog_revisions: 3,
       medicines: 1,
       energy: 1,
       data_imports: 1,
@@ -603,6 +1429,23 @@ describe('archive import storage', () => {
       JOIN report ON report.id = record.report_id
     `);
     expect(relationship.rows[0]?.patient_id).toBe('destination-patient');
+
+    const medicineRelationship = await client.execute(`
+      SELECT medicine_claim.patient_id AS patient_id,
+        medicine_product.display_name AS product_name,
+        medicine_ingredient.canonical_name AS ingredient_name
+      FROM medicine_claim
+      JOIN medicine_product ON medicine_product.id = medicine_claim.product_id
+      JOIN medicine_product_ingredient
+        ON medicine_product_ingredient.product_id = medicine_product.id
+      JOIN medicine_ingredient
+        ON medicine_ingredient.id = medicine_product_ingredient.ingredient_id
+    `);
+    expect(medicineRelationship.rows[0]).toMatchObject({
+      patient_id: 'destination-patient',
+      product_name: 'Example medicine 10 mg',
+      ingredient_name: 'Example ingredient',
+    });
 
     const revisions = await client.execute(`
       SELECT claim_kind, revision,

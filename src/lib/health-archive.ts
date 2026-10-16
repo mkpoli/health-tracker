@@ -20,6 +20,8 @@ export interface HealthTrackerExport {
   patient: Record<string, unknown>;
   reports: unknown[];
   records: unknown[];
+  medicineIngredients: unknown[];
+  medicineProducts: unknown[];
   medicines: unknown[];
   medicineCourses: unknown[];
   doseRegimens: unknown[];
@@ -30,6 +32,7 @@ export interface HealthTrackerExport {
   exerciseDefinitions: unknown[];
   workouts: unknown[];
   claimRevisions: unknown[];
+  medicineCatalogRevisions: unknown[];
   mediaFiles: HealthArchiveMediaFile[];
 }
 
@@ -44,6 +47,7 @@ export type HealthArchiveErrorCode =
   | 'archive_corrupt'
   | 'checksum_mismatch'
   | 'invalid_format'
+  | 'item_too_large'
   | 'manifest_missing'
   | 'manifest_too_large'
   | 'media_too_large'
@@ -169,6 +173,8 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     patient,
     reports: data.reports,
     records: data.records,
+    medicineIngredients: arrayOrEmpty(data.medicineIngredients),
+    medicineProducts: arrayOrEmpty(data.medicineProducts),
     medicines: arrayOrEmpty(data.medicines),
     medicineCourses: arrayOrEmpty(data.medicineCourses),
     doseRegimens: arrayOrEmpty(data.doseRegimens),
@@ -179,6 +185,7 @@ export function parseHealthTrackerExport(value: unknown): HealthTrackerExport {
     exerciseDefinitions: arrayOrEmpty(data.exerciseDefinitions),
     workouts: arrayOrEmpty(data.workouts),
     claimRevisions: arrayOrEmpty(data.claimRevisions),
+    medicineCatalogRevisions: arrayOrEmpty(data.medicineCatalogRevisions),
     mediaFiles,
   };
 }
@@ -416,8 +423,27 @@ export async function forEachArchiveMedia(
   return completed;
 }
 
-export function chunkArchiveItems<T>(items: T[], size = 100) {
+export function chunkArchiveItems<T>(items: T[], size = 100, maxBytes = Infinity) {
   const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  const encoder = new TextEncoder();
+  let chunk: T[] = [];
+  let bytes = 2; // JSON array brackets.
+
+  for (const item of items) {
+    const itemBytes = Number.isFinite(maxBytes)
+      ? encoder.encode(JSON.stringify(item) ?? 'null').byteLength
+      : 0;
+    if (itemBytes + 2 > maxBytes) {
+      throw new HealthArchiveError('item_too_large', 'An archive item exceeds the import batch size limit');
+    }
+    if (chunk.length > 0 && (chunk.length >= size || bytes + 1 + itemBytes > maxBytes)) {
+      chunks.push(chunk);
+      chunk = [];
+      bytes = 2;
+    }
+    bytes += itemBytes + (chunk.length > 0 ? 1 : 0);
+    chunk.push(item);
+  }
+  if (chunk.length > 0) chunks.push(chunk);
   return chunks;
 }
