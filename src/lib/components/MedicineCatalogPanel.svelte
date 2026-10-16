@@ -509,6 +509,8 @@
                       <p>{m.medicine_catalog_versions_failed()}</p>
                       <button type="button" onclick={() => loadVersions(product.id)} class="mt-1 font-semibold text-blue-700 hover:text-blue-800">{m.medicine_catalog_versions_retry()}</button>
                     </div>
+                  {:else if loadedVersions[product.id] === 'loading'}
+                    <p class="mt-2 text-left text-xs text-slate-500" role="status">{m.medicine_catalog_versions_loading()}</p>
                   {:else if versionRows(product.id).length}
                     <ol class="mt-2 space-y-1 text-left text-[11px] text-slate-500">
                       {#each versionRows(product.id) as revision (revision.id)}

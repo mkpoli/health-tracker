@@ -1133,6 +1133,7 @@
   "medicine_catalog_version_entry": "Version {revision} · {date}",
   "medicine_catalog_versions_failed": "Saved versions could not be loaded.",
   "medicine_catalog_versions_retry": "Try again",
+  "medicine_catalog_versions_loading": "Loading saved versions…",
   "medicine_catalog_invalid_identifier": "Each identifier needs both a system and a code. Fill in both or remove the row.",
   "medicine_catalog_invalid_ingredient": "Each ingredient can be listed only once per product. Remove the duplicate or choose a different ingredient.",
   "medicine_catalog_save_failed": "The catalog entry could not be saved. Check the fields and try again.",
