@@ -601,9 +601,9 @@
           <input type="hidden" name="patientId" value={patientId} />
           <input type="hidden" name="structure" value={productStructure} />
           {#if productDraft.id}<input type="hidden" name="id" value={productDraft.id} /><input type="hidden" name="revision" value={productDraft.revision} />{/if}
-          <div class="space-y-7 px-5 py-5 sm:px-6">
-            <fieldset>
-              <legend class="section-label">{m.medicine_catalog_product_identity()}</legend>
+          <div class="px-5 py-5 sm:px-6">
+            <fieldset class="min-w-0 border-0 p-0">
+              <legend class="section-label w-full">{m.medicine_catalog_product_identity()}</legend>
               <div class="mt-4 grid gap-4 sm:grid-cols-3">
                 <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_display_name()}</span><input name="displayName" bind:value={productDraft.displayName} required maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
                 {@render statusSelect(productDraft)}
@@ -622,8 +622,8 @@
             {@render namesEditor(productDraft.names)}
             {@render identifiersEditor(productDraft.identifiers)}
 
-            <fieldset class="border-t border-slate-100 pt-6">
-              <legend class="section-label">{m.medicine_catalog_market_package()}</legend>
+            <fieldset class="mt-6 min-w-0 border-0 p-0">
+              <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_market_package()}</legend>
               <div class="mt-4 grid gap-4 sm:grid-cols-2">
                 <label><span class="field-label">{m.medicine_catalog_manufacturer()}</span><input name="manufacturer" bind:value={productDraft.manufacturer} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
                 <label><span class="field-label">{m.medicine_catalog_authorization_holder()}</span><input name="marketingAuthorizationHolder" bind:value={productDraft.marketingAuthorizationHolder} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
@@ -662,7 +662,7 @@
 {/snippet}
 
 {#snippet namesEditor(names: NameDraft[])}
-  <fieldset class="min-w-0 border-0 p-0">
+  <fieldset class="mt-6 min-w-0 border-0 p-0">
     <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_names()}</legend>
     <div class="flex justify-end"><button type="button" onclick={() => names.push(emptyName())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_name()}</button></div>
     <div class="mt-4 space-y-3">
@@ -682,7 +682,7 @@
 {/snippet}
 
 {#snippet identifiersEditor(identifiers: IdentifierDraft[])}
-  <fieldset class="min-w-0 border-0 p-0">
+  <fieldset class="mt-6 min-w-0 border-0 p-0">
     <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_identifiers()}</legend>
     <div class="flex justify-end"><button type="button" onclick={() => identifiers.push(emptyIdentifier())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_identifier()}</button></div>
     <div class="mt-4 space-y-3">
@@ -712,7 +712,7 @@
 {/snippet}
 
 {#snippet componentsEditor()}
-  <fieldset class="min-w-0 border-0 p-0">
+  <fieldset class="mt-6 min-w-0 border-0 p-0">
     <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_ingredients()}</legend>
     <div class="flex justify-end"><button type="button" disabled={ingredients.length === 0} onclick={() => productDraft.ingredients.push(emptyComponent())} class="text-xs font-semibold text-blue-700 disabled:text-slate-400">{m.medicine_catalog_add_component()}</button></div>
     {#if ingredients.length === 0}<p class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{m.medicine_catalog_create_ingredient_first()}</p>{/if}
