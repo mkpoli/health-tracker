@@ -3,6 +3,7 @@
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
+  import { createModalController } from '$lib/modal';
   import { getLocale } from '$lib/paraglide/runtime';
   import { fetchMedicineCatalogRevisions } from '$lib/medicine-catalog-client';
   import {
@@ -317,6 +318,12 @@
     saveError = '';
   }
 
+  const editorModal = createModalController({
+    onClose: closeEditor,
+    busy: () => saving,
+    draft: () => editorKind === 'ingredient' ? ingredientDraft : productDraft,
+  });
+
   function prepareNames(names: NameDraft[], fallback: string) {
     return names
       .filter((name) => name.name.trim())
@@ -480,8 +487,6 @@
   }
 </script>
 
-<svelte:window onkeydown={(event) => event.key === 'Escape' && closeEditor()} />
-
 <details class="group border-b border-slate-100 bg-slate-50/40">
   <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 sm:px-6">
     <div>
@@ -601,8 +606,8 @@
 </details>
 
 {#if editorKind}
-  <div class="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onclick={(event) => event.target === event.currentTarget && closeEditor()}>
-    <div class="sheet-enter app-scroll flex max-h-[96vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="catalog-editor-title">
+  <div class="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-slate-900/55 backdrop-blur-sm sm:items-center sm:p-6" role="presentation">
+    <div class="sheet-enter app-scroll flex max-h-[96vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl" use:editorModal.attach role="dialog" aria-modal="true" aria-labelledby="catalog-editor-title">
       <header class="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-6">
         <div>
           <h2 id="catalog-editor-title" class="text-xl font-semibold text-slate-900">
@@ -612,7 +617,7 @@
           </h2>
           <p class="mt-1 text-sm text-slate-500">{m.medicine_catalog_editor_hint()}</p>
         </div>
-        <button type="button" onclick={closeEditor} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700" aria-label={m.close()}>
+        <button type="button" onclick={editorModal.requestClose} disabled={saving} class="rounded-full p-2 text-slate-400 hover:bg-white hover:text-slate-700" aria-label={m.close()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </header>
@@ -773,7 +778,7 @@
 
 {#snippet editorFooter()}
   <footer class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-6">
-    <button type="button" onclick={closeEditor} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
+    <button type="button" onclick={editorModal.requestClose} disabled={saving} class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{m.cancel()}</button>
     <button type="submit" disabled={saving} class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-400">{saving ? m.saving() : m.save()}</button>
   </footer>
 {/snippet}
