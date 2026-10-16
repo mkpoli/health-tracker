@@ -10,11 +10,24 @@ import {
 } from '$lib/server/medicine-catalog-load';
 import { getOwnedPatient, requireUserId } from '$lib/server/ownership';
 
-function archiveSnapshot(snapshot: MedicineCatalogRevisionSnapshot) {
-  if (!('ingredients' in snapshot)) return snapshot;
+function archiveSnapshot(
+  snapshot: MedicineCatalogRevisionSnapshot,
+  ingredientIdsWithSourceData: Set<string>,
+) {
+  if (!('ingredients' in snapshot) || !Array.isArray(snapshot.ingredients)) return snapshot;
   return {
     ...snapshot,
     ingredients: snapshot.ingredients.map((component) => {
+      if (
+        !component ||
+        typeof component !== 'object' ||
+        !component.ingredient ||
+        typeof component.ingredient !== 'object' ||
+        Array.isArray(component.ingredient) ||
+        !ingredientIdsWithSourceData.has(component.ingredient.id)
+      ) {
+        return component;
+      }
       const { sourceData: _sourceData, ...ingredient } = component.ingredient;
       return { ...component, ingredient };
     }),
@@ -46,13 +59,20 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
   const catalog = await loadMedicineCatalog(patientId, { sourceData: true });
   const revisions = await loadMedicineCatalogRevisions(patientId);
+  const ingredientIdsWithSourceData = new Set(
+    catalog.ingredients
+      .filter((ingredient) => ingredient.sourceData != null)
+      .map((ingredient) => ingredient.id),
+  );
   return json(
     {
       medicineIngredients: catalog.ingredients,
-      medicineProducts: catalog.products.map(archiveSnapshot),
+      medicineProducts: catalog.products.map((product) =>
+        archiveSnapshot(product, ingredientIdsWithSourceData),
+      ),
       medicineCatalogRevisions: revisions.map((revision) => ({
         ...revision,
-        snapshot: archiveSnapshot(revision.snapshot),
+        snapshot: archiveSnapshot(revision.snapshot, ingredientIdsWithSourceData),
       })),
     },
     { headers },
