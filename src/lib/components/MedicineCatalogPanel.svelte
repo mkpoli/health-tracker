@@ -662,9 +662,9 @@
 {/snippet}
 
 {#snippet namesEditor(names: NameDraft[])}
-  <fieldset class="border-t border-slate-100 pt-6">
-    <legend class="section-label">{m.medicine_catalog_names()}</legend>
-    <div class="mt-3 flex justify-end"><button type="button" onclick={() => names.push(emptyName())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_name()}</button></div>
+  <fieldset class="min-w-0 border-0 p-0">
+    <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_names()}</legend>
+    <div class="flex justify-end"><button type="button" onclick={() => names.push(emptyName())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_name()}</button></div>
     <div class="mt-4 space-y-3">
       {#each names as name, index (name.localId)}
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-6">
@@ -682,9 +682,9 @@
 {/snippet}
 
 {#snippet identifiersEditor(identifiers: IdentifierDraft[])}
-  <fieldset class="border-t border-slate-100 pt-6">
-    <legend class="section-label">{m.medicine_catalog_identifiers()}</legend>
-    <div class="mt-3 flex justify-end"><button type="button" onclick={() => identifiers.push(emptyIdentifier())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_identifier()}</button></div>
+  <fieldset class="min-w-0 border-0 p-0">
+    <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_identifiers()}</legend>
+    <div class="flex justify-end"><button type="button" onclick={() => identifiers.push(emptyIdentifier())} class="text-xs font-semibold text-blue-700">{m.medicine_catalog_add_identifier()}</button></div>
     <div class="mt-4 space-y-3">
       {#each identifiers as identifier, index (identifier.localId)}
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-6">
@@ -712,9 +712,9 @@
 {/snippet}
 
 {#snippet componentsEditor()}
-  <fieldset class="border-t border-slate-100 pt-6">
-    <legend class="section-label">{m.medicine_catalog_ingredients()}</legend>
-    <div class="mt-3 flex justify-end"><button type="button" disabled={ingredients.length === 0} onclick={() => productDraft.ingredients.push(emptyComponent())} class="text-xs font-semibold text-blue-700 disabled:text-slate-400">{m.medicine_catalog_add_component()}</button></div>
+  <fieldset class="min-w-0 border-0 p-0">
+    <legend class="section-label w-full border-t border-slate-100 pt-6">{m.medicine_catalog_ingredients()}</legend>
+    <div class="flex justify-end"><button type="button" disabled={ingredients.length === 0} onclick={() => productDraft.ingredients.push(emptyComponent())} class="text-xs font-semibold text-blue-700 disabled:text-slate-400">{m.medicine_catalog_add_component()}</button></div>
     {#if ingredients.length === 0}<p class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{m.medicine_catalog_create_ingredient_first()}</p>{/if}
     <div class="mt-4 space-y-3">
       {#each productDraft.ingredients as component, index (component.localId)}
