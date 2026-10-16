@@ -7,6 +7,7 @@ import {
   energyClaim,
   energySource,
   medicineClaim,
+  medicineProduct,
 } from '$lib/server/db/schema';
 import type { EnergyInput } from '$lib/server/energy';
 import type { MedicineInput } from '$lib/server/medicines';
@@ -20,8 +21,29 @@ export interface ClaimOrigin extends ClaimRevisionSource {
   externalId?: string | null;
 }
 
+export class InvalidMedicineReferenceError extends Error {
+  constructor() {
+    super('The medicine product is outside this profile');
+    this.name = 'InvalidMedicineReferenceError';
+  }
+}
+
 /** The handle a transaction body writes through. */
 export type WriteTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function validateMedicineProduct(
+  tx: WriteTx,
+  patientId: string,
+  productId: string | null | undefined,
+) {
+  if (!productId) return;
+  const rows = await tx
+    .select({ id: medicineProduct.id })
+    .from(medicineProduct)
+    .where(and(eq(medicineProduct.id, productId), eq(medicineProduct.patientId, patientId)))
+    .limit(1);
+  if (!rows[0]) throw new InvalidMedicineReferenceError();
+}
 
 /** Runs the body in the caller's transaction when one is given, else in its own. */
 export function inTransaction<T>(tx: WriteTx | undefined, body: (tx: WriteTx) => Promise<T>) {
@@ -33,6 +55,7 @@ export function normalizeMedicineClaim(
 ): MedicineClaimRecord {
   return {
     ...value,
+    productId: typeof value.productId === 'string' ? value.productId : null,
     status: isMedicineStatus(value.status) ? value.status : 'active',
   };
 }
@@ -67,6 +90,7 @@ export async function createMedicineClaim(options: {
   tx?: WriteTx;
 }) {
   return inTransaction(options.tx, async (tx) => {
+    await validateMedicineProduct(tx, options.patientId, options.input.productId);
     const values = {
       ...(options.id ? { id: options.id } : {}),
       patientId: options.patientId,

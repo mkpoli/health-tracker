@@ -39,6 +39,7 @@ import {
   createMedicineClaim,
   inTransaction,
   normalizeMedicineClaim,
+  validateMedicineProduct,
   type ClaimOrigin,
   type WriteTx,
 } from '$lib/server/claim-mutations';
@@ -197,6 +198,7 @@ export async function updateMedicineClaim(options: {
   const changedAt = options.changedAt ?? new Date().toISOString();
 
   return db.transaction(async (tx) => {
+    await validateMedicineProduct(tx, options.current.patientId, options.input.productId);
     const currentSnapshot = normalizeMedicineClaim(options.current);
     await tx
       .insert(claimRevision)

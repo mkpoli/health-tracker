@@ -1,6 +1,7 @@
 import { check, foreignKey, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import type { ClaimRevisionSnapshot } from '$lib/claim-revision';
+import type { MedicineCatalogRevisionSnapshot } from '$lib/medicine-catalog';
 
 export const task = sqliteTable('task', {
 	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -49,6 +50,280 @@ export const record = sqliteTable('record', {
 	extraData: text('extra_data', { mode: 'json' })
 });
 
+export const medicineIngredient = sqliteTable(
+	'medicine_ingredient',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		canonicalName: text('canonical_name').notNull(),
+		normalizedName: text('normalized_name').notNull(),
+		status: text('status').notNull().default('active'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		sourceData: text('source_data', { mode: 'json' }).$type<unknown>(),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check(
+			'medicine_ingredient_status_check',
+			sql`${table.status} in ('active', 'inactive', 'archived')`
+		),
+		uniqueIndex('medicine_ingredient_id_patient_idx').on(table.id, table.patientId),
+		index('medicine_ingredient_patient_name_idx').on(table.patientId, table.normalizedName),
+		index('medicine_ingredient_patient_cursor_idx').on(table.patientId, table.id),
+		index('medicine_ingredient_patient_updated_idx').on(table.patientId, table.updatedAt)
+	]
+);
+
+export const medicineProduct = sqliteTable(
+	'medicine_product',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		displayName: text('display_name').notNull(),
+		normalizedName: text('normalized_name').notNull().default(''),
+		productType: text('product_type').notNull().default('other'),
+		status: text('status').notNull().default('active'),
+		doseFormText: text('dose_form_text'),
+		doseFormSystem: text('dose_form_system'),
+		doseFormCode: text('dose_form_code'),
+		routeText: text('route_text'),
+		routeSystem: text('route_system'),
+		routeCode: text('route_code'),
+		strengthText: text('strength_text'),
+		manufacturer: text('manufacturer'),
+		marketingAuthorizationHolder: text('marketing_authorization_holder'),
+		marketCountry: text('market_country'),
+		packageDescription: text('package_description'),
+		imprint: text('imprint'),
+		color: text('color'),
+		shape: text('shape'),
+		notes: text('notes'),
+		originKind: text('origin_kind').notNull().default('manual'),
+		originProvider: text('origin_provider'),
+		originExternalId: text('origin_external_id'),
+		sourceData: text('source_data', { mode: 'json' }).$type<unknown>(),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+		updatedAt: text('updated_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		check(
+			'medicine_product_type_check',
+			sql`${table.productType} in ('branded', 'generic', 'compounded', 'supplement', 'other')`
+		),
+		check(
+			'medicine_product_status_check',
+			sql`${table.status} in ('active', 'inactive', 'archived')`
+		),
+		uniqueIndex('medicine_product_id_patient_idx').on(table.id, table.patientId),
+		index('medicine_product_patient_name_idx').on(table.patientId, table.normalizedName),
+		index('medicine_product_patient_cursor_idx').on(table.patientId, table.id),
+		index('medicine_product_patient_status_idx').on(table.patientId, table.status),
+		index('medicine_product_patient_updated_idx').on(table.patientId, table.updatedAt)
+	]
+);
+
+export const medicineCatalogName = sqliteTable(
+	'medicine_catalog_name',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		ingredientId: text('ingredient_id'),
+		productId: text('product_id'),
+		orderIndex: integer('order_index').notNull(),
+		name: text('name').notNull(),
+		normalizedName: text('normalized_name').notNull(),
+		languageTag: text('language_tag').notNull().default('und'),
+		nameType: text('name_type').notNull().default('preferred'),
+		jurisdiction: text('jurisdiction'),
+		preferred: integer('preferred', { mode: 'boolean' }).notNull().default(false),
+		sourceKind: text('source_kind').notNull().default('manual'),
+		sourceProvider: text('source_provider'),
+		sourceUrl: text('source_url'),
+		sourceRetrievedAt: text('source_retrieved_at')
+	},
+	(table) => [
+		foreignKey({
+			name: 'medicine_catalog_name_ingredient_patient_fk',
+			columns: [table.ingredientId, table.patientId],
+			foreignColumns: [medicineIngredient.id, medicineIngredient.patientId]
+		}).onDelete('cascade'),
+		foreignKey({
+			name: 'medicine_catalog_name_product_patient_fk',
+			columns: [table.productId, table.patientId],
+			foreignColumns: [medicineProduct.id, medicineProduct.patientId]
+		}).onDelete('cascade'),
+		check(
+			'medicine_catalog_name_owner_check',
+			sql`(${table.ingredientId} is not null and ${table.productId} is null) or (${table.ingredientId} is null and ${table.productId} is not null)`
+		),
+		check(
+			'medicine_catalog_name_type_check',
+			sql`${table.nameType} in ('preferred', 'brand', 'generic', 'synonym')`
+		),
+		uniqueIndex('medicine_catalog_name_ingredient_order_idx').on(
+			table.patientId,
+			table.ingredientId,
+			table.orderIndex
+		),
+		uniqueIndex('medicine_catalog_name_product_order_idx').on(
+			table.patientId,
+			table.productId,
+			table.orderIndex
+		),
+		index('medicine_catalog_name_patient_name_idx').on(table.patientId, table.normalizedName)
+	]
+);
+
+export const medicineCatalogIdentifier = sqliteTable(
+	'medicine_catalog_identifier',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		ingredientId: text('ingredient_id'),
+		productId: text('product_id'),
+		orderIndex: integer('order_index').notNull(),
+		system: text('system').notNull(),
+		code: text('code').notNull(),
+		jurisdiction: text('jurisdiction'),
+		sourceKind: text('source_kind').notNull().default('manual'),
+		sourceProvider: text('source_provider'),
+		sourceUrl: text('source_url'),
+		sourceRetrievedAt: text('source_retrieved_at')
+	},
+	(table) => [
+		foreignKey({
+			name: 'medicine_catalog_identifier_ingredient_patient_fk',
+			columns: [table.ingredientId, table.patientId],
+			foreignColumns: [medicineIngredient.id, medicineIngredient.patientId]
+		}).onDelete('cascade'),
+		foreignKey({
+			name: 'medicine_catalog_identifier_product_patient_fk',
+			columns: [table.productId, table.patientId],
+			foreignColumns: [medicineProduct.id, medicineProduct.patientId]
+		}).onDelete('cascade'),
+		check(
+			'medicine_catalog_identifier_owner_check',
+			sql`(${table.ingredientId} is not null and ${table.productId} is null) or (${table.ingredientId} is null and ${table.productId} is not null)`
+		),
+		uniqueIndex('medicine_catalog_identifier_ingredient_order_idx').on(
+			table.patientId,
+			table.ingredientId,
+			table.orderIndex
+		),
+		uniqueIndex('medicine_catalog_identifier_product_order_idx').on(
+			table.patientId,
+			table.productId,
+			table.orderIndex
+		),
+		index('medicine_catalog_identifier_patient_system_idx').on(
+			table.patientId,
+			table.system,
+			table.code
+		)
+	]
+);
+
+export const medicineProductIngredient = sqliteTable(
+	'medicine_product_ingredient',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		productId: text('product_id').notNull(),
+		ingredientId: text('ingredient_id').notNull(),
+		orderIndex: integer('order_index').notNull(),
+		role: text('role').notNull().default('active'),
+		numeratorValue: text('numerator_value'),
+		numeratorUnit: text('numerator_unit'),
+		denominatorValue: text('denominator_value'),
+		denominatorUnit: text('denominator_unit'),
+		strengthText: text('strength_text'),
+		basisOfStrengthText: text('basis_of_strength_text'),
+		sourceKind: text('source_kind').notNull().default('manual'),
+		sourceProvider: text('source_provider'),
+		sourceUrl: text('source_url'),
+		sourceRetrievedAt: text('source_retrieved_at')
+	},
+	(table) => [
+		foreignKey({
+			name: 'medicine_product_ingredient_product_patient_fk',
+			columns: [table.productId, table.patientId],
+			foreignColumns: [medicineProduct.id, medicineProduct.patientId]
+		}).onDelete('cascade'),
+		foreignKey({
+			name: 'medicine_product_ingredient_ingredient_patient_fk',
+			columns: [table.ingredientId, table.patientId],
+			foreignColumns: [medicineIngredient.id, medicineIngredient.patientId]
+		}),
+		check(
+			'medicine_product_ingredient_role_check',
+			sql`${table.role} in ('active', 'inactive', 'unknown')`
+		),
+		uniqueIndex('medicine_product_ingredient_product_ingredient_idx').on(
+			table.productId,
+			table.ingredientId
+		),
+		uniqueIndex('medicine_product_ingredient_order_idx').on(table.patientId, table.productId, table.orderIndex),
+		index('medicine_product_ingredient_patient_idx').on(table.patientId),
+		index('medicine_product_ingredient_ingredient_idx').on(table.ingredientId)
+	]
+);
+
+export const medicineCatalogRevision = sqliteTable(
+	'medicine_catalog_revision',
+	{
+		id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+		patientId: text('patient_id')
+			.notNull()
+			.references(() => patient.id, { onDelete: 'cascade' }),
+		entityKind: text('entity_kind').notNull(),
+		entityId: text('entity_id').notNull(),
+		revision: integer('revision').notNull(),
+		snapshot: text('snapshot', { mode: 'json' })
+			.notNull()
+			.$type<MedicineCatalogRevisionSnapshot>(),
+		changedAt: text('changed_at').notNull(),
+		changeOriginKind: text('change_origin_kind').notNull().default('manual'),
+		changeOriginProvider: text('change_origin_provider')
+	},
+	(table) => [
+		check(
+			'medicine_catalog_revision_kind_check',
+			sql`${table.entityKind} in ('ingredient', 'product')`
+		),
+		uniqueIndex('medicine_catalog_revision_entity_idx').on(
+			table.entityKind,
+			table.entityId,
+			table.revision
+		),
+		index('medicine_catalog_revision_patient_idx').on(table.patientId),
+		index('medicine_catalog_revision_patient_changed_idx').on(table.patientId, table.changedAt)
+	]
+);
+
 export const medicineClaim = sqliteTable(
 	'medicine_claim',
 	{
@@ -56,6 +331,7 @@ export const medicineClaim = sqliteTable(
 		patientId: text('patient_id')
 			.notNull()
 			.references(() => patient.id, { onDelete: 'cascade' }),
+		productId: text('product_id'),
 		name: text('name').notNull(),
 		genericName: text('generic_name'),
 		form: text('form'),
@@ -79,7 +355,13 @@ export const medicineClaim = sqliteTable(
 			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
 	},
 	(table) => [
+		foreignKey({
+			name: 'medicine_claim_product_patient_fk',
+			columns: [table.productId, table.patientId],
+			foreignColumns: [medicineProduct.id, medicineProduct.patientId]
+		}),
 		index('medicine_claim_patient_idx').on(table.patientId),
+		index('medicine_claim_product_idx').on(table.productId),
 		index('medicine_claim_patient_status_idx').on(table.patientId, table.status),
 		index('medicine_claim_patient_updated_idx').on(table.patientId, table.updatedAt)
 	]
@@ -613,6 +895,12 @@ export const claimRevision = sqliteTable(
 export const patientRelations = relations(patient, ({ many }) => ({
 	reports: many(report),
 	records: many(record),
+	medicineIngredients: many(medicineIngredient),
+	medicineProducts: many(medicineProduct),
+	medicineCatalogNames: many(medicineCatalogName),
+	medicineCatalogIdentifiers: many(medicineCatalogIdentifier),
+	medicineProductIngredients: many(medicineProductIngredient),
+	medicineCatalogRevisions: many(medicineCatalogRevision),
 	medicineClaims: many(medicineClaim),
 	medicineCourses: many(medicineCourse),
 	doseRegimens: many(doseRegimen),
@@ -646,10 +934,99 @@ export const recordRelations = relations(record, ({ one }) => ({
 	})
 }));
 
+export const medicineIngredientRelations = relations(medicineIngredient, ({ one, many }) => ({
+	patient: one(patient, {
+		fields: [medicineIngredient.patientId],
+		references: [patient.id]
+	}),
+	names: many(medicineCatalogName, { relationName: 'medicineIngredientNames' }),
+	identifiers: many(medicineCatalogIdentifier, {
+		relationName: 'medicineIngredientIdentifiers'
+	}),
+	products: many(medicineProductIngredient)
+}));
+
+export const medicineProductRelations = relations(medicineProduct, ({ one, many }) => ({
+	patient: one(patient, {
+		fields: [medicineProduct.patientId],
+		references: [patient.id]
+	}),
+	names: many(medicineCatalogName, { relationName: 'medicineProductNames' }),
+	identifiers: many(medicineCatalogIdentifier, { relationName: 'medicineProductIdentifiers' }),
+	ingredients: many(medicineProductIngredient),
+	claims: many(medicineClaim)
+}));
+
+export const medicineCatalogNameRelations = relations(medicineCatalogName, ({ one }) => ({
+	patient: one(patient, {
+		fields: [medicineCatalogName.patientId],
+		references: [patient.id]
+	}),
+	ingredient: one(medicineIngredient, {
+		fields: [medicineCatalogName.ingredientId],
+		references: [medicineIngredient.id],
+		relationName: 'medicineIngredientNames'
+	}),
+	product: one(medicineProduct, {
+		fields: [medicineCatalogName.productId],
+		references: [medicineProduct.id],
+		relationName: 'medicineProductNames'
+	})
+}));
+
+export const medicineCatalogIdentifierRelations = relations(
+	medicineCatalogIdentifier,
+	({ one }) => ({
+		patient: one(patient, {
+			fields: [medicineCatalogIdentifier.patientId],
+			references: [patient.id]
+		}),
+		ingredient: one(medicineIngredient, {
+			fields: [medicineCatalogIdentifier.ingredientId],
+			references: [medicineIngredient.id],
+			relationName: 'medicineIngredientIdentifiers'
+		}),
+		product: one(medicineProduct, {
+			fields: [medicineCatalogIdentifier.productId],
+			references: [medicineProduct.id],
+			relationName: 'medicineProductIdentifiers'
+		})
+	})
+);
+
+export const medicineProductIngredientRelations = relations(
+	medicineProductIngredient,
+	({ one }) => ({
+		patient: one(patient, {
+			fields: [medicineProductIngredient.patientId],
+			references: [patient.id]
+		}),
+		product: one(medicineProduct, {
+			fields: [medicineProductIngredient.productId],
+			references: [medicineProduct.id]
+		}),
+		ingredient: one(medicineIngredient, {
+			fields: [medicineProductIngredient.ingredientId],
+			references: [medicineIngredient.id]
+		})
+	})
+);
+
+export const medicineCatalogRevisionRelations = relations(medicineCatalogRevision, ({ one }) => ({
+	patient: one(patient, {
+		fields: [medicineCatalogRevision.patientId],
+		references: [patient.id]
+	})
+}));
+
 export const medicineClaimRelations = relations(medicineClaim, ({ one, many }) => ({
 	patient: one(patient, {
 		fields: [medicineClaim.patientId],
 		references: [patient.id]
+	}),
+	product: one(medicineProduct, {
+		fields: [medicineClaim.productId],
+		references: [medicineProduct.id]
 	}),
 	courses: many(medicineCourse)
 }));

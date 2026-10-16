@@ -40,6 +40,25 @@ describe('parseMedicineInput', () => {
     });
   });
 
+  it('keeps an optional product catalog link', () => {
+    expect(
+      parseMedicineInput(
+        form({
+          productId: 'product-1',
+          name: 'Wegovy',
+          status: 'active',
+        }),
+      ).productId,
+    ).toBe('product-1');
+  });
+
+  it('distinguishes an omitted product link from an explicit unlink', () => {
+    expect(parseMedicineInput(form({ name: 'Medicine', status: 'active' })))
+      .not.toHaveProperty('productId');
+    expect(parseMedicineInput(form({ name: 'Medicine', status: 'active', productId: '' })).productId)
+      .toBeNull();
+  });
+
   it('rejects a missing name', () => {
     expect(() => parseMedicineInput(form({ name: ' ', status: 'active' }))).toThrowError(
       new InvalidMedicineInputError('missing_name'),

@@ -5,7 +5,7 @@
   import { dashboardTabHref, dashboardTabOf, type DashboardTab } from '$lib/dashboard-tabs';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
-  import { downloadPatientArchive } from '$lib/export';
+  import { exportPatientArchive } from '$lib/patient-archive-export';
   import { tick } from 'svelte';
   import {
     normalizeComparableMeasurement,
@@ -549,24 +549,7 @@
     exportingPatientData = true;
 
     try {
-      await downloadPatientArchive(
-        {
-          patient: data.currentPatient,
-          reports: data.reports,
-          records: data.records,
-          medicines: data.medicines,
-          medicineCourses: data.medicineCourses,
-          doseRegimens: data.doseRegimens,
-          doseOccurrences: data.doseOccurrences,
-          energyEntries: data.energyEntries,
-          energySources: data.energySources,
-          dataImports: data.dataImports,
-          exerciseDefinitions: data.exerciseDefinitions,
-          workouts: data.workouts,
-          claimRevisions: data.claimRevisions,
-        },
-        data.currentPatient.name,
-      );
+      await exportPatientArchive(data);
     } catch {
       alert(m.export_archive_failed());
     } finally {
@@ -1760,6 +1743,8 @@
         patient={data.currentPatient}
         reports={data.reports}
         records={data.records}
+        medicineIngredients={data.medicineIngredients}
+        medicineProducts={data.medicineProducts}
         medicines={data.medicines}
         medicineCourses={data.medicineCourses}
         doseRegimens={data.doseRegimens}
@@ -2917,6 +2902,9 @@
             patientId={data.currentPatient.id}
             medicines={data.medicines}
             revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
+            ingredients={data.medicineIngredients}
+            products={data.medicineProducts}
+            catalogVersionCounts={data.medicineCatalogVersionCounts}
             courses={data.medicineCourses}
             regimens={data.doseRegimens}
             occurrences={data.doseOccurrences}

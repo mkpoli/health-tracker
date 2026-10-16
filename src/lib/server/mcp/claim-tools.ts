@@ -13,6 +13,7 @@ import {
 } from '$lib/server/db/schema';
 import {
   createEnergyClaim,
+  InvalidMedicineReferenceError,
   normalizeEnergyClaim,
   normalizeMedicineClaim,
   updateEnergyClaim,
@@ -48,6 +49,7 @@ import {
   utcOffsetMinutesAt,
 } from '$lib/time-zone';
 import { capResult } from './budget';
+import { owns, pageLimit, positiveInteger, requestId, mcpProvider } from './claim-tool-input';
 import { REQUEST_ID_LIMIT, stableClaimId } from './claim-ids';
 import {
   parseRegimenArgs,
@@ -62,6 +64,7 @@ const MAX_CLAIMS_PER_PAGE = 100;
 const MAX_HISTORY_PER_PAGE = 100;
 
 const medicineFields = [
+  'product_id',
   'name',
   'generic_name',
   'form',
@@ -88,6 +91,7 @@ const energyFields = [
 ] as const;
 
 const medicineProperties = {
+  product_id: { type: ['string', 'null'], maxLength: 128 },
   name: { type: 'string', maxLength: 200 },
   generic_name: { type: ['string', 'null'], maxLength: 200 },
   form: { type: ['string', 'null'], maxLength: 120 },
@@ -120,46 +124,12 @@ function text(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function owns(object: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(object, key);
-}
-
 function filterText(args: Record<string, unknown>, key: string, maximum?: number) {
   if (!owns(args, key)) return null;
   if (typeof args[key] !== 'string') throw new ToolError(`${key} must be text`);
   const normalized = args[key].trim();
   if (maximum && normalized.length > maximum) throw new ToolError(`${key} is too long`);
   return normalized || null;
-}
-
-function pageLimit(value: unknown, fallback: number, maximum = MAX_CLAIMS_PER_PAGE) {
-  if (value === undefined) return fallback;
-  if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > maximum) {
-    throw new ToolError(`limit must be an integer from 1 through ${maximum}`);
-  }
-
-  return Number(value);
-}
-
-function positiveInteger(value: unknown, field: string) {
-  if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    throw new ToolError(`${field} must be a positive integer`);
-  }
-
-  return Number(value);
-}
-
-function requestId(value: unknown) {
-  const normalized = text(value);
-  if (
-    !normalized ||
-    normalized.length > REQUEST_ID_LIMIT ||
-    /[\u0000-\u001f\u007f]/.test(normalized)
-  ) {
-    throw new ToolError(`request_id must contain 1 to ${REQUEST_ID_LIMIT} visible characters`);
-  }
-
-  return normalized;
 }
 
 function optionalTextField(
@@ -216,12 +186,9 @@ function instant(value: unknown, fallback: number) {
   return parsed.toISOString();
 }
 
-function mcpProvider(ctx: McpContext) {
-  return `mcp:${ctx.clientId}`;
-}
-
 function medicineForm(args: Record<string, unknown>, current?: MedicineClaimRecord) {
   const data = new FormData();
+  if (owns(args, 'product_id')) data.set('productId', optionalTextField(args, 'product_id'));
   data.set('name', optionalTextField(args, 'name', current?.name ?? null));
   data.set('genericName', optionalTextField(args, 'generic_name', current?.genericName ?? null));
   data.set('form', optionalTextField(args, 'form', current?.form ?? null));
@@ -338,6 +305,7 @@ function serializeMedicine(claim: MedicineClaimRecord) {
   return {
     medicine_id: claim.id,
     patient_id: claim.patientId,
+    product_id: claim.productId,
     name: claim.name,
     generic_name: claim.genericName,
     form: claim.form,
@@ -518,6 +486,9 @@ const createMedicine: ToolDefinition = {
       origin: { kind: 'mcp', provider, externalId: key },
       });
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        throw new ToolError('product_id does not identify a catalog product in this profile');
+      }
       if (error instanceof InvalidMedicinePlanInputError) {
         throw new ToolError('Invalid regimen: the rule must start inside the course, and end_date must not fall before start_date');
       }
@@ -579,6 +550,9 @@ const updateMedicine: ToolDefinition = {
       });
       return { updated: true, medicine: serializeMedicine(updated) };
     } catch (error) {
+      if (error instanceof InvalidMedicineReferenceError) {
+        throw new ToolError('product_id does not identify a catalog product in this profile');
+      }
       if (error instanceof StaleClaimRevisionError) {
         const latest = await getOwnedMedicineClaim(ctx.userId, id);
         throw new ToolError(`Revision conflict; current_revision is ${latest?.revision ?? 'unknown'}`);
