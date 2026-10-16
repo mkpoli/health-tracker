@@ -85,6 +85,65 @@ describe('medicine catalog archive', () => {
     });
   });
 
+  it.each([
+    [{ label: 'Historical payload' }, { label: 'Current payload' }],
+    [{ details: { version: 1 } }, { details: { version: 2 } }],
+    [{ values: [1, 2] }, { values: [2, 1] }],
+  ])('keeps a historical payload that differs from the current ingredient payload: %j', async (historicalSourceData, sourceData) => {
+    const historicalProduct = {
+      ...product,
+      ingredients: [{ ...component, ingredient: { ...ingredient, sourceData: historicalSourceData } }],
+    };
+    const historicalRevision = { ...revision, snapshot: historicalProduct };
+    const currentIngredient = { ...ingredient, sourceData };
+    const currentProduct = {
+      ...product,
+      ingredients: [{ ...component, ingredient: currentIngredient }],
+    };
+    mocks.loadMedicineCatalog.mockResolvedValue({
+      ingredients: [currentIngredient],
+      products: [currentProduct],
+    });
+    mocks.loadMedicineCatalogRevisions.mockResolvedValue([historicalRevision]);
+
+    const response = await GET(requestEvent());
+
+    await expect(response.json()).resolves.toEqual({
+      medicineIngredients: [currentIngredient],
+      medicineProducts: [{
+        ...product,
+        ingredients: [{ ...component, ingredient: { id: ingredient.id, canonicalName: 'Ingredient' } }],
+      }],
+      medicineCatalogRevisions: [historicalRevision],
+    });
+  });
+
+  it('strips equal nested payloads regardless of object key order', async () => {
+    const sourceData = { label: 'Ingredient source payload', details: [{ code: 'A', version: 1 }] };
+    const nestedIngredient = {
+      ...ingredient,
+      sourceData: { details: [{ version: 1, code: 'A' }], label: 'Ingredient source payload' },
+    };
+    const nestedProduct = { ...product, ingredients: [{ ...component, ingredient: nestedIngredient }] };
+    mocks.loadMedicineCatalog.mockResolvedValue({
+      ingredients: [{ ...ingredient, sourceData }],
+      products: [nestedProduct],
+    });
+    mocks.loadMedicineCatalogRevisions.mockResolvedValue([{ ...revision, snapshot: nestedProduct }]);
+
+    const response = await GET(requestEvent());
+    const archivedProduct = {
+      ...product,
+      ingredients: [{ ...component, ingredient: { id: ingredient.id, canonicalName: 'Ingredient' } }],
+    };
+
+    await expect(response.json()).resolves.toEqual({
+      medicineIngredients: [{ ...ingredient, sourceData }],
+      medicineProducts: [archivedProduct],
+      medicineCatalogRevisions: [{ ...revision, snapshot: archivedProduct }],
+    });
+  });
+
   it.each([null, undefined])('keeps nested payloads when the top-level payload is %s', async (sourceData) => {
     mocks.loadMedicineCatalog.mockResolvedValue({
       ingredients: [{ ...ingredient, sourceData }],
