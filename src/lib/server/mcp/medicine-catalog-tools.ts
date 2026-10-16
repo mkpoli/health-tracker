@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   medicineCatalogStatuses,
   medicineProductTypes,
@@ -22,6 +22,7 @@ import {
 import {
   InvalidMedicineCatalogInputError,
   parseMedicineIngredientInput,
+  parseMedicineCatalogCountry,
   parseMedicineProductInput,
 } from '$lib/server/medicine-catalog';
 import {
@@ -30,6 +31,7 @@ import {
   getMedicineIngredientRecord,
   getMedicineProductRecord,
   InvalidMedicineCatalogReferenceError,
+  MedicineCatalogIdentifierCollisionError,
   updateMedicineIngredient,
   updateMedicineProduct,
 } from '$lib/server/medicine-catalog-mutations';
@@ -39,12 +41,29 @@ import {
   toMedicineCatalogRevision,
 } from '$lib/server/medicine-catalog-records';
 import { StaleClaimRevisionError } from '$lib/server/claim-revisions';
-import { capResult } from './budget';
+import { capResult, MAX_RESULT_BYTES } from './budget';
+import { owns, pageLimit, positiveInteger, requestId, mcpProvider } from './claim-tool-input';
+import { stableClaimId, REQUEST_ID_LIMIT } from './claim-ids';
 import { requirePatient, ToolError, type McpContext } from './context';
 import type { ToolDefinition } from './tools';
 
 const MAX_CATALOG_PAGE = 100;
-const REQUEST_ID_LIMIT = 128;
+
+function readColumns<T extends typeof medicineIngredient | typeof medicineProduct>(table: T) {
+  return {
+    ...getTableColumns(table),
+    sourceData: sql<null>`null`,
+    sourceDataBytes: sql<number | null>`length(cast(${table.sourceData} as blob))`,
+  };
+}
+
+type SourceSize = { sourceDataBytes?: number | null };
+
+function longestCursor(ids: string[]) {
+  return ids.reduce<string | null>((longest, id) =>
+    new TextEncoder().encode(JSON.stringify(id)).byteLength > new TextEncoder().encode(JSON.stringify(longest)).byteLength
+      ? id : longest, null);
+}
 
 const sourceProperties = {
   source_kind: { type: 'string', maxLength: 80 },
@@ -86,6 +105,16 @@ const componentSchema = {
   properties: {
     component_id: { type: ['string', 'null'], maxLength: 128 },
     ingredient_id: { type: 'string', minLength: 1, maxLength: 128 },
+    ingredient: {
+      type: 'object',
+      description: 'Display reference returned by reads. ingredient_id above determines the link.',
+      properties: {
+        ingredient_id: { type: 'string', maxLength: 128 },
+        canonical_name: { type: 'string', maxLength: 300 },
+      },
+      required: ['ingredient_id', 'canonical_name'],
+      additionalProperties: false,
+    },
     role: { type: 'string', enum: ['active', 'inactive', 'unknown'] },
     numerator_value: { type: ['string', 'null'], maxLength: 64 },
     numerator_unit: { type: ['string', 'null'], maxLength: 80 },
@@ -99,10 +128,6 @@ const componentSchema = {
   additionalProperties: false,
 } as const;
 
-function owns(value: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function text(value: unknown, field: string, limit: number, required = false) {
   if (value === null || value === undefined) {
     if (required) throw new ToolError(`${field} is required`);
@@ -113,29 +138,6 @@ function text(value: unknown, field: string, limit: number, required = false) {
   if (normalized.length > limit) throw new ToolError(`${field} is too long`);
   if (required && !normalized) throw new ToolError(`${field} is required`);
   return normalized || null;
-}
-
-function positiveInteger(value: unknown, field: string) {
-  if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    throw new ToolError(`${field} must be a positive integer`);
-  }
-  return Number(value);
-}
-
-function pageLimit(value: unknown) {
-  if (value === undefined) return 50;
-  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > MAX_CATALOG_PAGE) {
-    throw new ToolError(`limit must be an integer from 1 through ${MAX_CATALOG_PAGE}`);
-  }
-  return Number(value);
-}
-
-function requestId(value: unknown) {
-  const id = text(value, 'request_id', REQUEST_ID_LIMIT, true);
-  if (!id || /[\u0000-\u001f\u007f]/.test(id)) {
-    throw new ToolError(`request_id must contain 1 to ${REQUEST_ID_LIMIT} visible characters`);
-  }
-  return id;
 }
 
 function sourceObject(value: Record<string, unknown>) {
@@ -169,7 +171,7 @@ function catalogName(value: Record<string, unknown>) {
     name: text(value.name, 'names.name', 300, true),
     languageTag: text(value.language_tag, 'names.language_tag', 100) || 'und',
     nameType: text(value.name_type, 'names.name_type', 40) || 'preferred',
-    jurisdiction: text(value.jurisdiction, 'names.jurisdiction', 2),
+    jurisdiction: parseMedicineCatalogCountry(value.jurisdiction),
     preferred: value.preferred === true,
     ...sourceObject(value),
   };
@@ -180,7 +182,7 @@ function catalogIdentifier(value: Record<string, unknown>) {
     id: text(value.identifier_id ?? value.id, 'identifiers.identifier_id', 128),
     system: text(value.system, 'identifiers.system', 300, true),
     code: text(value.code, 'identifiers.code', 500, true),
-    jurisdiction: text(value.jurisdiction, 'identifiers.jurisdiction', 2),
+    jurisdiction: parseMedicineCatalogCountry(value.jurisdiction),
     ...sourceObject(value),
   };
 }
@@ -237,7 +239,7 @@ function productForm(args: Record<string, unknown>) {
   setOptional(data, 'strengthText', args.strength, 300);
   setOptional(data, 'manufacturer', args.manufacturer, 300);
   setOptional(data, 'marketingAuthorizationHolder', args.authorization_holder, 300);
-  setOptional(data, 'marketCountry', args.market_country, 2);
+  data.set('marketCountry', parseMedicineCatalogCountry(args.market_country) || '');
   setOptional(data, 'packageDescription', args.package_description, 1_000);
   setOptional(data, 'imprint', args.imprint, 200);
   setOptional(data, 'color', args.color, 200);
@@ -276,6 +278,12 @@ function parseProduct(args: Record<string, unknown>) {
   }
 }
 
+function catalogReferenceError(error: InvalidMedicineCatalogReferenceError) {
+  return new ToolError(error.code === 'ingredient'
+    ? 'A medicine ingredient does not belong to this profile'
+    : `Unknown ${error.code}; use an existing child id or omit it for a new row`);
+}
+
 function sourceData(value: unknown) {
   if (value === undefined || value === null) return null;
   try {
@@ -289,30 +297,6 @@ function sourceData(value: unknown) {
   }
 }
 
-function mcpProvider(ctx: McpContext) {
-  return `mcp:${ctx.clientId}`.slice(0, 300);
-}
-
-async function stableCatalogId(
-  ctx: McpContext,
-  patientId: string,
-  kind: 'ingredient' | 'product',
-  key: string,
-) {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(
-        `health-tracker-mcp-catalog\0${ctx.userId}\0${ctx.clientId}\0${patientId}\0${kind}\0${key}`,
-      ),
-    ),
-  ).slice(0, 16);
-  digest[6] = (digest[6] & 0x0f) | 0x50;
-  digest[8] = (digest[8] & 0x3f) | 0x80;
-  const hex = [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 function serializeSource(value: MedicineCatalogSource) {
   return {
     source_kind: value.sourceKind,
@@ -322,43 +306,21 @@ function serializeSource(value: MedicineCatalogSource) {
   };
 }
 
-function serializeName(value: MedicineCatalogNameRecord) {
-  return {
-    name_id: value.id,
-    name: value.name,
-    language_tag: value.languageTag,
-    name_type: value.nameType,
-    jurisdiction: value.jurisdiction,
-    preferred: value.preferred,
-    ...serializeSource(value),
-  };
-}
-
-function serializeIdentifier(value: MedicineCatalogIdentifierRecord) {
-  return {
-    identifier_id: value.id,
-    system: value.system,
-    code: value.code,
-    jurisdiction: value.jurisdiction,
-    ...serializeSource(value),
-  };
-}
-
-function serializeIngredient(value: MedicineIngredientRecord) {
+function serializeIngredient(value: MedicineIngredientRecord & SourceSize) {
   return {
     ingredient_id: value.id,
     patient_id: value.patientId,
     canonical_name: value.canonicalName,
     status: value.status,
     notes: value.notes,
-    names: value.names.map(serializeName),
-    identifiers: value.identifiers.map(serializeIdentifier),
+    names: value.names.map(inputName),
+    identifiers: value.identifiers.map(inputIdentifier),
     origin: {
       kind: value.originKind,
       provider: value.originProvider,
       external_id: value.originExternalId,
     },
-    source_data: sourceDataSummary(value.sourceData),
+    source_data: sourceDataSummary(value),
     revision: value.revision,
     created_at: value.createdAt,
     updated_at: value.updatedAt,
@@ -367,21 +329,12 @@ function serializeIngredient(value: MedicineIngredientRecord) {
 
 function serializeComponent(value: MedicineProductIngredientRecord) {
   return {
-    component_id: value.id,
-    ingredient_id: value.ingredientId,
-    ingredient: serializeIngredient(value.ingredient),
-    role: value.role,
-    numerator_value: value.numeratorValue,
-    numerator_unit: value.numeratorUnit,
-    denominator_value: value.denominatorValue,
-    denominator_unit: value.denominatorUnit,
-    strength_text: value.strengthText,
-    basis_of_strength_text: value.basisOfStrengthText,
-    ...serializeSource(value),
+    ...inputComponent(value),
+    ingredient: { ingredient_id: value.ingredient.id, canonical_name: value.ingredient.canonicalName },
   };
 }
 
-function serializeProduct(value: MedicineProductRecord) {
+function serializeProduct(value: MedicineProductRecord & SourceSize) {
   return {
     product_id: value.id,
     patient_id: value.patientId,
@@ -389,44 +342,46 @@ function serializeProduct(value: MedicineProductRecord) {
     product_type: value.productType,
     status: value.status,
     dose_form: value.doseFormText,
-    dose_form_code: value.doseFormCode
-      ? { system: value.doseFormSystem, code: value.doseFormCode }
-      : null,
+    dose_form_system: value.doseFormSystem,
+    dose_form_code: value.doseFormCode,
     route: value.routeText,
-    route_code: value.routeCode ? { system: value.routeSystem, code: value.routeCode } : null,
+    route_system: value.routeSystem,
+    route_code: value.routeCode,
     strength: value.strengthText,
     manufacturer: value.manufacturer,
     authorization_holder: value.marketingAuthorizationHolder,
     market_country: value.marketCountry,
     package_description: value.packageDescription,
-    appearance: { imprint: value.imprint, color: value.color, shape: value.shape },
+    imprint: value.imprint,
+    color: value.color,
+    shape: value.shape,
     notes: value.notes,
-    names: value.names.map(serializeName),
-    identifiers: value.identifiers.map(serializeIdentifier),
+    names: value.names.map(inputName),
+    identifiers: value.identifiers.map(inputIdentifier),
     ingredients: value.ingredients.map(serializeComponent),
     origin: {
       kind: value.originKind,
       provider: value.originProvider,
       external_id: value.originExternalId,
     },
-    source_data: sourceDataSummary(value.sourceData),
+    source_data: sourceDataSummary(value),
     revision: value.revision,
     created_at: value.createdAt,
     updated_at: value.updatedAt,
   };
 }
 
-function sourceDataSummary(value: unknown) {
+function sourceDataSummary(record: { sourceData: unknown } & SourceSize) {
+  if (record.sourceDataBytes !== undefined) {
+    return { available: record.sourceDataBytes !== null, byte_size: record.sourceDataBytes ?? 0 };
+  }
+  const value = record.sourceData;
   if (value === null || value === undefined) return { available: false, byte_size: 0 };
   const serialized = JSON.stringify(value);
   return {
     available: true,
     byte_size: new TextEncoder().encode(serialized).byteLength,
   };
-}
-
-function inputSource(value: MedicineCatalogSource) {
-  return serializeSource(value);
 }
 
 function inputName(value: MedicineCatalogNameRecord) {
@@ -437,7 +392,7 @@ function inputName(value: MedicineCatalogNameRecord) {
     name_type: value.nameType,
     jurisdiction: value.jurisdiction,
     preferred: value.preferred,
-    ...inputSource(value),
+    ...serializeSource(value),
   };
 }
 
@@ -447,7 +402,7 @@ function inputIdentifier(value: MedicineCatalogIdentifierRecord) {
     system: value.system,
     code: value.code,
     jurisdiction: value.jurisdiction,
-    ...inputSource(value),
+    ...serializeSource(value),
   };
 }
 
@@ -462,7 +417,7 @@ function inputComponent(value: MedicineProductIngredientRecord) {
     denominator_unit: value.denominatorUnit,
     strength_text: value.strengthText,
     basis_of_strength_text: value.basisOfStrengthText,
-    ...inputSource(value),
+    ...serializeSource(value),
   };
 }
 
@@ -511,7 +466,7 @@ function mergedProductArgs(current: MedicineProductRecord, args: Record<string, 
 
 async function loadIngredientRecords(
   patientId: string,
-  roots: Array<typeof medicineIngredient.$inferSelect>,
+  roots: Array<typeof medicineIngredient.$inferSelect & SourceSize>,
 ) {
   if (roots.length === 0) return [];
   const ids = roots.map((root) => root.id);
@@ -533,12 +488,15 @@ async function loadIngredientRecords(
         inArray(medicineCatalogIdentifier.ingredientId, ids),
       ),
     );
-  return buildMedicineIngredientRecords(roots, names, identifiers);
+  return buildMedicineIngredientRecords(roots, names, identifiers).map((record, index) => ({
+    ...record,
+    sourceDataBytes: roots[index].sourceDataBytes,
+  }));
 }
 
 async function loadProductRecords(
   patientId: string,
-  roots: Array<typeof medicineProduct.$inferSelect>,
+  roots: Array<typeof medicineProduct.$inferSelect & SourceSize>,
 ) {
   if (roots.length === 0) return [];
   const ids = roots.map((root) => root.id);
@@ -561,28 +519,26 @@ async function loadProductRecords(
       ),
     );
   const components = await db
-    .select()
+    .select({
+      ...getTableColumns(medicineProductIngredient),
+      ingredient: readColumns(medicineIngredient),
+    })
     .from(medicineProductIngredient)
-    .where(
-      and(
-        eq(medicineProductIngredient.patientId, patientId),
-        inArray(medicineProductIngredient.productId, ids),
-      ),
-    );
-  const ingredientIds = [...new Set(components.map((component) => component.ingredientId))];
-  const ingredientRoots = ingredientIds.length
-    ? await db
-        .select()
-        .from(medicineIngredient)
-        .where(
-          and(
-            eq(medicineIngredient.patientId, patientId),
-            inArray(medicineIngredient.id, ingredientIds),
-          ),
-        )
-    : [];
-  const ingredients = await loadIngredientRecords(patientId, ingredientRoots);
-  return buildMedicineProductRecords(roots, names, identifiers, components, ingredients);
+    .innerJoin(medicineIngredient, and(
+      eq(medicineIngredient.id, medicineProductIngredient.ingredientId),
+      eq(medicineIngredient.patientId, medicineProductIngredient.patientId),
+    ))
+    .where(and(
+      eq(medicineProductIngredient.patientId, patientId),
+      inArray(medicineProductIngredient.productId, ids),
+    ));
+  const ingredients = buildMedicineIngredientRecords(
+    components.map((component) => component.ingredient), [], [],
+  );
+  return buildMedicineProductRecords(roots, names, identifiers, components, ingredients).map((record, index) => ({
+    ...record,
+    sourceDataBytes: roots[index].sourceDataBytes,
+  }));
 }
 
 function isPair(value: string, index: number) {
@@ -618,13 +574,15 @@ const listMedicineCatalog: ToolDefinition = {
   name: 'list_medicine_catalog',
   title: 'List medicine catalog entries',
   description:
-    'Packaged medicine products and their ingredients, localized names, identifiers, strengths, routes, appearance, provenance, and current revisions.',
+    'Scan a bounded page of medicine ingredients and products in ID order. Search matches normalized names within that page. Continue with next_ingredient_id and next_product_id, even when a page has no matches. Counts describe this page only.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       query: { type: 'string', maxLength: 200 },
       status: { type: 'string', enum: medicineCatalogStatuses },
+      after_ingredient_id: { type: ['string', 'null'], maxLength: 128, description: 'Omit for the first page; null skips this exhausted stream.' },
+      after_product_id: { type: ['string', 'null'], maxLength: 128, description: 'Omit for the first page; null skips this exhausted stream.' },
       limit: { type: 'integer', minimum: 1, maximum: MAX_CATALOG_PAGE },
     },
     required: ['patient_id'],
@@ -638,22 +596,30 @@ const listMedicineCatalog: ToolDefinition = {
     if (status && !medicineCatalogStatuses.includes(status as never)) {
       throw new ToolError('status is invalid');
     }
-    const limit = pageLimit(args.limit);
+    const limit = pageLimit(args.limit, 50, MAX_CATALOG_PAGE);
+    // These covering indexes bound candidates before substring/status filtering:
+    // medicine_ingredient_patient_cursor_idx and medicine_product_patient_cursor_idx.
+    const afterIngredient = text(args.after_ingredient_id, 'after_ingredient_id', 128);
+    const afterProduct = text(args.after_product_id, 'after_product_id', 128);
+    const ingredientPage = args.after_ingredient_id === null ? [] : await db.select({ id: medicineIngredient.id }).from(medicineIngredient)
+      .where(and(eq(medicineIngredient.patientId, profile.id),
+        afterIngredient ? gt(medicineIngredient.id, afterIngredient) : undefined))
+      .orderBy(medicineIngredient.id).limit(limit + 1);
+    const productPage = args.after_product_id === null ? [] : await db.select({ id: medicineProduct.id }).from(medicineProduct)
+      .where(and(eq(medicineProduct.patientId, profile.id),
+        afterProduct ? gt(medicineProduct.id, afterProduct) : undefined))
+      .orderBy(medicineProduct.id).limit(limit + 1);
+    const ingredientIds = ingredientPage.slice(0, limit).map((row) => row.id);
+    const productIds = productPage.slice(0, limit).map((row) => row.id);
     const ingredientConditions = [eq(medicineIngredient.patientId, profile.id)];
     const productConditions = [eq(medicineProduct.patientId, profile.id)];
+    ingredientConditions.push(ingredientIds.length ? inArray(medicineIngredient.id, ingredientIds) : sql`0`);
+    productConditions.push(productIds.length ? inArray(medicineProduct.id, productIds) : sql`0`);
     if (status) {
       ingredientConditions.push(eq(medicineIngredient.status, status));
       productConditions.push(eq(medicineProduct.status, status));
     }
     if (query && normalizedQuery) {
-      // SQLite's lower() folds ASCII only, so display names are folded here.
-      const displayNames = await db
-        .select({ id: medicineProduct.id, displayName: medicineProduct.displayName })
-        .from(medicineProduct)
-        .where(eq(medicineProduct.patientId, profile.id));
-      const matchedProductIds = displayNames
-        .filter((row) => normalizedMedicineCatalogName(row.displayName).includes(normalizedQuery))
-        .map((row) => row.id);
       ingredientConditions.push(
         or(
           sql`instr(${medicineIngredient.normalizedName}, ${normalizedQuery}) > 0`,
@@ -662,7 +628,7 @@ const listMedicineCatalog: ToolDefinition = {
       );
       productConditions.push(
         or(
-          matchedProductIds.length ? inArray(medicineProduct.id, matchedProductIds) : sql`0`,
+          sql`instr(${medicineProduct.normalizedName}, ${normalizedQuery}) > 0`,
           sql`exists (select 1 from medicine_catalog_name where medicine_catalog_name.patient_id = ${profile.id} and medicine_catalog_name.product_id = ${medicineProduct.id} and instr(medicine_catalog_name.normalized_name, ${normalizedQuery}) > 0)`,
         ) as typeof productConditions[number],
       );
@@ -671,37 +637,36 @@ const listMedicineCatalog: ToolDefinition = {
     const ingredientWhere = and(...ingredientConditions);
     const productWhere = and(...productConditions);
     const ingredientRoots = await db
-      .select()
+      .select(readColumns(medicineIngredient))
       .from(medicineIngredient)
       .where(ingredientWhere)
-      .orderBy(desc(medicineIngredient.updatedAt))
-      .limit(limit);
+      .orderBy(medicineIngredient.id);
     const productRoots = await db
-      .select()
+      .select(readColumns(medicineProduct))
       .from(medicineProduct)
       .where(productWhere)
-      .orderBy(desc(medicineProduct.updatedAt))
-      .limit(limit);
-    const ingredientTotal = await db
-      .select({ value: count() })
-      .from(medicineIngredient)
-      .where(ingredientWhere);
-    const productTotal = await db
-      .select({ value: count() })
-      .from(medicineProduct)
-      .where(productWhere);
+      .orderBy(medicineProduct.id);
     const ingredients = await loadIngredientRecords(profile.id, ingredientRoots);
     const products = await loadProductRecords(profile.id, productRoots);
-    return capResult({
+    const result = capResult({
       patient_id: profile.id,
-      ingredient_total: ingredientTotal[0]?.value ?? 0,
-      product_total: productTotal[0]?.value ?? 0,
+      ingredient_count: ingredientRoots.length,
+      product_count: productRoots.length,
+      next_ingredient_id: longestCursor(ingredientIds) as string | null,
+      next_product_id: longestCursor(productIds) as string | null,
       ingredients: ingredients.map(serializeIngredient),
       products: products.map(serializeProduct),
       truncated:
-        Number(ingredientTotal[0]?.value ?? 0) > ingredients.length ||
-        Number(productTotal[0]?.value ?? 0) > products.length,
+        ingredientPage.length > limit || productPage.length > limit,
     });
+    // A budget-trimmed page must resume after the last returned match.
+    result.next_ingredient_id = result.ingredients.length < ingredients.length
+      ? result.ingredients.at(-1)?.ingredient_id ?? null
+      : ingredientPage.length > limit ? ingredientIds.at(-1) ?? null : null;
+    result.next_product_id = result.products.length < products.length
+      ? result.products.at(-1)?.product_id ?? null
+      : productPage.length > limit ? productIds.at(-1) ?? null : null;
+    return result;
   },
 };
 
@@ -709,13 +674,14 @@ const getMedicineCatalogHistory: ToolDefinition = {
   name: 'get_medicine_catalog_history',
   title: 'Get medicine catalog history',
   description:
-    'Saved versions of one medicine ingredient or product, newest first. Each version includes its complete snapshot and change source.',
+    'Saved versions of one medicine ingredient or product, newest first. Each version includes its snapshot and change source, with source payloads available separately. Continue with next_before_revision.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       entity_kind: { type: 'string', enum: ['ingredient', 'product'] },
       entity_id: { type: 'string' },
+      before_revision: { type: 'integer', minimum: 1 },
       limit: { type: 'integer', minimum: 1, maximum: MAX_CATALOG_PAGE },
     },
     required: ['patient_id', 'entity_kind', 'entity_id'],
@@ -728,28 +694,39 @@ const getMedicineCatalogHistory: ToolDefinition = {
       throw new ToolError('entity_kind must be ingredient or product');
     }
     const id = text(args.entity_id, 'entity_id', 128, true) || '';
-    const current = kind === 'ingredient'
-      ? await getMedicineIngredientRecord(profile.id, id)
-      : await getMedicineProductRecord(profile.id, id);
+    const table = kind === 'ingredient' ? medicineIngredient : medicineProduct;
+    const currentRows = await db.select({ revision: table.revision }).from(table)
+      .where(and(eq(table.patientId, profile.id), eq(table.id, id))).limit(1);
+    const current = currentRows[0];
     if (!current) throw new ToolError('No such medicine catalog entry');
-    const limit = pageLimit(args.limit);
+    const limit = pageLimit(args.limit, 50, MAX_CATALOG_PAGE);
+    const before = args.before_revision === undefined ? null : positiveInteger(args.before_revision, 'before_revision');
+    // medicine_catalog_revision_entity_idx serves the entity/revision range and ordering.
     const where = and(
       eq(medicineCatalogRevision.patientId, profile.id),
       eq(medicineCatalogRevision.entityKind, kind),
       eq(medicineCatalogRevision.entityId, id),
+      before === null ? undefined : lt(medicineCatalogRevision.revision, before),
     );
     const rows = await db
-      .select()
+      .select({
+        ...getTableColumns(medicineCatalogRevision),
+        // Keep large source payloads inside SQLite, including ingredient snapshots.
+        snapshot: sql<string>`json_set(json_remove(${medicineCatalogRevision.snapshot}, '$.sourceData'),
+          '$.ingredients', json(coalesce((select json_group_array(json_set(value, '$.ingredient',
+            json_object('id', json_extract(value, '$.ingredient.id'),
+              'canonicalName', json_extract(value, '$.ingredient.canonicalName'))))
+            from json_each(${medicineCatalogRevision.snapshot}, '$.ingredients')), '[]')))`,
+        sourceDataBytes: sql<number | null>`case
+          when json_type(${medicineCatalogRevision.snapshot}, '$.sourceData') in ('null') then null
+          else length(cast(${medicineCatalogRevision.snapshot} -> '$.sourceData' as blob)) end`,
+      })
       .from(medicineCatalogRevision)
       .where(where)
       .orderBy(desc(medicineCatalogRevision.revision))
-      .limit(limit);
-    const totals = await db
-      .select({ value: count() })
-      .from(medicineCatalogRevision)
-      .where(where);
-    const revisions = rows.flatMap((row) => {
-      const revision = toMedicineCatalogRevision(row);
+      .limit(limit + 1);
+    const revisions = rows.slice(0, limit).flatMap((row) => {
+      const revision = toMedicineCatalogRevision({ ...row, snapshot: JSON.parse(row.snapshot) });
       if (!revision) return [];
       return [{
         revision: revision.revision,
@@ -759,21 +736,24 @@ const getMedicineCatalogHistory: ToolDefinition = {
           provider: revision.changeOriginProvider,
         },
         snapshot: revision.entityKind === 'ingredient'
-          ? serializeIngredient(revision.snapshot as MedicineIngredientRecord)
-          : serializeProduct(revision.snapshot as MedicineProductRecord),
+          ? serializeIngredient({ ...revision.snapshot as MedicineIngredientRecord, sourceDataBytes: row.sourceDataBytes })
+          : serializeProduct({ ...revision.snapshot as MedicineProductRecord, sourceDataBytes: row.sourceDataBytes }),
       }];
     });
-    return capResult({
+    const result = capResult({
       patient_id: profile.id,
       entity_kind: kind,
       entity_id: id,
-      current: kind === 'ingredient'
-        ? serializeIngredient(current as MedicineIngredientRecord)
-        : serializeProduct(current as MedicineProductRecord),
-      total: totals[0]?.value ?? 0,
+      current_revision: current.revision,
       revisions,
-      truncated: Number(totals[0]?.value ?? 0) > revisions.length,
+      // Reserve the longest possible cursor before enforcing the byte budget.
+      next_before_revision: Number.MAX_SAFE_INTEGER as number | null,
+      truncated: rows.length > revisions.length,
     });
+    result.next_before_revision = rows.length > result.revisions.length
+      ? result.revisions.at(-1)?.revision ?? null
+      : null;
+    return result;
   },
 };
 
@@ -811,9 +791,10 @@ const readMedicineCatalogSource: ToolDefinition = {
       throw new ToolError('entity_kind must be ingredient or product');
     }
     const id = text(args.entity_id, 'entity_id', 128, true) || '';
-    const current = kind === 'ingredient'
-      ? await getMedicineIngredientRecord(profile.id, id)
-      : await getMedicineProductRecord(profile.id, id);
+    const table = kind === 'ingredient' ? medicineIngredient : medicineProduct;
+    const currentRows = await db.select({ sourceData: table.sourceData, revision: table.revision })
+      .from(table).where(and(eq(table.patientId, profile.id), eq(table.id, id))).limit(1);
+    const current = currentRows[0];
     if (!current) throw new ToolError('No such medicine catalog entry');
     const requestedRevision = args.revision === undefined
       ? null
@@ -821,7 +802,10 @@ const readMedicineCatalogSource: ToolDefinition = {
     let selected = current;
     if (requestedRevision !== null) {
       const rows = await db
-        .select()
+        .select({
+          sourceData: sql<string>`${medicineCatalogRevision.snapshot} -> '$.sourceData'`,
+          revision: medicineCatalogRevision.revision,
+        })
         .from(medicineCatalogRevision)
         .where(
           and(
@@ -832,9 +816,9 @@ const readMedicineCatalogSource: ToolDefinition = {
           ),
         )
         .limit(1);
-      const saved = rows[0] ? toMedicineCatalogRevision(rows[0]) : null;
+      const saved = rows[0];
       if (!saved) throw new ToolError('No such medicine catalog revision');
-      selected = saved.snapshot as typeof current;
+      selected = { sourceData: JSON.parse(saved.sourceData ?? 'null'), revision: saved.revision };
     }
     const offset = args.offset === undefined ? 0 : Number(args.offset);
     const limit = args.limit === undefined ? 8_000 : Number(args.limit);
@@ -852,7 +836,7 @@ const readMedicineCatalogSource: ToolDefinition = {
     const digest = new Uint8Array(
       await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized)),
     );
-    return {
+    const result = {
       patient_id: profile.id,
       entity_kind: kind,
       entity_id: id,
@@ -866,6 +850,25 @@ const readMedicineCatalogSource: ToolDefinition = {
       next_offset: nextOffset < totalCharacters ? nextOffset : null,
       complete: nextOffset >= totalCharacters,
     };
+    // The JSON envelope escapes quotes and controls; count its UTF-8 bytes too.
+    let low = 0;
+    let high = chunkLength;
+    while (low < high) {
+      const length = Math.ceil((low + high) / 2);
+      const candidate = sliceCodePoints(chunk, 0, length).chunk;
+      const candidateNext = offset + length < totalCharacters ? offset + length : null;
+      if (new TextEncoder().encode(JSON.stringify({
+        ...result, chunk: candidate, next_offset: candidateNext, complete: candidateNext === null,
+      })).byteLength <= MAX_RESULT_BYTES) {
+        low = length;
+      } else {
+        high = length - 1;
+      }
+    }
+    result.chunk = sliceCodePoints(chunk, 0, low).chunk;
+    result.next_offset = offset + low < totalCharacters ? offset + low : null;
+    result.complete = result.next_offset === null;
+    return result;
   },
 };
 
@@ -929,30 +932,25 @@ const createMedicineIngredientTool: ToolDefinition = {
     const profile = await requirePatient(ctx, args.patient_id);
     const key = requestId(args.request_id);
     const provider = mcpProvider(ctx);
-    const id = await stableCatalogId(ctx, profile.id, 'ingredient', key);
-    const existing = await getMedicineIngredientRecord(profile.id, id);
-    if (existing) {
-      if (
-        existing.originKind !== 'mcp' ||
-        existing.originProvider !== provider ||
-        existing.originExternalId !== key
-      ) {
-        throw new ToolError('Ingredient identifier collision');
-      }
-      return { created: false, ingredient: serializeIngredient(existing) };
+    const id = await stableClaimId(ctx, profile.id, 'ingredient', key);
+    try {
+      const { ingredient, created } = await createMedicineIngredient({
+        id,
+        patientId: profile.id,
+        input: parseIngredient(args),
+        origin: {
+          kind: 'mcp',
+          provider,
+          externalId: key,
+          sourceData: sourceData(args.source_data),
+        },
+      });
+      return capResult({ created, ingredient: serializeIngredient(ingredient) });
+    } catch (error) {
+      if (error instanceof MedicineCatalogIdentifierCollisionError) throw new ToolError(error.message);
+      if (error instanceof InvalidMedicineCatalogReferenceError) throw catalogReferenceError(error);
+      throw error;
     }
-    const ingredient = await createMedicineIngredient({
-      id,
-      patientId: profile.id,
-      input: parseIngredient(args),
-      origin: {
-        kind: 'mcp',
-        provider,
-        externalId: key,
-        sourceData: sourceData(args.source_data),
-      },
-    });
-    return { created: true, ingredient: serializeIngredient(ingredient) };
   },
 };
 
@@ -993,8 +991,9 @@ const updateMedicineIngredientTool: ToolDefinition = {
         ...(owns(args, 'source_data') ? { sourceData: sourceData(args.source_data) } : {}),
         changedAt: new Date(ctx.now).toISOString(),
       });
-      return { updated: true, ingredient: serializeIngredient(ingredient) };
+      return capResult({ updated: true, ingredient: serializeIngredient(ingredient) });
     } catch (error) {
+      if (error instanceof InvalidMedicineCatalogReferenceError) throw catalogReferenceError(error);
       if (error instanceof StaleClaimRevisionError) {
         const latest = await getMedicineIngredientRecord(profile.id, id);
         throw new ToolError(`Revision conflict; current_revision is ${latest?.revision ?? 'unknown'}`);
@@ -1026,20 +1025,9 @@ const createMedicineProductTool: ToolDefinition = {
     const profile = await requirePatient(ctx, args.patient_id);
     const key = requestId(args.request_id);
     const provider = mcpProvider(ctx);
-    const id = await stableCatalogId(ctx, profile.id, 'product', key);
-    const existing = await getMedicineProductRecord(profile.id, id);
-    if (existing) {
-      if (
-        existing.originKind !== 'mcp' ||
-        existing.originProvider !== provider ||
-        existing.originExternalId !== key
-      ) {
-        throw new ToolError('Product identifier collision');
-      }
-      return { created: false, product: serializeProduct(existing) };
-    }
+    const id = await stableClaimId(ctx, profile.id, 'product', key);
     try {
-      const product = await createMedicineProduct({
+      const { product, created } = await createMedicineProduct({
         id,
         patientId: profile.id,
         input: parseProduct(args),
@@ -1050,11 +1038,10 @@ const createMedicineProductTool: ToolDefinition = {
           sourceData: sourceData(args.source_data),
         },
       });
-      return { created: true, product: serializeProduct(product) };
+      return capResult({ created, product: serializeProduct(product) });
     } catch (error) {
-      if (error instanceof InvalidMedicineCatalogReferenceError) {
-        throw new ToolError('A medicine ingredient does not belong to this profile');
-      }
+      if (error instanceof MedicineCatalogIdentifierCollisionError) throw new ToolError(error.message);
+      if (error instanceof InvalidMedicineCatalogReferenceError) throw catalogReferenceError(error);
       throw error;
     }
   },
@@ -1097,11 +1084,10 @@ const updateMedicineProductTool: ToolDefinition = {
         ...(owns(args, 'source_data') ? { sourceData: sourceData(args.source_data) } : {}),
         changedAt: new Date(ctx.now).toISOString(),
       });
-      return { updated: true, product: serializeProduct(product) };
+      return capResult({ updated: true, product: serializeProduct(product) });
     } catch (error) {
-      if (error instanceof InvalidMedicineCatalogReferenceError) {
-        throw new ToolError('A medicine ingredient does not belong to this profile');
-      }
+      if (error instanceof MedicineCatalogIdentifierCollisionError) throw new ToolError(error.message);
+      if (error instanceof InvalidMedicineCatalogReferenceError) throw catalogReferenceError(error);
       if (error instanceof StaleClaimRevisionError) {
         const latest = await getMedicineProductRecord(profile.id, id);
         throw new ToolError(`Revision conflict; current_revision is ${latest?.revision ?? 'unknown'}`);

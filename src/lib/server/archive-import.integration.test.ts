@@ -75,6 +75,7 @@ beforeAll(async () => {
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
       display_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
       product_type TEXT NOT NULL DEFAULT 'other',
       status TEXT NOT NULL DEFAULT 'active',
       dose_form_text TEXT,

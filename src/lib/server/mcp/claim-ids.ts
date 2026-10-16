@@ -3,6 +3,8 @@ import type { McpContext } from './context';
 export const REQUEST_ID_LIMIT = 128;
 
 export type StableClaimKind =
+  | 'ingredient'
+  | 'product'
   | 'medicine'
   | 'medicine:course'
   | 'medicine:regimen'
