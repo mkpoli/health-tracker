@@ -1,6 +1,5 @@
 import { isMedicineStatus, medicineFieldLimits as fieldLimits, type MedicineStatus } from '$lib/medicine';
 
-
 export type MedicineInput = {
   productId: string | null;
   name: string;
