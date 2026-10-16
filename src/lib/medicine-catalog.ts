@@ -157,13 +157,11 @@ export function normalizedMedicineCatalogName(value: string) {
   return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('und');
 }
 
-function localeCandidates(locale: string) {
+function canonicalLocale(locale: string) {
   try {
-    const canonical = Intl.getCanonicalLocales(locale)[0] || 'und';
-    const base = canonical.split('-')[0];
-    return base === canonical ? [canonical, 'und'] : [canonical, base, 'und'];
+    return Intl.getCanonicalLocales(locale)[0] || 'und';
   } catch {
-    return ['und'];
+    return 'und';
   }
 }
 
@@ -172,12 +170,20 @@ export function localizedMedicineCatalogName(
   locale: string,
   fallback: string,
 ) {
-  const candidates = localeCandidates(locale);
-  for (const languageTag of candidates) {
-    const match = names.find((name) => name.preferred && name.languageTag === languageTag)
-      ?? names.find((name) => name.languageTag === languageTag);
-    if (match) return match.name;
-  }
+  const languageTag = canonicalLocale(locale);
+  const base = languageTag.split('-')[0];
+  const exact = names.find((name) => name.preferred && name.languageTag === languageTag)
+    ?? names.find((name) => name.languageTag === languageTag);
+  if (exact) return exact.name;
+  const sameLanguage = names.find(
+    (name) => name.preferred && name.languageTag !== 'und' && name.languageTag.split('-')[0] === base,
+  ) ?? names.find(
+    (name) => name.languageTag !== 'und' && name.languageTag.split('-')[0] === base,
+  );
+  if (sameLanguage) return sameLanguage.name;
+  const undetermined = names.find((name) => name.preferred && name.languageTag === 'und')
+    ?? names.find((name) => name.languageTag === 'und');
+  if (undetermined) return undetermined.name;
   return names.find((name) => name.preferred)?.name ?? names[0]?.name ?? fallback;
 }
 

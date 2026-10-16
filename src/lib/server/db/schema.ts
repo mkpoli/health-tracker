@@ -320,7 +320,7 @@ export const medicineClaim = sqliteTable(
 		patientId: text('patient_id')
 			.notNull()
 			.references(() => patient.id, { onDelete: 'cascade' }),
-		productId: text('product_id').references(() => medicineProduct.id, { onDelete: 'set null' }),
+		productId: text('product_id'),
 		name: text('name').notNull(),
 		genericName: text('generic_name'),
 		form: text('form'),
@@ -345,6 +345,11 @@ export const medicineClaim = sqliteTable(
 			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
 	},
 	(table) => [
+		foreignKey({
+			name: 'medicine_claim_product_patient_fk',
+			columns: [table.productId, table.patientId],
+			foreignColumns: [medicineProduct.id, medicineProduct.patientId]
+		}),
 		index('medicine_claim_patient_idx').on(table.patientId),
 		index('medicine_claim_product_idx').on(table.productId),
 		index('medicine_claim_patient_status_idx').on(table.patientId, table.status),

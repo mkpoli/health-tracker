@@ -7,9 +7,11 @@ import type {
 } from '$lib/medicine-catalog';
 import { db } from '$lib/server/db';
 import {
+  claimRevision,
   medicineCatalogIdentifier,
   medicineCatalogName,
   medicineCatalogRevision,
+  medicineClaim,
   medicineIngredient,
   medicineProduct,
   medicineProductIngredient,
@@ -26,7 +28,12 @@ import {
   buildMedicineProductRecords,
 } from '$lib/server/medicine-catalog-records';
 import { normalizedMedicineCatalogName } from '$lib/medicine-catalog';
-import { StaleClaimRevisionError, type ClaimRevisionSource } from '$lib/server/claim-revisions';
+import {
+  claimRevisionValues,
+  StaleClaimRevisionError,
+  type ClaimRevisionSource,
+} from '$lib/server/claim-revisions';
+import { normalizeMedicineClaim } from '$lib/server/claim-mutations';
 
 export interface MedicineCatalogOrigin extends ClaimRevisionSource {
   externalId?: string | null;
@@ -37,6 +44,13 @@ export class InvalidMedicineCatalogReferenceError extends Error {
   constructor(public readonly code: 'ingredient') {
     super(code);
     this.name = 'InvalidMedicineCatalogReferenceError';
+  }
+}
+
+export class MedicineCatalogIngredientInUseError extends Error {
+  constructor() {
+    super('ingredient_in_use');
+    this.name = 'MedicineCatalogIngredientInUseError';
   }
 }
 
@@ -152,59 +166,55 @@ async function ingredientSnapshot(
   tx: Transaction,
   root: typeof medicineIngredient.$inferSelect,
 ) {
-  const [names, identifiers] = await Promise.all([
-    tx
-      .select()
-      .from(medicineCatalogName)
-      .where(
-        and(
-          eq(medicineCatalogName.patientId, root.patientId),
-          eq(medicineCatalogName.ingredientId, root.id),
-        ),
+  const names = await tx
+    .select()
+    .from(medicineCatalogName)
+    .where(
+      and(
+        eq(medicineCatalogName.patientId, root.patientId),
+        eq(medicineCatalogName.ingredientId, root.id),
       ),
-    tx
-      .select()
-      .from(medicineCatalogIdentifier)
-      .where(
-        and(
-          eq(medicineCatalogIdentifier.patientId, root.patientId),
-          eq(medicineCatalogIdentifier.ingredientId, root.id),
-        ),
+    );
+  const identifiers = await tx
+    .select()
+    .from(medicineCatalogIdentifier)
+    .where(
+      and(
+        eq(medicineCatalogIdentifier.patientId, root.patientId),
+        eq(medicineCatalogIdentifier.ingredientId, root.id),
       ),
-  ]);
+    );
   return buildMedicineIngredientRecords([root], names, identifiers)[0];
 }
 
 async function productSnapshot(tx: Transaction, root: typeof medicineProduct.$inferSelect) {
-  const [names, identifiers, components] = await Promise.all([
-    tx
-      .select()
-      .from(medicineCatalogName)
-      .where(
-        and(
-          eq(medicineCatalogName.patientId, root.patientId),
-          eq(medicineCatalogName.productId, root.id),
-        ),
+  const names = await tx
+    .select()
+    .from(medicineCatalogName)
+    .where(
+      and(
+        eq(medicineCatalogName.patientId, root.patientId),
+        eq(medicineCatalogName.productId, root.id),
       ),
-    tx
-      .select()
-      .from(medicineCatalogIdentifier)
-      .where(
-        and(
-          eq(medicineCatalogIdentifier.patientId, root.patientId),
-          eq(medicineCatalogIdentifier.productId, root.id),
-        ),
+    );
+  const identifiers = await tx
+    .select()
+    .from(medicineCatalogIdentifier)
+    .where(
+      and(
+        eq(medicineCatalogIdentifier.patientId, root.patientId),
+        eq(medicineCatalogIdentifier.productId, root.id),
       ),
-    tx
-      .select()
-      .from(medicineProductIngredient)
-      .where(
-        and(
-          eq(medicineProductIngredient.patientId, root.patientId),
-          eq(medicineProductIngredient.productId, root.id),
-        ),
+    );
+  const components = await tx
+    .select()
+    .from(medicineProductIngredient)
+    .where(
+      and(
+        eq(medicineProductIngredient.patientId, root.patientId),
+        eq(medicineProductIngredient.productId, root.id),
       ),
-  ]);
+    );
   const ingredientIds = [...new Set(components.map((value) => value.ingredientId))];
   const ingredientRoots = ingredientIds.length
     ? await tx
@@ -217,28 +227,28 @@ async function productSnapshot(tx: Transaction, root: typeof medicineProduct.$in
           ),
         )
     : [];
-  const [ingredientNames, ingredientIdentifiers] = ingredientIds.length
-    ? await Promise.all([
-        tx
-          .select()
-          .from(medicineCatalogName)
-          .where(
-            and(
-              eq(medicineCatalogName.patientId, root.patientId),
-              inArray(medicineCatalogName.ingredientId, ingredientIds),
-            ),
+  const ingredientNames = ingredientIds.length
+    ? await tx
+        .select()
+        .from(medicineCatalogName)
+        .where(
+          and(
+            eq(medicineCatalogName.patientId, root.patientId),
+            inArray(medicineCatalogName.ingredientId, ingredientIds),
           ),
-        tx
-          .select()
-          .from(medicineCatalogIdentifier)
-          .where(
-            and(
-              eq(medicineCatalogIdentifier.patientId, root.patientId),
-              inArray(medicineCatalogIdentifier.ingredientId, ingredientIds),
-            ),
+        )
+    : [];
+  const ingredientIdentifiers = ingredientIds.length
+    ? await tx
+        .select()
+        .from(medicineCatalogIdentifier)
+        .where(
+          and(
+            eq(medicineCatalogIdentifier.patientId, root.patientId),
+            inArray(medicineCatalogIdentifier.ingredientId, ingredientIds),
           ),
-      ])
-    : [[], []];
+        )
+    : [];
   const ingredients = buildMedicineIngredientRecords(
     ingredientRoots,
     ingredientNames,
@@ -346,6 +356,7 @@ export async function updateMedicineIngredient(options: {
   input: MedicineIngredientInput;
   expectedRevision: number;
   source: ClaimRevisionSource;
+  sourceData?: unknown;
   changedAt?: string;
 }) {
   if (options.current.revision !== options.expectedRevision) throw new StaleClaimRevisionError();
@@ -358,6 +369,7 @@ export async function updateMedicineIngredient(options: {
       .update(medicineIngredient)
       .set({
         ...ingredientRootValues(options.input),
+        ...(options.sourceData === undefined ? {} : { sourceData: options.sourceData }),
         revision: options.expectedRevision + 1,
         updatedAt: options.changedAt ?? new Date().toISOString(),
       })
@@ -370,24 +382,22 @@ export async function updateMedicineIngredient(options: {
       )
       .returning();
     if (!rows[0]) throw new StaleClaimRevisionError();
-    await Promise.all([
-      tx
-        .delete(medicineCatalogName)
-        .where(
-          and(
-            eq(medicineCatalogName.patientId, options.current.patientId),
-            eq(medicineCatalogName.ingredientId, options.current.id),
-          ),
+    await tx
+      .delete(medicineCatalogName)
+      .where(
+        and(
+          eq(medicineCatalogName.patientId, options.current.patientId),
+          eq(medicineCatalogName.ingredientId, options.current.id),
         ),
-      tx
-        .delete(medicineCatalogIdentifier)
-        .where(
-          and(
-            eq(medicineCatalogIdentifier.patientId, options.current.patientId),
-            eq(medicineCatalogIdentifier.ingredientId, options.current.id),
-          ),
+      );
+    await tx
+      .delete(medicineCatalogIdentifier)
+      .where(
+        and(
+          eq(medicineCatalogIdentifier.patientId, options.current.patientId),
+          eq(medicineCatalogIdentifier.ingredientId, options.current.id),
         ),
-    ]);
+      );
     const names = nameValues({
       patientId: options.current.patientId,
       ingredientId: options.current.id,
@@ -462,6 +472,7 @@ export async function updateMedicineProduct(options: {
   input: MedicineProductInput;
   expectedRevision: number;
   source: ClaimRevisionSource;
+  sourceData?: unknown;
   changedAt?: string;
 }) {
   if (options.current.revision !== options.expectedRevision) throw new StaleClaimRevisionError();
@@ -475,6 +486,7 @@ export async function updateMedicineProduct(options: {
       .update(medicineProduct)
       .set({
         ...productRootValues(options.input),
+        ...(options.sourceData === undefined ? {} : { sourceData: options.sourceData }),
         revision: options.expectedRevision + 1,
         updatedAt: options.changedAt ?? new Date().toISOString(),
       })
@@ -487,32 +499,30 @@ export async function updateMedicineProduct(options: {
       )
       .returning();
     if (!rows[0]) throw new StaleClaimRevisionError();
-    await Promise.all([
-      tx
-        .delete(medicineCatalogName)
-        .where(
-          and(
-            eq(medicineCatalogName.patientId, options.current.patientId),
-            eq(medicineCatalogName.productId, options.current.id),
-          ),
+    await tx
+      .delete(medicineCatalogName)
+      .where(
+        and(
+          eq(medicineCatalogName.patientId, options.current.patientId),
+          eq(medicineCatalogName.productId, options.current.id),
         ),
-      tx
-        .delete(medicineCatalogIdentifier)
-        .where(
-          and(
-            eq(medicineCatalogIdentifier.patientId, options.current.patientId),
-            eq(medicineCatalogIdentifier.productId, options.current.id),
-          ),
+      );
+    await tx
+      .delete(medicineCatalogIdentifier)
+      .where(
+        and(
+          eq(medicineCatalogIdentifier.patientId, options.current.patientId),
+          eq(medicineCatalogIdentifier.productId, options.current.id),
         ),
-      tx
-        .delete(medicineProductIngredient)
-        .where(
-          and(
-            eq(medicineProductIngredient.patientId, options.current.patientId),
-            eq(medicineProductIngredient.productId, options.current.id),
-          ),
+      );
+    await tx
+      .delete(medicineProductIngredient)
+      .where(
+        and(
+          eq(medicineProductIngredient.patientId, options.current.patientId),
+          eq(medicineProductIngredient.productId, options.current.id),
         ),
-    ]);
+      );
     const names = nameValues({
       patientId: options.current.patientId,
       productId: options.current.id,
@@ -539,5 +549,135 @@ export async function updateMedicineProduct(options: {
       .insert(medicineCatalogRevision)
       .values(revisionValues('product', snapshot, options.source));
     return snapshot;
+  });
+}
+
+export async function deleteMedicineIngredient(options: {
+  patientId: string;
+  id: string;
+  expectedRevision: number;
+}) {
+  return db.transaction(async (tx) => {
+    const roots = await tx
+      .select({ revision: medicineIngredient.revision })
+      .from(medicineIngredient)
+      .where(
+        and(
+          eq(medicineIngredient.id, options.id),
+          eq(medicineIngredient.patientId, options.patientId),
+        ),
+      )
+      .limit(1);
+    if (roots[0]?.revision !== options.expectedRevision) throw new StaleClaimRevisionError();
+
+    const used = await tx
+      .select({ id: medicineProductIngredient.id })
+      .from(medicineProductIngredient)
+      .where(
+        and(
+          eq(medicineProductIngredient.patientId, options.patientId),
+          eq(medicineProductIngredient.ingredientId, options.id),
+        ),
+      )
+      .limit(1);
+    if (used[0]) throw new MedicineCatalogIngredientInUseError();
+
+    await tx
+      .delete(medicineCatalogRevision)
+      .where(
+        and(
+          eq(medicineCatalogRevision.patientId, options.patientId),
+          eq(medicineCatalogRevision.entityKind, 'ingredient'),
+          eq(medicineCatalogRevision.entityId, options.id),
+        ),
+      );
+    const deleted = await tx
+      .delete(medicineIngredient)
+      .where(
+        and(
+          eq(medicineIngredient.id, options.id),
+          eq(medicineIngredient.patientId, options.patientId),
+          eq(medicineIngredient.revision, options.expectedRevision),
+        ),
+      )
+      .returning({ id: medicineIngredient.id });
+    if (!deleted[0]) throw new StaleClaimRevisionError();
+  });
+}
+
+export async function deleteMedicineProduct(options: {
+  patientId: string;
+  id: string;
+  expectedRevision: number;
+  source: ClaimRevisionSource;
+  changedAt?: string;
+}) {
+  return db.transaction(async (tx) => {
+    const roots = await tx
+      .select({ revision: medicineProduct.revision })
+      .from(medicineProduct)
+      .where(
+        and(eq(medicineProduct.id, options.id), eq(medicineProduct.patientId, options.patientId)),
+      )
+      .limit(1);
+    if (roots[0]?.revision !== options.expectedRevision) throw new StaleClaimRevisionError();
+
+    const linkedClaims = await tx
+      .select()
+      .from(medicineClaim)
+      .where(
+        and(eq(medicineClaim.patientId, options.patientId), eq(medicineClaim.productId, options.id)),
+      );
+    const changedAt = options.changedAt ?? new Date().toISOString();
+    for (const linkedClaim of linkedClaims) {
+      const previous = normalizeMedicineClaim(linkedClaim);
+      await tx
+        .insert(claimRevision)
+        .values(claimRevisionValues('medicine', previous, options.source))
+        .onConflictDoNothing();
+      const updated = await tx
+        .update(medicineClaim)
+        .set({
+          productId: null,
+          revision: linkedClaim.revision + 1,
+          updatedAt: changedAt,
+        })
+        .where(
+          and(
+            eq(medicineClaim.id, linkedClaim.id),
+            eq(medicineClaim.patientId, options.patientId),
+            eq(medicineClaim.revision, linkedClaim.revision),
+          ),
+        )
+        .returning();
+      if (!updated[0]) throw new StaleClaimRevisionError();
+      await tx
+        .insert(claimRevision)
+        .values(
+          claimRevisionValues('medicine', normalizeMedicineClaim(updated[0]), options.source),
+        );
+    }
+
+    await tx
+      .delete(medicineCatalogRevision)
+      .where(
+        and(
+          eq(medicineCatalogRevision.patientId, options.patientId),
+          eq(medicineCatalogRevision.entityKind, 'product'),
+          eq(medicineCatalogRevision.entityId, options.id),
+        ),
+      );
+    const deleted = await tx
+      .delete(medicineProduct)
+      .where(
+        and(
+          eq(medicineProduct.id, options.id),
+          eq(medicineProduct.patientId, options.patientId),
+          eq(medicineProduct.revision, options.expectedRevision),
+        ),
+      )
+      .returning({ id: medicineProduct.id });
+    if (!deleted[0]) throw new StaleClaimRevisionError();
+    return { detachedClaimIds: linkedClaims.map((claim) => claim.id) };
   });
 }

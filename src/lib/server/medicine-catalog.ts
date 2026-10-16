@@ -232,7 +232,8 @@ function parseIdentifier(value: unknown): MedicineCatalogIdentifierInput {
 function decimal(value: unknown) {
   const raw = textValue(value, limits.strengthValue);
   if (!raw) return null;
-  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw) || Number(raw) <= 0) {
+  const number = Number(raw);
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw) || !Number.isFinite(number) || number <= 0) {
     throw new InvalidMedicineCatalogInputError('invalid_strength');
   }
   return raw;
