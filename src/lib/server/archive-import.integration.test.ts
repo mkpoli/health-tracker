@@ -719,6 +719,33 @@ describe('archive import storage', () => {
     }
   });
 
+  it('does not restore catalogue children removed after an earlier restore', async () => {
+    await client.execute(
+      `INSERT INTO patient (id, owner_user_id, name) VALUES ('repeat-destination', 'owner-1', 'Repeat import')`,
+    );
+    try {
+      const batch = {
+        patientId: 'repeat-destination',
+        sourcePatientId: 'repeat-source',
+        kind: 'medicineIngredients' as const,
+        items: [medicineIngredientCurrent],
+      };
+      await archiveModule.importArchiveBatch(batch);
+      await client.execute({
+        sql: 'DELETE FROM medicine_catalog_identifier WHERE patient_id = ?',
+        args: ['repeat-destination'],
+      });
+      await archiveModule.importArchiveBatch(batch);
+      const left = await client.execute({
+        sql: 'SELECT count(*) AS n FROM medicine_catalog_identifier WHERE patient_id = ?',
+        args: ['repeat-destination'],
+      });
+      expect(Number(left.rows[0].n)).toBe(0);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: ['repeat-destination'] });
+    }
+  });
+
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
     const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
     const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));

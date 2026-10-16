@@ -1553,12 +1553,14 @@ async function importMedicineIngredients(
       .values(planned.map((item) => item.root))
       .onConflictDoNothing()
       .returning({ id: medicineIngredient.id });
-    const names = planned.flatMap((item) => item.names);
-    const identifiers = planned.flatMap((item) => item.identifiers);
+    // A root that already exists keeps its stored children, so a repeated restore
+    // cannot bring back a name or identifier that was deleted after the first one.
+    const insertedIds = new Set(inserted.map((row) => row.id));
+    const created = planned.filter((item) => insertedIds.has(item.root.id));
+    const names = created.flatMap((item) => item.names);
+    const identifiers = created.flatMap((item) => item.identifiers);
     if (names.length) await tx.insert(medicineCatalogName).values(names).onConflictDoNothing();
-    if (identifiers.length) {
-      await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
-    }
+    if (identifiers.length) await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
     return insertResult(items.length, inserted.length);
   });
 }
@@ -1596,16 +1598,14 @@ async function importMedicineProducts(
       .values(planned.map((item) => item.root))
       .onConflictDoNothing()
       .returning({ id: medicineProduct.id });
-    const names = planned.flatMap((item) => item.names);
-    const identifiers = planned.flatMap((item) => item.identifiers);
-    const ingredients = planned.flatMap((item) => item.ingredients);
+    const insertedIds = new Set(inserted.map((row) => row.id));
+    const created = planned.filter((item) => insertedIds.has(item.root.id));
+    const names = created.flatMap((item) => item.names);
+    const identifiers = created.flatMap((item) => item.identifiers);
+    const ingredients = created.flatMap((item) => item.ingredients);
     if (names.length) await tx.insert(medicineCatalogName).values(names).onConflictDoNothing();
-    if (identifiers.length) {
-      await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
-    }
-    if (ingredients.length) {
-      await tx.insert(medicineProductIngredient).values(ingredients).onConflictDoNothing();
-    }
+    if (identifiers.length) await tx.insert(medicineCatalogIdentifier).values(identifiers).onConflictDoNothing();
+    if (ingredients.length) await tx.insert(medicineProductIngredient).values(ingredients).onConflictDoNothing();
     return insertResult(items.length, inserted.length);
   });
 }
