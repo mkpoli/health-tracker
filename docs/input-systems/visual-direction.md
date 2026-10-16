@@ -1,10 +1,4 @@
-> **Status note (2026-10-16).** This specification was written on 2026-08-15 against an earlier version of the app and has not been revised. The routes and navigation below do not match the app on `main`:
->
-> - Navigation on `main` is one dashboard at `/[[tab=dashboardTab]]` with the tabs Lab results (`/`), Body (`/body`), Vitals (`/vitals`), Medicine (`/medicine`), Activity (`/activity`) and Calories (`/calories`). The selected profile is the `?patientId=` query, not a path segment.
-> - There are no `/patients/[patientId]/today`, `/records`, `/medicine`, `/calories` or `/assistant` routes, no patient-scoped layout, and no Today or Assistant destination. Under `/patients/[patientId]/` only `extract` and `reports/[reportId]/review` exist.
-> - The compatibility redirects proposed for old links do not apply; the dashboard tab routes were built instead.
-> - Parts already built in another shape: dose plans (courses, regimens, occurrences) and the Medicine tab, a Calories tab, Hevy import, and MCP medicine tools. No separate Agent Worker exists.
-> - Mockup images referenced from `visual-direction.md` (`assets/medicine-desktop-light.png`, `assets/calories-mobile-dark.png`) are not in the repository because of their size.
+> **Status (2026-10-16).** Written on 2026-08-15 against an earlier version of the app. Routes and navigation differ from `main`; see the [status note](./README.md).
 
 # Visual direction
 
@@ -12,7 +6,7 @@ These reference boards extend the current navy, teal, blue-gray, white, and ambe
 
 ## Medicine on desktop
 
-![Medicine desktop reference](./assets/medicine-desktop-light.png)
+*Reference board: Medicine on desktop, light. The image is kept outside the repository.*
 
 The desktop layout uses a persistent left navigation rail, a spacious Medicine workspace, and a contextual Assistant rail. The selected medication destination receives the strongest navy treatment. Teal marks confirmed events. Amber marks due items and estimate review. Blue-gray marks future items.
 
@@ -28,7 +22,7 @@ Production adjustments:
 
 ## Calories on mobile
 
-![Calories mobile reference](./assets/calories-mobile-dark.png)
+*Reference board: Calories on mobile, dark. The image is kept outside the repository.*
 
 The mobile layout keeps the daily summary compact and gives meal capture a direct thumb path. The photo-review sheet shows a total range, an uncertainty reason, editable dish rows, and a conversational correction field. The five-item bottom navigation remains visible during capture.
 

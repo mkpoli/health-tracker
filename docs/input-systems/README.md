@@ -4,7 +4,7 @@
 > - There are no `/patients/[patientId]/today`, `/records`, `/medicine`, `/calories` or `/assistant` routes, no patient-scoped layout, and no Today or Assistant destination. Under `/patients/[patientId]/` only `extract` and `reports/[reportId]/review` exist.
 > - The compatibility redirects proposed for old links do not apply; the dashboard tab routes were built instead.
 > - Parts already built in another shape: dose plans (courses, regimens, occurrences) and the Medicine tab, a Calories tab, Hevy import, and MCP medicine tools. No separate Agent Worker exists.
-> - Mockup images referenced from `visual-direction.md` (`assets/medicine-desktop-light.png`, `assets/calories-mobile-dark.png`) are not in the repository because of their size.
+> - The mockup images that `visual-direction.md` describes are kept outside the repository because of their size.
 
 # Health input systems
 
