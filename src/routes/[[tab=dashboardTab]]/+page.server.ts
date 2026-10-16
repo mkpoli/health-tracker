@@ -35,6 +35,8 @@ import {
   getOwnedDoseRegimen,
   getOwnedEnergyClaim,
   getOwnedMedicineClaim,
+  getOwnedMedicineIngredient,
+  getOwnedMedicineProduct,
   getOwnedMedicineCourse,
   getOwnedPatient,
   getOwnedRecord,
@@ -99,6 +101,23 @@ import {
   loadMedicineCatalog,
   loadMedicineCatalogRevisionCounts,
 } from '$lib/server/medicine-catalog-load';
+import {
+  InvalidMedicineCatalogInputError,
+  parseMedicineIngredientInput,
+  parseMedicineProductInput,
+} from '$lib/server/medicine-catalog';
+import {
+  createMedicineIngredient,
+  createMedicineProduct,
+  deleteMedicineIngredient,
+  deleteMedicineProduct,
+  getMedicineIngredientRecord,
+  getMedicineProductRecord,
+  InvalidMedicineCatalogReferenceError,
+  MedicineCatalogIngredientInUseError,
+  updateMedicineIngredient,
+  updateMedicineProduct,
+} from '$lib/server/medicine-catalog-mutations';
 import {
   InvalidWorkoutInputError,
   buildWorkoutRecords,
@@ -378,6 +397,180 @@ export const actions: Actions = {
     return { success: true, patient: newPatient[0] };
   },
 
+  createMedicineIngredient: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    if (!patientId) return fail(400, { code: 'medicine_catalog_missing_patient' });
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'medicine_catalog_patient_not_found' });
+
+    try {
+      const ingredient = await createMedicineIngredient({
+        patientId: ownedPatient.id,
+        input: parseMedicineIngredientInput(data),
+        origin: manualClaimSource,
+      });
+      return { success: true, medicineIngredient: ingredient };
+    } catch (error) {
+      if (error instanceof InvalidMedicineCatalogInputError) {
+        return fail(400, { code: `medicine_catalog_${error.code}` });
+      }
+      throw error;
+    }
+  },
+
+  updateMedicineIngredient: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+    if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
+    const owned = await getOwnedMedicineIngredient(userId, id);
+    if (!owned) return fail(404, { code: 'medicine_catalog_ingredient_not_found' });
+    const current = await getMedicineIngredientRecord(owned.patientId, owned.id);
+    if (!current) return fail(404, { code: 'medicine_catalog_ingredient_not_found' });
+
+    try {
+      const ingredient = await updateMedicineIngredient({
+        current,
+        input: parseMedicineIngredientInput(data),
+        expectedRevision,
+        source: manualClaimSource,
+      });
+      return { success: true, medicineIngredient: ingredient };
+    } catch (error) {
+      if (error instanceof InvalidMedicineCatalogInputError) {
+        return fail(400, { code: `medicine_catalog_${error.code}` });
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
+  },
+
+  deleteMedicineIngredient: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+    if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
+    const current = await getOwnedMedicineIngredient(userId, id);
+    if (!current) return fail(404, { code: 'medicine_catalog_ingredient_not_found' });
+    try {
+      await deleteMedicineIngredient({
+        patientId: current.patientId,
+        id: current.id,
+        expectedRevision,
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof MedicineCatalogIngredientInUseError) {
+        return fail(409, { code: 'medicine_catalog_ingredient_in_use' });
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
+  },
+
+  createMedicineProduct: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const patientId = data.get('patientId')?.toString();
+    if (!patientId) return fail(400, { code: 'medicine_catalog_missing_patient' });
+    const ownedPatient = await getOwnedPatient(userId, patientId);
+    if (!ownedPatient) return fail(404, { code: 'medicine_catalog_patient_not_found' });
+
+    try {
+      const product = await createMedicineProduct({
+        patientId: ownedPatient.id,
+        input: parseMedicineProductInput(data),
+        origin: manualClaimSource,
+      });
+      return { success: true, medicineProduct: product };
+    } catch (error) {
+      if (error instanceof InvalidMedicineCatalogInputError) {
+        return fail(400, { code: `medicine_catalog_${error.code}` });
+      }
+      if (error instanceof InvalidMedicineCatalogReferenceError) {
+        return fail(400, { code: 'medicine_catalog_invalid_ingredient' });
+      }
+      throw error;
+    }
+  },
+
+  updateMedicineProduct: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+    if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
+    const owned = await getOwnedMedicineProduct(userId, id);
+    if (!owned) return fail(404, { code: 'medicine_catalog_product_not_found' });
+    const current = await getMedicineProductRecord(owned.patientId, owned.id);
+    if (!current) return fail(404, { code: 'medicine_catalog_product_not_found' });
+
+    try {
+      const product = await updateMedicineProduct({
+        current,
+        input: parseMedicineProductInput(data),
+        expectedRevision,
+        source: manualClaimSource,
+      });
+      return { success: true, medicineProduct: product };
+    } catch (error) {
+      if (error instanceof InvalidMedicineCatalogInputError) {
+        return fail(400, { code: `medicine_catalog_${error.code}` });
+      }
+      if (error instanceof InvalidMedicineCatalogReferenceError) {
+        return fail(400, { code: 'medicine_catalog_invalid_ingredient' });
+      }
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
+  },
+
+  deleteMedicineProduct: async ({ request, locals }) => {
+    const userId = requireUserId(locals);
+    const data = await request.formData();
+    const id = data.get('id')?.toString();
+    const expectedRevision = parseExpectedClaimRevision(data.get('revision'));
+    if (!id) return fail(400, { code: 'medicine_catalog_missing_id' });
+    if (expectedRevision === null) {
+      return fail(400, { code: 'medicine_catalog_invalid_revision' });
+    }
+    const current = await getOwnedMedicineProduct(userId, id);
+    if (!current) return fail(404, { code: 'medicine_catalog_product_not_found' });
+    try {
+      await deleteMedicineProduct({
+        patientId: current.patientId,
+        id: current.id,
+        expectedRevision,
+        source: manualClaimSource,
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof StaleClaimRevisionError) {
+        return fail(409, { code: 'medicine_catalog_stale_revision' });
+      }
+      throw error;
+    }
+  },
+
   createMedicine: async ({ request, locals }) => {
     const userId = requireUserId(locals);
     const data = await request.formData();
@@ -425,6 +618,9 @@ export const actions: Actions = {
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
       }
+      if (error instanceof InvalidMedicineReferenceError) {
+        return fail(400, { code: 'medicine_invalid_product' });
+      }
       if (error instanceof InvalidMedicinePlanInputError) {
         return fail(400, { code: `plan_${error.code}` });
       }
@@ -464,6 +660,9 @@ export const actions: Actions = {
       }
       if (error instanceof InvalidMedicineInputError) {
         return fail(400, { code: `medicine_${error.code}` });
+      }
+      if (error instanceof InvalidMedicineReferenceError) {
+        return fail(400, { code: 'medicine_invalid_product' });
       }
 
       if (error instanceof StaleClaimRevisionError) {
