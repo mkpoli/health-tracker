@@ -190,3 +190,26 @@ describe('product composition uniqueness', () => {
     }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_ingredient'));
   });
 });
+
+describe('country validation', () => {
+  it.each(['USA', 'J', '123', 'United States'])(
+    'reports invalid_country for %s in every country field',
+    (country) => {
+      for (const structure of [
+        { names: [{ name: 'Ingredient', jurisdiction: country }], identifiers: [] },
+        { names: [], identifiers: [{ system: 'local', code: '1', jurisdiction: country }] },
+      ]) {
+        expect(() => parseMedicineIngredientInput(form({
+          canonicalName: 'Ingredient', structure: JSON.stringify(structure),
+        }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+        expect(() => parseMedicineProductInput(form({
+          displayName: 'Product', structure: JSON.stringify({ ...structure, ingredients: [] }),
+        }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+      }
+      expect(() => parseMedicineProductInput(form({
+        displayName: 'Product', marketCountry: country,
+        structure: JSON.stringify({ names: [], identifiers: [], ingredients: [] }),
+      }))).toThrowError(new InvalidMedicineCatalogInputError('invalid_country'));
+    },
+  );
+});

@@ -19,7 +19,6 @@ const limits = {
   id: 128,
   name: 300,
   languageTag: 100,
-  jurisdiction: 2,
   sourceKind: 80,
   sourceProvider: 200,
   sourceUrl: 2_000,
@@ -160,7 +159,7 @@ function languageTag(value: unknown) {
 }
 
 function jurisdiction(value: unknown) {
-  const raw = textValue(value, limits.jurisdiction);
+  const raw = typeof value === 'string' ? value.normalize('NFKC').trim() : '';
   if (!raw) return null;
   if (!/^[A-Za-z]{2}$/.test(raw)) {
     throw new InvalidMedicineCatalogInputError('invalid_country');
