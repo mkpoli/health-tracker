@@ -16,6 +16,8 @@ function baseExport(overrides: Record<string, unknown> = {}) {
     patient: { id: 'patient-1', name: 'Example' },
     reports: [],
     records: [],
+    medicineIngredients: [],
+    medicineProducts: [],
     medicines: [],
     energyEntries: [],
     energySources: [],
@@ -23,6 +25,7 @@ function baseExport(overrides: Record<string, unknown> = {}) {
     exerciseDefinitions: [],
     workouts: [],
     claimRevisions: [],
+    medicineCatalogRevisions: [],
     mediaFiles: [],
     ...overrides,
   };
@@ -40,6 +43,8 @@ describe('health archive', () => {
       }),
     ).toMatchObject({
       version: 1,
+      medicineIngredients: [],
+      medicineProducts: [],
       medicines: [],
       energyEntries: [],
       energySources: [],
@@ -47,6 +52,7 @@ describe('health archive', () => {
       exerciseDefinitions: [],
       workouts: [],
       claimRevisions: [],
+      medicineCatalogRevisions: [],
       mediaFiles: [],
     });
   });

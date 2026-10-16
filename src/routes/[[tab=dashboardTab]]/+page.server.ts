@@ -7,7 +7,13 @@ import {
   energyClaim,
   energySource,
   exerciseDefinition,
+  medicineCatalogIdentifier,
+  medicineCatalogName,
+  medicineCatalogRevision,
   medicineClaim,
+  medicineIngredient,
+  medicineProduct,
+  medicineProductIngredient,
   medicineCourse,
   patient,
   report,
@@ -95,6 +101,11 @@ import {
   updateEnergyClaim,
 } from '$lib/server/claim-mutations';
 import {
+  buildMedicineIngredientRecords,
+  buildMedicineProductRecords,
+  toMedicineCatalogRevision,
+} from '$lib/server/medicine-catalog-records';
+import {
   InvalidWorkoutInputError,
   buildWorkoutRecords,
   normalizeExerciseDefinition,
@@ -170,6 +181,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       records: [],
       reports: [],
       medicines: [],
+      medicineIngredients: [],
+      medicineProducts: [],
+      medicineCatalogRevisions: [],
       medicineCourses: [],
       doseRegimens: [],
       doseOccurrences: [],
@@ -197,6 +211,12 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let recordsList: typeof record.$inferSelect[] = [];
   let reportsList: typeof report.$inferSelect[] = [];
   let medicinesList: typeof medicineClaim.$inferSelect[] = [];
+  let medicineIngredientsList: typeof medicineIngredient.$inferSelect[] = [];
+  let medicineProductsList: typeof medicineProduct.$inferSelect[] = [];
+  let medicineCatalogNamesList: typeof medicineCatalogName.$inferSelect[] = [];
+  let medicineCatalogIdentifiersList: typeof medicineCatalogIdentifier.$inferSelect[] = [];
+  let medicineProductIngredientsList: typeof medicineProductIngredient.$inferSelect[] = [];
+  let medicineCatalogRevisionsList: typeof medicineCatalogRevision.$inferSelect[] = [];
   let medicineCoursesList: typeof medicineCourse.$inferSelect[] = [];
   let doseRegimensList: typeof doseRegimen.$inferSelect[] = [];
   let doseOccurrencesList: typeof doseOccurrence.$inferSelect[] = [];
@@ -218,6 +238,12 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       recordsList,
       reportsList,
       medicinesList,
+      medicineIngredientsList,
+      medicineProductsList,
+      medicineCatalogNamesList,
+      medicineCatalogIdentifiersList,
+      medicineProductIngredientsList,
+      medicineCatalogRevisionsList,
       medicineCoursesList,
       doseRegimensList,
       doseOccurrencesList,
@@ -245,6 +271,36 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(medicineClaim)
         .where(eq(medicineClaim.patientId, patientId))
         .orderBy(desc(medicineClaim.updatedAt)),
+      readDb
+        .select()
+        .from(medicineIngredient)
+        .where(eq(medicineIngredient.patientId, patientId))
+        .orderBy(medicineIngredient.canonicalName),
+      readDb
+        .select()
+        .from(medicineProduct)
+        .where(eq(medicineProduct.patientId, patientId))
+        .orderBy(desc(medicineProduct.updatedAt)),
+      readDb
+        .select()
+        .from(medicineCatalogName)
+        .where(eq(medicineCatalogName.patientId, patientId))
+        .orderBy(medicineCatalogName.orderIndex),
+      readDb
+        .select()
+        .from(medicineCatalogIdentifier)
+        .where(eq(medicineCatalogIdentifier.patientId, patientId))
+        .orderBy(medicineCatalogIdentifier.orderIndex),
+      readDb
+        .select()
+        .from(medicineProductIngredient)
+        .where(eq(medicineProductIngredient.patientId, patientId))
+        .orderBy(medicineProductIngredient.orderIndex),
+      readDb
+        .select()
+        .from(medicineCatalogRevision)
+        .where(eq(medicineCatalogRevision.patientId, patientId))
+        .orderBy(desc(medicineCatalogRevision.changedAt)),
       readDb
         .select()
         .from(medicineCourse)
@@ -318,6 +374,18 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 
     return normalized ? [normalized] : [];
   });
+  const medicineIngredients = buildMedicineIngredientRecords(
+    medicineIngredientsList,
+    medicineCatalogNamesList,
+    medicineCatalogIdentifiersList,
+  );
+  const medicineProducts = buildMedicineProductRecords(
+    medicineProductsList,
+    medicineCatalogNamesList,
+    medicineCatalogIdentifiersList,
+    medicineProductIngredientsList,
+    medicineIngredients,
+  );
 
   return {
     user: locals.user,
@@ -327,6 +395,12 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     records: recordsList,
     reports: reportsList,
     medicines: medicinesList.map(normalizeMedicineClaim),
+    medicineIngredients,
+    medicineProducts,
+    medicineCatalogRevisions: medicineCatalogRevisionsList.flatMap((revision) => {
+      const normalized = toMedicineCatalogRevision(revision);
+      return normalized ? [normalized] : [];
+    }),
     medicineCourses: medicineCoursesList.map(normalizeMedicineCourse),
     doseRegimens: doseRegimensList.map(normalizeDoseRegimen),
     doseOccurrences: doseOccurrencesList.map(normalizeDoseOccurrence),

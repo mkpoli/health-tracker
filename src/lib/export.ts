@@ -7,6 +7,8 @@ export interface PatientExportInput {
   patient: unknown;
   reports: unknown[];
   records: unknown[];
+  medicineIngredients: unknown[];
+  medicineProducts: unknown[];
   medicines: unknown[];
   medicineCourses: unknown[];
   doseRegimens: unknown[];
@@ -17,6 +19,7 @@ export interface PatientExportInput {
   exerciseDefinitions: unknown[];
   workouts: unknown[];
   claimRevisions: unknown[];
+  medicineCatalogRevisions: unknown[];
 }
 
 export interface PatientArchiveMedia {
@@ -135,6 +138,8 @@ export function buildPatientExport({
   patient,
   reports,
   records,
+  medicineIngredients,
+  medicineProducts,
   medicines,
   medicineCourses,
   doseRegimens,
@@ -145,11 +150,14 @@ export function buildPatientExport({
   exerciseDefinitions,
   workouts,
   claimRevisions,
+  medicineCatalogRevisions,
 }: PatientExportInput) {
   const input = {
     patient,
     reports,
     records,
+    medicineIngredients,
+    medicineProducts,
     medicines,
     medicineCourses,
     doseRegimens,
@@ -160,6 +168,7 @@ export function buildPatientExport({
     exerciseDefinitions,
     workouts,
     claimRevisions,
+    medicineCatalogRevisions,
   };
 
   return {
@@ -169,6 +178,8 @@ export function buildPatientExport({
     patient,
     reports,
     records,
+    medicineIngredients,
+    medicineProducts,
     medicines,
     medicineCourses,
     doseRegimens,
@@ -179,6 +190,7 @@ export function buildPatientExport({
     exerciseDefinitions,
     workouts,
     claimRevisions,
+    medicineCatalogRevisions,
     mediaFiles: listPatientArchiveMedia(input).map(({ sourceUrl: _sourceUrl, ...media }) => media),
   };
 }

@@ -554,6 +554,8 @@
           patient: data.currentPatient,
           reports: data.reports,
           records: data.records,
+          medicineIngredients: data.medicineIngredients,
+          medicineProducts: data.medicineProducts,
           medicines: data.medicines,
           medicineCourses: data.medicineCourses,
           doseRegimens: data.doseRegimens,
@@ -564,6 +566,7 @@
           exerciseDefinitions: data.exerciseDefinitions,
           workouts: data.workouts,
           claimRevisions: data.claimRevisions,
+          medicineCatalogRevisions: data.medicineCatalogRevisions,
         },
         data.currentPatient.name,
       );
@@ -1760,6 +1763,8 @@
         patient={data.currentPatient}
         reports={data.reports}
         records={data.records}
+        medicineIngredients={data.medicineIngredients}
+        medicineProducts={data.medicineProducts}
         medicines={data.medicines}
         medicineCourses={data.medicineCourses}
         doseRegimens={data.doseRegimens}
@@ -1770,6 +1775,7 @@
         exerciseDefinitions={data.exerciseDefinitions}
         workouts={data.workouts}
         claimRevisions={data.claimRevisions}
+        medicineCatalogRevisions={data.medicineCatalogRevisions}
         onClose={() => (showDeleteModal = false)}
       />
     {/if}
