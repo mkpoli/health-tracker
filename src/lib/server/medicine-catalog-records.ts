@@ -127,7 +127,7 @@ export function buildMedicineProductRecords(
   }
   for (const value of components) {
     const ingredient = ingredientsById.get(value.ingredientId);
-    if (!ingredient) continue;
+    if (!ingredient) throw new Error(`Missing medicine ingredient: ${value.ingredientId}`);
     const rows = componentsByProduct.get(value.productId) || [];
     rows.push({
       id: value.id,

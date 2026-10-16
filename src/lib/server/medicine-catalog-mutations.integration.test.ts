@@ -291,3 +291,16 @@ describe('medicine claim normalization', () => {
     },
   );
 });
+
+describe('medicine product records', () => {
+  it('rejects an incomplete composition when an ingredient is missing', async () => {
+    const { product } = await linkedMedicine();
+    const { buildMedicineProductRecords } = await import('./medicine-catalog-records');
+    const roots = await drizzle(client).select().from(schema.medicineProduct);
+    const components = await drizzle(client).select().from(schema.medicineProductIngredient);
+    expect(() => buildMedicineProductRecords(
+      roots.filter((row) => row.id === product.id), [], [],
+      components.filter((row) => row.productId === product.id), [],
+    )).toThrow(`Missing medicine ingredient: ${product.ingredients[0].ingredientId}`);
+  });
+});
