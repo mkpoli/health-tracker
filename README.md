@@ -32,6 +32,13 @@ the schema so the `mcp_client`, `mcp_grant` and `mcp_auth_code` tables exist:
 bun run db:push
 ```
 
+When upgrading a database that already has `medicine_claim`, create a backup and prepare its nullable catalog link before Drizzle rebuilds the table:
+
+```bash
+bun run db:prepare:medicine-catalog -- --apply
+bun run db:push -- --force
+```
+
 In the assistant, add `https://<host>/mcp` as a connector. It opens the consent
 screen, where the account holder picks the profiles it may read, demographic
 sharing, measurement writes, and medicine or energy writes. Reference-range
