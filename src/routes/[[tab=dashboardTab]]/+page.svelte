@@ -2926,7 +2926,7 @@
             revisions={data.claimRevisions.filter((revision) => revision.claimKind === 'medicine')}
             ingredients={data.medicineIngredients}
             products={data.medicineProducts}
-            catalogRevisions={data.medicineCatalogRevisions}
+            catalogVersionCounts={data.medicineCatalogVersionCounts}
             courses={data.medicineCourses}
             regimens={data.doseRegimens}
             occurrences={data.doseOccurrences}

@@ -4,6 +4,7 @@
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
   import { getLocale } from '$lib/paraglide/runtime';
+  import { fetchMedicineCatalogRevisions } from '$lib/medicine-catalog-client';
   import {
     localizedMedicineCatalogName,
     medicineIngredientStrength,
@@ -22,12 +23,12 @@
     patientId,
     ingredients = [],
     products = [],
-    revisions = [],
+    versionCounts = {},
   }: {
     patientId: string;
     ingredients: MedicineIngredientRecord[];
     products: MedicineProductRecord[];
-    revisions: MedicineCatalogRevisionRecord[];
+    versionCounts: Record<string, number>;
   } = $props();
 
   type SourceDraft = {
@@ -431,10 +432,27 @@
     return m.medicine_catalog_role_unknown();
   }
 
-  function revisionsFor(kind: 'ingredient' | 'product', id: string) {
-    return revisions
-      .filter((revision) => revision.entityKind === kind && revision.entityId === id)
-      .sort((left, right) => right.revision - left.revision);
+  // Saved versions are read when a product's list is opened, not with the page.
+  let loadedVersions = $state<Record<string, MedicineCatalogRevisionRecord[] | 'failed'>>({});
+
+  $effect(() => {
+    void versionCounts;
+    loadedVersions = {};
+  });
+
+  function versionRows(id: string) {
+    const rows = loadedVersions[id];
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  async function loadVersions(event: Event, id: string) {
+    if (!(event.currentTarget as HTMLDetailsElement).open || loadedVersions[id]) return;
+    try {
+      const rows = await fetchMedicineCatalogRevisions(patientId, 'product', id);
+      loadedVersions[id] = rows.sort((left, right) => right.revision - left.revision);
+    } catch {
+      loadedVersions[id] = 'failed';
+    }
   }
 
   function formatDateTime(value: string) {
@@ -510,15 +528,17 @@
               {/if}
               <div class="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                 <span class="text-xs font-medium text-slate-500">{statusLabel(product.status)}</span>
-                <details class="text-right">
+                <details class="text-right" ontoggle={(event) => loadVersions(event, product.id)}>
                   <summary class="cursor-pointer text-xs font-medium text-slate-500">
-                    {m.medicine_catalog_versions({ count: revisionsFor('product', product.id).length })}
+                    {m.medicine_catalog_versions({ count: versionCounts[`product:${product.id}`] ?? 0 })}
                   </summary>
-                  <ol class="mt-2 space-y-1 text-left text-[11px] text-slate-500">
-                    {#each revisionsFor('product', product.id) as revision (revision.id)}
-                      <li>{m.medicine_catalog_version_entry({ revision: revision.revision, date: formatDateTime(revision.changedAt) })}</li>
-                    {/each}
-                  </ol>
+                  {#if versionRows(product.id).length}
+                    <ol class="mt-2 space-y-1 text-left text-[11px] text-slate-500">
+                      {#each versionRows(product.id) as revision (revision.id)}
+                        <li>{m.medicine_catalog_version_entry({ revision: revision.revision, date: formatDateTime(revision.changedAt) })}</li>
+                      {/each}
+                    </ol>
+                  {/if}
                 </details>
               </div>
             </article>

@@ -42,7 +42,7 @@
     revisions = [],
     ingredients = [],
     products = [],
-    catalogRevisions = [],
+    catalogVersionCounts = {},
     courses = [],
     regimens = [],
     occurrences = [],
@@ -53,7 +53,7 @@
     revisions: MedicineClaimRevisionRecord[];
     ingredients: MedicineIngredientRecord[];
     products: MedicineProductRecord[];
-    catalogRevisions: MedicineCatalogRevisionRecord[];
+    catalogVersionCounts: Record<string, number>;
     courses: MedicineCourseRecord[];
     regimens: DoseRegimenRecord[];
     occurrences: DoseOccurrenceRecord[];
@@ -521,7 +521,7 @@
     {patientId}
     {ingredients}
     {products}
-    revisions={catalogRevisions}
+    versionCounts={catalogVersionCounts}
   />
 
   {#if medicines.length === 0}
