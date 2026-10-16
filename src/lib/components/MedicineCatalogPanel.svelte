@@ -323,6 +323,8 @@
       case 'medicine_catalog_invalid_language': return m.medicine_catalog_invalid_language();
       case 'medicine_catalog_invalid_country': return m.medicine_catalog_invalid_country();
       case 'medicine_catalog_invalid_source': return m.medicine_catalog_invalid_source();
+      case 'medicine_catalog_invalid_identifier': return m.medicine_catalog_invalid_identifier();
+      case 'medicine_catalog_invalid_ingredient': return m.medicine_catalog_invalid_ingredient();
       case 'medicine_catalog_field_too_long': return m.medicine_catalog_field_too_long();
       default: return m.medicine_catalog_save_failed();
     }
