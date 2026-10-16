@@ -440,6 +440,23 @@
     loadedVersions = {};
   });
 
+  const productCountLabel = $derived(
+    products.length === 1
+      ? m.medicine_catalog_product_count_one({ count: products.length })
+      : m.medicine_catalog_product_count_other({ count: products.length }),
+  );
+  const ingredientCountLabel = $derived(
+    ingredients.length === 1
+      ? m.medicine_catalog_ingredient_count_one({ count: ingredients.length })
+      : m.medicine_catalog_ingredient_count_other({ count: ingredients.length }),
+  );
+
+  function versionsLabel(count: number) {
+    return count === 1
+      ? m.medicine_catalog_versions_one({ count })
+      : m.medicine_catalog_versions_other({ count });
+  }
+
   function versionRows(id: string) {
     const rows = loadedVersions[id];
     return Array.isArray(rows) ? rows : [];
@@ -472,7 +489,7 @@
       <p class="mt-0.5 text-xs leading-relaxed text-slate-500">{m.medicine_catalog_subtitle()}</p>
     </div>
     <span class="flex shrink-0 items-center gap-2 text-xs font-semibold text-blue-700">
-      {m.medicine_catalog_count({ products: products.length, ingredients: ingredients.length })}
+      {productCountLabel} · {ingredientCountLabel}
       <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true">
         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
       </svg>
@@ -530,7 +547,7 @@
                 <span class="text-xs font-medium text-slate-500">{statusLabel(product.status)}</span>
                 <details class="text-right" ontoggle={(event) => loadVersions(event, product.id)}>
                   <summary class="cursor-pointer text-xs font-medium text-slate-500">
-                    {m.medicine_catalog_versions({ count: versionCounts[`product:${product.id}`] ?? 0 })}
+                    {versionsLabel(versionCounts[`product:${product.id}`] ?? 0)}
                   </summary>
                   {#if versionRows(product.id).length}
                     <ol class="mt-2 space-y-1 text-left text-[11px] text-slate-500">
