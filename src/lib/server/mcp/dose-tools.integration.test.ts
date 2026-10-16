@@ -45,6 +45,7 @@ beforeAll(async () => {
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT,
       name TEXT NOT NULL,
       generic_name TEXT,
       form TEXT,

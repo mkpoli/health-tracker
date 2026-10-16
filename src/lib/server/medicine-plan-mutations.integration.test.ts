@@ -35,6 +35,7 @@ beforeAll(async () => {
     CREATE TABLE medicine_claim (
       id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+      product_id TEXT,
       name TEXT NOT NULL,
       generic_name TEXT,
       form TEXT,
@@ -660,6 +661,7 @@ describe('medicine plan mutations', () => {
     const medicineRow = async () =>
       (await client.execute("SELECT * FROM medicine_claim WHERE id = 'medicine-2'")).rows[0];
     const medicineInput = {
+      productId: null,
       name: 'ベタメタゾンローション',
       genericName: null,
       form: null,
@@ -676,6 +678,7 @@ describe('medicine plan mutations', () => {
       return {
         id: String(row.id),
         patientId: String(row.patient_id),
+        productId: null,
         name: String(row.name),
         genericName: null,
         form: null,

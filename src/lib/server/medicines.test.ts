@@ -29,6 +29,7 @@ describe('parseMedicineInput', () => {
       name: 'Amoxicillin',
       genericName: 'amoxicillin',
       form: 'capsule',
+      productId: null,
       strength: '500 mg',
       route: 'oral',
       status: 'active',
@@ -38,6 +39,18 @@ describe('parseMedicineInput', () => {
       prescriber: 'Clinic',
       notes: 'With food',
     });
+  });
+
+  it('keeps an optional product catalog link', () => {
+    expect(
+      parseMedicineInput(
+        form({
+          productId: 'product-1',
+          name: 'Wegovy',
+          status: 'active',
+        }),
+      ).productId,
+    ).toBe('product-1');
   });
 
   it('rejects a missing name', () => {

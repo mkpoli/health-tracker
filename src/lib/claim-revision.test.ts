@@ -10,6 +10,7 @@ import type { MedicineClaimRecord } from './medicine';
 const original: MedicineClaimRecord = {
   id: 'medicine-1',
   patientId: 'patient-1',
+  productId: null,
   name: 'Medicine',
   genericName: null,
   form: 'tablet',
