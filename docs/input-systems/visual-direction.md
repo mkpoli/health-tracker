@@ -1,4 +1,4 @@
-> **Status (2026-10-16).** Written on 2026-08-15 against an earlier version of the app. Routes and navigation differ from `main`; see the [status note](./README.md).
+> **Archived proposal (written 2026-08-15).** Does not govern implementation; see the [status note](./README.md).
 
 # Visual direction
 

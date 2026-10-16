@@ -1,9 +1,11 @@
-> **Status note (2026-10-16).** This specification was written on 2026-08-15 against an earlier version of the app and has not been revised. The routes and navigation below do not match the app on `main`:
+> **Archived proposal (written 2026-08-15).** This specification predates the app on `main` and does not govern implementation. Its routes, navigation, data model, MCP contracts, retention rules and delivery backlog all differ from what was built. The current design is in [product-landscape.md](../product-landscape.md) and [data-portability.md](../data-portability.md).
 >
 > - Navigation on `main` is one dashboard at `/[[tab=dashboardTab]]` with the tabs Lab results (`/`), Body (`/body`), Vitals (`/vitals`), Medicine (`/medicine`), Activity (`/activity`) and Calories (`/calories`). The selected profile is the `?patientId=` query, not a path segment.
 > - There are no `/patients/[patientId]/today`, `/records`, `/medicine`, `/calories` or `/assistant` routes, no patient-scoped layout, and no Today or Assistant destination. Under `/patients/[patientId]/` only `extract` and `reports/[reportId]/review` exist.
 > - The compatibility redirects proposed for old links do not apply; the dashboard tab routes were built instead.
 > - Parts already built in another shape: dose plans (courses, regimens, occurrences) and the Medicine tab, a Calories tab, Hevy import, and MCP medicine tools. No separate Agent Worker exists.
+> - The data model on `main` is claims with revisions: `medicine_claim`, `medicine_course`, `dose_regimen`, `dose_occurrence`, `dose_delivery`, `energy_claim`, `energy_source`, `data_import`, `exercise_definition`, `workout_claim`, `workout_exercise`, `workout_set` and `claim_revision`. The tables named in `medicine.md` and `calories.md`, such as `medication_plan_version`, `medication_event`, `meal` and `nutrition_evidence`, do not exist.
+> - Hevy data arrives by CSV import. There is no provider-credential store; `/settings/connections` manages MCP OAuth grants only.
 > - The mockup images that `visual-direction.md` describes are kept outside the repository because of their size.
 
 # Health input systems
