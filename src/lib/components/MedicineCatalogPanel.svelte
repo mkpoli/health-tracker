@@ -665,12 +665,12 @@
           {#if ingredientDraft.id}<input type="hidden" name="id" value={ingredientDraft.id} /><input type="hidden" name="revision" value={ingredientDraft.revision} />{/if}
           <div class="space-y-6 px-5 py-5 sm:px-6">
             <div class="grid gap-4 sm:grid-cols-3">
-              <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_canonical_name()}</span><input name="canonicalName" bind:value={ingredientDraft.canonicalName} required maxlength="300" class="field-input" /></label>
+              <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_canonical_name()}</span><input name="canonicalName" bind:value={ingredientDraft.canonicalName} required maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
               {@render statusSelect(ingredientDraft)}
             </div>
             {@render namesEditor(ingredientDraft.names)}
             {@render identifiersEditor(ingredientDraft.identifiers)}
-            <label><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={ingredientDraft.notes} rows="3" maxlength="4000" class="field-input resize-y"></textarea></label>
+            <label><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={ingredientDraft.notes} rows="3" maxlength="4000" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 resize-y"></textarea></label>
             {#if saveError}<p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
           </div>
           {@render editorFooter()}
@@ -684,16 +684,16 @@
             <fieldset>
               <legend class="section-label">{m.medicine_catalog_product_identity()}</legend>
               <div class="mt-4 grid gap-4 sm:grid-cols-3">
-                <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_display_name()}</span><input name="displayName" bind:value={productDraft.displayName} required maxlength="300" class="field-input" /></label>
+                <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_display_name()}</span><input name="displayName" bind:value={productDraft.displayName} required maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
                 {@render statusSelect(productDraft)}
-                <label><span class="field-label">{m.medicine_catalog_product_type()}</span><select name="productType" bind:value={productDraft.productType} class="field-input"><option value="branded">{m.medicine_catalog_type_branded()}</option><option value="generic">{m.medicine_catalog_type_generic()}</option><option value="compounded">{m.medicine_catalog_type_compounded()}</option><option value="supplement">{m.medicine_catalog_type_supplement()}</option><option value="other">{m.medicine_catalog_type_other()}</option></select></label>
-                <label><span class="field-label">{m.medicine_strength()}</span><input name="strengthText" bind:value={productDraft.strengthText} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_dose_form()}</span><input name="doseFormText" bind:value={productDraft.doseFormText} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_route()}</span><input name="routeText" bind:value={productDraft.routeText} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_terminology_system()}</span><input name="doseFormSystem" bind:value={productDraft.doseFormSystem} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_terminology_code()}</span><input name="doseFormCode" bind:value={productDraft.doseFormCode} maxlength="500" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_route_system()}</span><input name="routeSystem" bind:value={productDraft.routeSystem} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_route_code()}</span><input name="routeCode" bind:value={productDraft.routeCode} maxlength="500" class="field-input" /></label>
+                <label><span class="field-label">{m.medicine_catalog_product_type()}</span><select name="productType" bind:value={productDraft.productType} class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500"><option value="branded">{m.medicine_catalog_type_branded()}</option><option value="generic">{m.medicine_catalog_type_generic()}</option><option value="compounded">{m.medicine_catalog_type_compounded()}</option><option value="supplement">{m.medicine_catalog_type_supplement()}</option><option value="other">{m.medicine_catalog_type_other()}</option></select></label>
+                <label><span class="field-label">{m.medicine_strength()}</span><input name="strengthText" bind:value={productDraft.strengthText} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_dose_form()}</span><input name="doseFormText" bind:value={productDraft.doseFormText} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_route()}</span><input name="routeText" bind:value={productDraft.routeText} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_terminology_system()}</span><input name="doseFormSystem" bind:value={productDraft.doseFormSystem} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_terminology_code()}</span><input name="doseFormCode" bind:value={productDraft.doseFormCode} maxlength="500" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_route_system()}</span><input name="routeSystem" bind:value={productDraft.routeSystem} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_route_code()}</span><input name="routeCode" bind:value={productDraft.routeCode} maxlength="500" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
               </div>
             </fieldset>
 
@@ -704,14 +704,14 @@
             <fieldset class="border-t border-slate-100 pt-6">
               <legend class="section-label">{m.medicine_catalog_market_package()}</legend>
               <div class="mt-4 grid gap-4 sm:grid-cols-2">
-                <label><span class="field-label">{m.medicine_catalog_manufacturer()}</span><input name="manufacturer" bind:value={productDraft.manufacturer} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_authorization_holder()}</span><input name="marketingAuthorizationHolder" bind:value={productDraft.marketingAuthorizationHolder} maxlength="300" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_market_country()}</span><input name="marketCountry" bind:value={productDraft.marketCountry} maxlength="2" placeholder="JP" class="field-input uppercase" /></label>
-                <label><span class="field-label">{m.medicine_catalog_package()}</span><input name="packageDescription" bind:value={productDraft.packageDescription} maxlength="1000" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_imprint()}</span><input name="imprint" bind:value={productDraft.imprint} maxlength="200" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_color()}</span><input name="color" bind:value={productDraft.color} maxlength="200" class="field-input" /></label>
-                <label><span class="field-label">{m.medicine_catalog_shape()}</span><input name="shape" bind:value={productDraft.shape} maxlength="200" class="field-input" /></label>
-                <label class="sm:col-span-2"><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={productDraft.notes} rows="3" maxlength="4000" class="field-input resize-y"></textarea></label>
+                <label><span class="field-label">{m.medicine_catalog_manufacturer()}</span><input name="manufacturer" bind:value={productDraft.manufacturer} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_authorization_holder()}</span><input name="marketingAuthorizationHolder" bind:value={productDraft.marketingAuthorizationHolder} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_market_country()}</span><input name="marketCountry" bind:value={productDraft.marketCountry} maxlength="2" placeholder="JP" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 uppercase" /></label>
+                <label><span class="field-label">{m.medicine_catalog_package()}</span><input name="packageDescription" bind:value={productDraft.packageDescription} maxlength="1000" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_imprint()}</span><input name="imprint" bind:value={productDraft.imprint} maxlength="200" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_color()}</span><input name="color" bind:value={productDraft.color} maxlength="200" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label><span class="field-label">{m.medicine_catalog_shape()}</span><input name="shape" bind:value={productDraft.shape} maxlength="200" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+                <label class="sm:col-span-2"><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={productDraft.notes} rows="3" maxlength="4000" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 resize-y"></textarea></label>
               </div>
             </fieldset>
             {#if saveError}<p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
@@ -737,7 +737,7 @@
 {/if}
 
 {#snippet statusSelect(target: { status: MedicineCatalogStatus })}
-  <label><span class="field-label">{m.status()}</span><select name="status" bind:value={target.status} class="field-input"><option value="active">{m.medicine_catalog_status_active()}</option><option value="inactive">{m.medicine_catalog_status_inactive()}</option><option value="archived">{m.medicine_catalog_status_archived()}</option></select></label>
+  <label><span class="field-label">{m.status()}</span><select name="status" bind:value={target.status} class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500"><option value="active">{m.medicine_catalog_status_active()}</option><option value="inactive">{m.medicine_catalog_status_inactive()}</option><option value="archived">{m.medicine_catalog_status_archived()}</option></select></label>
 {/snippet}
 
 {#snippet namesEditor(names: NameDraft[])}
@@ -747,10 +747,10 @@
     <div class="mt-4 space-y-3">
       {#each names as name, index (name.localId)}
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-6">
-          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_name()}</span><input bind:value={name.name} maxlength="300" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_language()}</span><input bind:value={name.languageTag} maxlength="100" placeholder="ja" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_name_type()}</span><select bind:value={name.nameType} class="field-input"><option value="preferred">{m.medicine_catalog_name_preferred()}</option><option value="brand">{m.medicine_catalog_name_brand()}</option><option value="generic">{m.medicine_catalog_name_generic()}</option><option value="synonym">{m.medicine_catalog_name_synonym()}</option></select></label>
-          <label><span class="field-label">{m.medicine_catalog_jurisdiction()}</span><input bind:value={name.jurisdiction} maxlength="2" class="field-input uppercase" /></label>
+          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_name()}</span><input bind:value={name.name} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_language()}</span><input bind:value={name.languageTag} maxlength="100" placeholder="ja" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_name_type()}</span><select bind:value={name.nameType} class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500"><option value="preferred">{m.medicine_catalog_name_preferred()}</option><option value="brand">{m.medicine_catalog_name_brand()}</option><option value="generic">{m.medicine_catalog_name_generic()}</option><option value="synonym">{m.medicine_catalog_name_synonym()}</option></select></label>
+          <label><span class="field-label">{m.medicine_catalog_jurisdiction()}</span><input bind:value={name.jurisdiction} maxlength="2" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 uppercase" /></label>
           <label class="flex items-center gap-2 sm:col-span-2"><input type="checkbox" bind:checked={name.preferred} class="rounded border-slate-300 text-blue-600" /><span class="text-xs font-medium text-slate-700">{m.medicine_catalog_preferred()}</span></label>
           {@render sourceFields(name)}
           <div class="flex justify-end sm:col-span-6"><button type="button" onclick={() => names.splice(index, 1)} class="text-xs font-semibold text-rose-600">{m.delete()}</button></div>
@@ -767,9 +767,9 @@
     <div class="mt-4 space-y-3">
       {#each identifiers as identifier, index (identifier.localId)}
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-6">
-          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_identifier_system()}</span><input bind:value={identifier.system} maxlength="300" placeholder="RxNorm, YJ, GS1" class="field-input" /></label>
-          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_identifier_code()}</span><input bind:value={identifier.code} maxlength="500" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_jurisdiction()}</span><input bind:value={identifier.jurisdiction} maxlength="2" class="field-input uppercase" /></label>
+          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_identifier_system()}</span><input bind:value={identifier.system} maxlength="300" placeholder="RxNorm, YJ, GS1" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_identifier_code()}</span><input bind:value={identifier.code} maxlength="500" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_jurisdiction()}</span><input bind:value={identifier.jurisdiction} maxlength="2" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 uppercase" /></label>
           {@render sourceFields(identifier)}
           <div class="flex justify-end sm:col-span-6"><button type="button" onclick={() => identifiers.splice(index, 1)} class="text-xs font-semibold text-rose-600">{m.delete()}</button></div>
         </div>
@@ -782,10 +782,10 @@
   <details class="sm:col-span-6">
     <summary class="cursor-pointer text-xs font-medium text-slate-500">{m.medicine_catalog_source()}</summary>
     <div class="mt-3 grid gap-3 sm:grid-cols-4">
-      <label><span class="field-label">{m.medicine_catalog_source_kind()}</span><input bind:value={source.sourceKind} maxlength="80" class="field-input" /></label>
-      <label><span class="field-label">{m.medicine_catalog_source_provider()}</span><input bind:value={source.sourceProvider} maxlength="200" class="field-input" /></label>
-      <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_source_url()}</span><input type="url" bind:value={source.sourceUrl} maxlength="2000" class="field-input" /></label>
-      <label><span class="field-label">{m.medicine_catalog_retrieved_at()}</span><input type="datetime-local" bind:value={source.sourceRetrievedAt} class="field-input" /></label>
+      <label><span class="field-label">{m.medicine_catalog_source_kind()}</span><input bind:value={source.sourceKind} maxlength="80" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+      <label><span class="field-label">{m.medicine_catalog_source_provider()}</span><input bind:value={source.sourceProvider} maxlength="200" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+      <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_source_url()}</span><input type="url" bind:value={source.sourceUrl} maxlength="2000" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+      <label><span class="field-label">{m.medicine_catalog_retrieved_at()}</span><input type="datetime-local" bind:value={source.sourceRetrievedAt} class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
     </div>
   </details>
 {/snippet}
@@ -798,14 +798,14 @@
     <div class="mt-4 space-y-3">
       {#each productDraft.ingredients as component, index (component.localId)}
         <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:grid-cols-6">
-          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_ingredient()}</span><select bind:value={component.ingredientId} required class="field-input">{#each sortedIngredients as ingredient (ingredient.id)}<option value={ingredient.id}>{localizedMedicineCatalogName(ingredient.names, getLocale(), ingredient.canonicalName)}</option>{/each}</select></label>
-          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_role()}</span><select bind:value={component.role} class="field-input"><option value="active">{m.medicine_catalog_role_active()}</option><option value="inactive">{m.medicine_catalog_role_inactive()}</option><option value="unknown">{m.medicine_catalog_role_unknown()}</option></select></label>
-          <label><span class="field-label">{m.medicine_catalog_strength_text()}</span><input bind:value={component.strengthText} maxlength="300" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_numerator_value()}</span><input inputmode="decimal" bind:value={component.numeratorValue} maxlength="64" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_numerator_unit()}</span><input bind:value={component.numeratorUnit} maxlength="80" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_denominator_value()}</span><input inputmode="decimal" bind:value={component.denominatorValue} maxlength="64" class="field-input" /></label>
-          <label><span class="field-label">{m.medicine_catalog_denominator_unit()}</span><input bind:value={component.denominatorUnit} maxlength="80" class="field-input" /></label>
-          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_basis_strength()}</span><input bind:value={component.basisOfStrengthText} maxlength="300" class="field-input" /></label>
+          <label class="sm:col-span-3"><span class="field-label">{m.medicine_catalog_ingredient()}</span><select bind:value={component.ingredientId} required class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500">{#each sortedIngredients as ingredient (ingredient.id)}<option value={ingredient.id}>{localizedMedicineCatalogName(ingredient.names, getLocale(), ingredient.canonicalName)}</option>{/each}</select></label>
+          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_role()}</span><select bind:value={component.role} class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500"><option value="active">{m.medicine_catalog_role_active()}</option><option value="inactive">{m.medicine_catalog_role_inactive()}</option><option value="unknown">{m.medicine_catalog_role_unknown()}</option></select></label>
+          <label><span class="field-label">{m.medicine_catalog_strength_text()}</span><input bind:value={component.strengthText} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_numerator_value()}</span><input inputmode="decimal" bind:value={component.numeratorValue} maxlength="64" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_numerator_unit()}</span><input bind:value={component.numeratorUnit} maxlength="80" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_denominator_value()}</span><input inputmode="decimal" bind:value={component.denominatorValue} maxlength="64" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label><span class="field-label">{m.medicine_catalog_denominator_unit()}</span><input bind:value={component.denominatorUnit} maxlength="80" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
+          <label class="sm:col-span-2"><span class="field-label">{m.medicine_catalog_basis_strength()}</span><input bind:value={component.basisOfStrengthText} maxlength="300" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500" /></label>
           {@render sourceFields(component)}
           <div class="flex justify-end sm:col-span-6"><button type="button" onclick={() => productDraft.ingredients.splice(index, 1)} class="text-xs font-semibold text-rose-600">{m.delete()}</button></div>
         </div>
@@ -822,8 +822,9 @@
 {/snippet}
 
 <style>
-  :global(.field-label) { margin-bottom: 0.375rem; display: block; font-size: 0.75rem; font-weight: 500; color: rgb(51 65 85); }
-  :global(.field-input) { width: 100%; border-radius: 0.5rem; border-color: rgb(203 213 225); padding: 0.625rem 0.75rem; font-size: 0.875rem; box-shadow: 0 1px 2px rgb(15 23 42 / 0.05); }
-  :global(.field-input:focus) { border-color: rgb(59 130 246); --tw-ring-color: rgb(59 130 246); }
-  :global(.section-label) { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: rgb(100 116 139); }
+  .field-label { margin-bottom: 0.375rem; display: block; font-size: 0.75rem; font-weight: 500; color: rgb(51 65 85); }
+  @layer components {
+    .field-input { width: 100%; border-radius: 0.5rem; border-color: rgb(203 213 225); padding: 0.625rem 0.75rem; font-size: 0.875rem; }
+  }
+  .section-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: rgb(100 116 139); }
 </style>
