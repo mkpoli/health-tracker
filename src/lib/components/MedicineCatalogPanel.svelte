@@ -635,7 +635,7 @@
                 <label class="sm:col-span-2"><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={productDraft.notes} rows="3" maxlength="4000" class="field-input shadow-sm focus:border-blue-500 focus:ring-blue-500 resize-y"></textarea></label>
               </div>
             </fieldset>
-            {#if saveError}<p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
+            {#if saveError}<p class="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
           </div>
           {@render editorFooter()}
         </form>
