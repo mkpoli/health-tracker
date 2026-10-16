@@ -110,7 +110,7 @@ import {
   InvalidWorkoutReferenceError,
   updateWorkoutClaim,
 } from '$lib/server/workout-mutations';
-import { CURRENT_HEALTH_ARCHIVE_VERSION } from '$lib/archive-format';
+import { CURRENT_HEALTH_ARCHIVE_VERSION, MAX_ARCHIVE_BATCH_BYTES } from '$lib/archive-format';
 import { normalizeDataImport } from '$lib/server/data-imports';
 import {
   HevyImportError,
@@ -1511,7 +1511,7 @@ export const actions: Actions = {
     if (!Number.isSafeInteger(version) || version < 1 || version > CURRENT_HEALTH_ARCHIVE_VERSION) {
       return fail(400, { code: 'archive_unsupported_version' });
     }
-    if (itemsStr.length > 12 * 1024 * 1024) {
+    if (new TextEncoder().encode(itemsStr).byteLength > MAX_ARCHIVE_BATCH_BYTES) {
       return fail(413, { code: 'archive_batch_too_large' });
     }
 

@@ -1,12 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
 import {
+  chunkArchiveItems,
   forEachArchiveMedia,
   HealthArchiveError,
   parseHealthTrackerExport,
   readHealthArchiveFile,
   sha256Hex,
 } from './health-archive';
+
+describe('archive batches', () => {
+  it('preserves item order and count limits', () => {
+    expect(chunkArchiveItems([], 2, 100)).toEqual([]);
+    expect(chunkArchiveItems([1, 2, 3, 4, 5], 2, 100)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('counts UTF-8 bytes, JSON escaping, brackets, and commas', () => {
+    const items = ['薬', '\n', '"'];
+    const bytes = new TextEncoder().encode(JSON.stringify(items.slice(0, 2))).byteLength;
+    expect(chunkArchiveItems(items, 100, bytes)).toEqual([items.slice(0, 2), items.slice(2)]);
+    expect(chunkArchiveItems(items, 100, bytes - 1)).toEqual([[items[0]], items.slice(1)]);
+  });
+
+  it('reports a specific error when one serialized item cannot fit', () => {
+    expect(() => chunkArchiveItems(['薬'], 100, 6)).toThrowError(
+      expect.objectContaining({ name: 'HealthArchiveError', code: 'item_too_large' }),
+    );
+    expect(chunkArchiveItems(['薬'], 100, 7)).toEqual([['薬']]);
+  });
+});
 
 function baseExport(overrides: Record<string, unknown> = {}) {
   return {

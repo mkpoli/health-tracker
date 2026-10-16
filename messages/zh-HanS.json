@@ -656,6 +656,7 @@
   "import_archive_file_hint": "Health Tracker ZIP或JSON；Apple健康ZIP或XML",
   "import_archive_invalid": "此Health Tracker归档已损坏、包含不安全内容，或使用了不支持的格式。",
   "import_archive_failed": "归档导入已停止。可以安全地用同一文件重试。",
+  "import_archive_item_too_large": "归档中的单个条目超过了12 MiB的导入上限。",
   "import_archive_version": "格式 {version}",
   "import_archive_reports": "报告",
   "import_archive_values": "记录值",
