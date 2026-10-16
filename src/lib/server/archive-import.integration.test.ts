@@ -1066,6 +1066,44 @@ describe('archive import storage', () => {
     }
   });
 
+  it('loads catalogue revisions ordered by changedAt then id descending', async () => {
+    const patientId = 'catalog-revision-order';
+    const entityId = `${patientId}-ingredient`;
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      for (const [index, [suffix, changedAt]] of [
+        ['b', '2026-01-02T00:00:00.000Z'],
+        ['c', '2026-01-02T00:00:00.000Z'],
+        ['z', '2026-01-01T00:00:00.000Z'],
+        ['a', '2026-01-02T00:00:00.000Z'],
+      ].entries()) {
+        const revision = index + 1;
+        await client.execute({
+          sql: `INSERT INTO medicine_catalog_revision
+            (id, patient_id, entity_kind, entity_id, revision, snapshot, changed_at)
+            VALUES (?, ?, 'ingredient', ?, ?, ?, ?)`,
+          args: [
+            `${patientId}-${suffix}`, patientId, entityId, revision,
+            JSON.stringify({ ...medicineIngredientCurrent, id: entityId, patientId, revision }),
+            changedAt,
+          ],
+        });
+      }
+
+      const { loadMedicineCatalogRevisions } = await import('./medicine-catalog-load');
+      const expectedIds = ['c', 'b', 'a', 'z'].map((suffix) => `${patientId}-${suffix}`);
+      expect((await loadMedicineCatalogRevisions(patientId)).map(({ id }) => id)).toEqual(expectedIds);
+      expect((await loadMedicineCatalogRevisions(patientId, {
+        kind: 'ingredient', id: entityId,
+      })).map(({ id }) => id)).toEqual(expectedIds);
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
   it('exports nested ingredients without source payloads and restores the catalogue', async () => {
     const patientId = 'catalog-export';
     const restoredPatientId = 'catalog-restored';
