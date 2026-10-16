@@ -419,6 +419,14 @@
     };
   };
 
+  const submitDelete: SubmitFunction = (submission) => {
+    const message = editorKind === 'ingredient'
+      ? m.medicine_catalog_delete_ingredient_confirm({ name: ingredientDraft.canonicalName })
+      : m.medicine_catalog_delete_product_confirm({ name: productDraft.displayName });
+    if (!confirm(message)) { submission.cancel(); return; }
+    return submitCatalog(submission);
+  };
+
   function statusLabel(status: MedicineCatalogStatus) {
     if (status === 'active') return m.medicine_catalog_status_active();
     if (status === 'inactive') return m.medicine_catalog_status_inactive();
@@ -636,13 +644,6 @@
             {@render identifiersEditor(ingredientDraft.identifiers)}
             <label><span class="field-label">{m.notes()}</span><textarea name="notes" bind:value={ingredientDraft.notes} rows="3" maxlength="4000" class="field-input resize-y"></textarea></label>
             {#if saveError}<p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
-            {#if ingredientDraft.id}
-              <div class="flex justify-start border-t border-slate-100 pt-4">
-                <button type="submit" formaction="?/deleteMedicineIngredient" formnovalidate onclick={(event) => { if (!confirm(m.medicine_catalog_delete_ingredient_confirm({ name: ingredientDraft.canonicalName }))) event.preventDefault(); }} class="text-sm font-semibold text-rose-600 hover:text-rose-700">
-                  {m.delete()}
-                </button>
-              </div>
-            {/if}
           </div>
           {@render editorFooter()}
         </form>
@@ -686,15 +687,21 @@
               </div>
             </fieldset>
             {#if saveError}<p class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{saveError}</p>{/if}
-            {#if productDraft.id}
-              <div class="flex justify-start border-t border-slate-100 pt-4">
-                <button type="submit" formaction="?/deleteMedicineProduct" formnovalidate onclick={(event) => { if (!confirm(m.medicine_catalog_delete_product_confirm({ name: productDraft.displayName }))) event.preventDefault(); }} class="text-sm font-semibold text-rose-600 hover:text-rose-700">
-                  {m.delete()}
-                </button>
-              </div>
-            {/if}
           </div>
           {@render editorFooter()}
+        </form>
+      {/if}
+      {#if editorKind === 'ingredient' ? ingredientDraft.id : productDraft.id}
+        <form
+          method="POST"
+          action={editorKind === 'ingredient' ? '?/deleteMedicineIngredient' : '?/deleteMedicineProduct'}
+          use:enhance={submitDelete}
+          class="border-t border-slate-100 px-5 py-3 sm:px-6"
+        >
+          <input type="hidden" name="patientId" value={patientId} />
+          <input type="hidden" name="id" value={editorKind === 'ingredient' ? ingredientDraft.id : productDraft.id} />
+          <input type="hidden" name="revision" value={editorKind === 'ingredient' ? ingredientDraft.revision : productDraft.revision} />
+          <button type="submit" disabled={saving} class="text-sm font-semibold text-rose-600 hover:text-rose-700 disabled:opacity-50">{m.delete()}</button>
         </form>
       {/if}
     </div>
