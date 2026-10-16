@@ -13,7 +13,7 @@ The archive contains:
 
 - profile details;
 - reports and recorded values;
-- current medicine entries and their saved revisions;
+- medicine ingredients, packaged products, localized names, identifiers, provenance, saved catalog versions, current medicine plans, and saved plan revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
 - exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
 - import records and retained source files, including Hevy workout CSV files;
@@ -58,7 +58,7 @@ Messages used to prepare Medicine or Calories drafts are copied into the claim's
 
 The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
 
-Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 7 carries source imports and exercise definitions before workouts during restoration, then restores workout revisions after the current records exist.
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 8 carries medicine ingredients before products and medicine plans. It carries source imports and exercise definitions before workouts. Saved revisions are restored after their current records exist.
 
 ## Hevy workout CSV import
 
