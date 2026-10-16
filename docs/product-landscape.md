@@ -101,12 +101,12 @@ The native catalog stores each source identifier independently. A match from one
 | [RxNorm and RxNav APIs](https://lhncbc.nlm.nih.gov/RxNav/APIs/index.html) | Normalized U.S. drug concepts, RxCUIs, branded and clinical-drug relationships | RxNorm concepts do not identify every marketed package outside the United States. |
 | [DailyMed v2 web services](https://dailymed.nlm.nih.gov/dailymed/app-support-web-services.cfm) | Current U.S. Structured Product Labels, SET IDs, NDCs, RxCUIs, packaging, media, and label history | DailyMed is a read-only U.S. label source. The SET ID and label version belong in provenance. |
 | [openFDA drug APIs](https://open.fda.gov/apis/drug/) | FDA label, enforcement, NDC, and adverse-event datasets | Adverse-event reports are source claims. They do not establish that a product caused an event. |
-| [PMDA medical-product search](https://www.pmda.go.jp/PmdaSearch/iyakuSearch/) and [electronic-label technical information](https://www.pmda.go.jp/safety/info-services/0003.html) | Japanese product names, general names, electronic labels, YJ links, GS1 links, safety documents, and revision material | Each document's terms are checked at the connector boundary, described below. |
+| [PMDA medical-product search](https://www.pmda.go.jp/PmdaSearch/iyakuSearch/) and [electronic-label technical information](https://www.pmda.go.jp/safety/info-services/0003.html) | Japanese product names, general names, electronic labels, YJ links, GS1 links, safety documents, and revision material | Terms of use differ between documents, so each import records the terms that applied to it. |
 | [MedlinePlus Web services](https://medlineplus.gov/about/developers/webservices/) | Patient-facing educational topic links and attributed summaries | Educational content stays separate from product identity and prescribing instructions. |
-| [PubChem PUG REST](https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest) and [ChEBI public APIs](https://www.ebi.ac.uk/chebi/beta/tools) | Chemical structure identifiers, names, formulas, and ontology links for ingredients | A chemical entity does not by itself define a dose form, package, indication, or approved product. |
+| [PubChem PUG REST](https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest) and [ChEBI public APIs](https://www.ebi.ac.uk/chebi/tools) | Chemical structure identifiers, names, formulas, and ontology links for ingredients | A chemical entity does not by itself define a dose form, package, indication, or approved product. |
 | [Wikidata REST API](https://www.wikidata.org/wiki/Wikidata%3AREST_API/en) and [SPARQL service](https://www.wikidata.org/wiki/Help%3ASPARQL) | Multilingual labels and cross-database identifiers with statement provenance | Community statements require source review before use in clinical or regulatory fields. |
 
-YJ, HOT, GS1, NDC, RxCUI, UNII, PubChem CID, ChEBI, Wikidata, and local pharmacy codes remain distinct identifier systems. A product can carry several of them. Wikipedia articles can be retained as attributed reference URLs; their titles are not promoted to official product labels. License or access restrictions are evaluated at the connector boundary. Each value in the catalog identifies the source that supplied it.
+YJ, HOT ([MEDIS HOT code master](https://www2.medis.or.jp/master/hcode/)), GS1, NDC, RxCUI, UNII ([FDA GSRS](https://precision.fda.gov/uniisearch)), PubChem CID, ChEBI, Wikidata, and local pharmacy codes remain distinct identifier systems. A product can carry several of them. Wikipedia articles can be retained as attributed reference URLs; their titles are not promoted to official product labels. License or access restrictions are evaluated at the connector boundary. Each value in the catalog identifies the source that supplied it.
 
 ### Regimen and schedule
 
@@ -175,6 +175,7 @@ Every connector record carries:
 - `originExternalId` and source version or update token;
 - source-created, source-updated, effective, imported, and observed timestamps;
 - raw payload or retained artifact reference with checksum;
+- the source's licence or terms of use, and any access restriction they set;
 - transform name and version;
 - import-batch ID and sync cursor;
 - source deletion or tombstone state;
