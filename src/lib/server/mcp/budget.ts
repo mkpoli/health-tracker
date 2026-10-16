@@ -3,6 +3,8 @@
 // result always says it was trimmed — a health tool that silently drops rows is
 // how a reader concludes a metric was never measured.
 
+import { ToolError } from './context';
+
 export const MAX_RESULT_BYTES = 40_000;
 
 function measure(value: unknown) {
@@ -39,7 +41,7 @@ export function capResult<T extends Record<string, unknown>>(payload: T): T & { 
 
   trimmed.truncated = true;
   trimmed.dropped_items = 0;
-  trimmed.hint = 'Narrow the request or request fewer entries. Lists and text may be shortened; do not write truncated records back.';
+  trimmed.hint = 'Narrow the request or request fewer entries. For medicine catalog child collections, use get_medicine_catalog_entry with child offsets and limits. Lists and text may be shortened; do not write truncated records back.';
 
   while (measure(trimmed) > MAX_RESULT_BYTES) {
     const arrays = arraysIn(trimmed);
@@ -53,7 +55,7 @@ export function capResult<T extends Record<string, unknown>>(payload: T): T & { 
         object[key] = characters.slice(0, Math.floor(characters.length / 2)).join('');
         continue;
       }
-      if (arrays.length === 0) throw new Error('Tool result cannot fit the response budget');
+      if (arrays.length === 0) throw new ToolError('Tool result cannot fit the response budget');
     }
     const items = (multiple.length ? multiple : arrays).sort((a, b) => measure(b) - measure(a))[0];
     const keep = items.length === 1 ? 0 : Math.max(1, Math.floor(items.length * 0.7));

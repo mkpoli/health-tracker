@@ -911,6 +911,7 @@ describe('MCP claim permissions', () => {
     };
     const names = toolsModule.toolsFor(readContext).map((definition) => definition.name);
     expect(names).toContain('list_medicine_catalog');
+    expect(names).toContain('get_medicine_catalog_entry');
     expect(names).toContain('get_medicine_catalog_history');
     expect(names).toContain('read_medicine_catalog_source');
     expect(names).toContain('list_medicines');
@@ -998,7 +999,7 @@ describe('MCP catalog review regressions', () => {
     expect(changed.ingredient).toMatchObject({
       canonical_name: 'Updated ingredient', revision: 2,
       names: first.ingredient.names, identifiers: first.ingredient.identifiers,
-      source_data: first.ingredient.source_data,
+      source_data_summary: first.ingredient.source_data_summary,
     });
     await expect(catalogTool('update_medicine_ingredient').handler(context, {
       patient_id: 'profile-1', ingredient_id: first.ingredient.ingredient_id,
@@ -1008,8 +1009,20 @@ describe('MCP catalog review regressions', () => {
       patient_id: 'profile-1', entity_kind: 'ingredient', entity_id: first.ingredient.ingredient_id,
     }) as any;
     expect(history.revisions.map((row: any) => row.revision)).toEqual([2, 1]);
-    expect(history.revisions[0].snapshot.source_data).toEqual(first.ingredient.source_data);
+    expect(history.revisions[0].snapshot.source_data_summary).toEqual(first.ingredient.source_data_summary);
     expect(JSON.stringify(history)).not.toContain('原文');
+  });
+
+  it('preserves ingredient source data through a full read and update', async () => {
+    const first = await ingredient('source-round-trip', { source_data: { retained: 'Original ingredient payload' } });
+    const read = await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1', query: 'source-round-trip',
+    }) as any;
+    const record = read.ingredients.find((row: any) => row.ingredient_id === first.ingredient.ingredient_id);
+    expect(record).not.toHaveProperty('source_data');
+    await catalogTool('update_medicine_ingredient').handler(context, { ...record, expected_revision: record.revision });
+    expect((await catalogMutations.getMedicineIngredientRecord('profile-1', record.ingredient_id))?.sourceData)
+      .toEqual({ retained: 'Original ingredient payload' });
   });
 
   it.each(['ingredient', 'product'] as const)('resolves overlapping %s creates inside the transaction', async (kind) => {
@@ -1066,6 +1079,7 @@ describe('MCP catalog review regressions', () => {
   it('round-trips product form, route, appearance, names, and identifiers', async () => {
     const linked = await ingredient('round-trip-component');
     const first = await product('round-trip', {
+      source_data: { retained: 'Original product payload' },
       dose_form: 'Tablet', dose_form_system: 'form-system', dose_form_code: 'tablet',
       route: 'Oral', route_system: 'route-system', route_code: 'oral',
       imprint: 'A1', color: 'white', shape: 'round', market_country: 'jp',
@@ -1083,14 +1097,96 @@ describe('MCP catalog review regressions', () => {
       imprint: 'A1', color: 'white', shape: 'round', market_country: 'JP',
     });
     expect(record).not.toHaveProperty('appearance');
+    expect(record).not.toHaveProperty('source_data');
     const schema = catalogTool('update_medicine_product').inputSchema as any;
     expect(Object.keys(record.ingredients[0]).every((key) => key in schema.properties.ingredients.items.properties)).toBe(true);
     const fields = Object.fromEntries(Object.keys(catalogTool('update_medicine_product').inputSchema.properties as object)
-      .filter((key) => key in record && key !== 'source_data').map((key) => [key, record[key]]));
+      .filter((key) => key in record).map((key) => [key, record[key]]));
     const changed = await catalogTool('update_medicine_product').handler(context, {
       ...fields, patient_id: 'profile-1', product_id: first.product.product_id, expected_revision: 1,
     }) as any;
     expect(changed.product).toMatchObject({ ...record, revision: 2, updated_at: expect.any(String) });
+    expect((await catalogMutations.getMedicineProductRecord('profile-1', record.product_id))?.sourceData)
+      .toEqual({ retained: 'Original product payload' });
+  });
+
+  it.each(['ingredient', 'product'] as const)('pages complete %s names and identifiers', async (kind) => {
+    const fields = {
+      names: Array.from({ length: 30 }, (_, i) => ({ name: `Name ${i}`, source_url: 'https://example.com/' + 'a'.repeat(1_900) })),
+      identifiers: Array.from({ length: 30 }, (_, i) => ({ system: 'test', code: String(i), source_url: 'https://example.com/' + 'b'.repeat(1_900) })),
+    };
+    const created = await (kind === 'ingredient' ? ingredient : product)('child-pages-' + kind, fields);
+    const args = { patient_id: 'profile-1', entity_kind: kind, entity_id: created[kind][kind + '_id'] };
+    const names: any[] = [];
+    const identifiers: any[] = [];
+    let namesOffset: number | null = 0;
+    let identifiersOffset: number | null = 0;
+    do {
+      const page = await catalogTool('get_medicine_catalog_entry').handler(context, {
+        ...args, names_offset: namesOffset ?? 30, identifiers_offset: identifiersOffset ?? 30,
+        names_limit: 30, identifiers_limit: 30,
+      }) as any;
+      expect(bytes(page)).toBeLessThanOrEqual(40_000);
+      expect(page.entry.revision).toBe(1);
+      names.push(...page.entry.names);
+      identifiers.push(...page.entry.identifiers);
+      expect(names.length).toBeLessThanOrEqual(30);
+      expect(identifiers.length).toBeLessThanOrEqual(30);
+      namesOffset = page.next_names_offset;
+      identifiersOffset = page.next_identifiers_offset;
+    } while (namesOffset !== null || identifiersOffset !== null);
+    expect(names.map(({ name, source_url }) => ({ name, source_url }))).toEqual(fields.names);
+    expect(identifiers.map(({ system, code, source_url }) => ({ system, code, source_url }))).toEqual(fields.identifiers);
+    await expect(catalogTool('get_medicine_catalog_entry').handler(context, { ...args, names_offset: -1 })).rejects.toThrow('names_offset');
+    await expect(catalogTool('get_medicine_catalog_entry').handler(context, { ...args, identifiers_limit: 31 })).rejects.toThrow('identifiers_limit');
+    await expect(catalogTool('get_medicine_catalog_entry').handler(context, { ...args, entity_kind: 'invalid' })).rejects.toThrow('entity_kind');
+    await expect(catalogTool('get_medicine_catalog_entry').handler(context, { ...args, entity_id: 'missing' })).rejects.toThrow('No such');
+    await expect(catalogTool('get_medicine_catalog_entry').handler(context, { ...args, patient_id: 'profile-2' })).rejects.toThrow();
+  });
+
+  it('keeps children reachable when root text exceeds the response budget', async () => {
+    const text = '\u0001';
+    const created = await product('large-root-details', {
+      notes: text.repeat(4_000), package_description: text.repeat(1_000),
+      ...Object.fromEntries(['dose_form', 'dose_form_system', 'route', 'route_system', 'strength',
+        'manufacturer', 'authorization_holder'].map((key) => [key, text.repeat(300)])),
+      dose_form_code: text.repeat(500), route_code: text.repeat(500),
+      names: [{ name: 'Complete child', source_url: 'https://example.com/' + 'a'.repeat(1_900) }],
+    });
+    expect(created.truncated).toBe(true);
+    const page = await catalogTool('get_medicine_catalog_entry').handler(context, {
+      patient_id: 'profile-1', entity_kind: 'product', entity_id: created.product.product_id,
+    }) as any;
+    expect(bytes(page)).toBeLessThanOrEqual(40_000);
+    expect(page.entry.names[0]).toMatchObject({ name: 'Complete child', source_url: 'https://example.com/' + 'a'.repeat(1_900) });
+    expect(page.next_names_offset).toBeNull();
+  });
+
+  it('rejects a detail page when the entry changes between its queries', async () => {
+    const created = await product('detail-concurrent', { names: [{ name: 'Before' }] });
+    const { db } = await import('../db');
+    const ormClient = (db as any).session.client as Client;
+    const execute = ormClient.execute.bind(ormClient);
+    let changed = false;
+    const spy = vi.spyOn(ormClient, 'execute').mockImplementation(async (statement: any) => {
+      const result = await execute(statement);
+      if (!changed && typeof statement === 'object' && /from "medicine_catalog_name"/.test(statement.sql)) {
+        changed = true;
+        await catalogTool('update_medicine_product').handler(context, {
+          patient_id: 'profile-1', product_id: created.product.product_id, expected_revision: 1,
+          names: [{ name: 'After' }],
+        });
+      }
+      return result;
+    });
+    try {
+      await expect(catalogTool('get_medicine_catalog_entry').handler(context, {
+        patient_id: 'profile-1', entity_kind: 'product', entity_id: created.product.product_id,
+      })).rejects.toThrow('changed while reading');
+      expect(changed).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('rejects source_data over 2 MB before inserting', async () => {
@@ -1202,6 +1298,29 @@ describe('MCP catalog review regressions', () => {
     });
     expect(bytes(created)).toBeLessThanOrEqual(40_000);
     expect(created.truncated).toBe(true);
+    const completeComponents: any[] = [];
+    let offset: number | null = 0;
+    do {
+      const page = await catalogTool('get_medicine_catalog_entry').handler({
+        ...context, canWriteClaims: false, canWriteMeasurements: false,
+      }, {
+        patient_id: 'profile-1', entity_kind: 'product', entity_id: created.product.product_id,
+        ingredients_offset: offset, ingredients_limit: 30, names_limit: 0, identifiers_limit: 0,
+      }) as any;
+      expect(bytes(page)).toBeLessThanOrEqual(40_000);
+      expect(page.entry.revision).toBe(1);
+      expect(page.entry.ingredients.length).toBeGreaterThan(0);
+      for (const component of page.entry.ingredients) {
+        expect(component.strength_text).toBe('語'.repeat(300));
+        expect(component.source_url).toBe('https://example.com/' + 'a'.repeat(1_900));
+      }
+      completeComponents.push(...page.entry.ingredients);
+      expect(completeComponents.length).toBeLessThanOrEqual(30);
+      offset = page.next_ingredients_offset;
+    } while (offset !== null);
+    expect(completeComponents.map((row) => row.ingredient_id)).toEqual(ingredientIds);
+    expect(new Set(completeComponents.map((row) => row.component_id)).size).toBe(30);
+
     expect(created.product.ingredients[0].ingredient).toEqual({
       ingredient_id: first.ingredient.ingredient_id, canonical_name: 'large-linked-ingredient',
     });
@@ -1220,7 +1339,7 @@ describe('MCP catalog review regressions', () => {
     expect(bytes(history)).toBeLessThanOrEqual(40_000);
     expect(JSON.stringify(history)).not.toContain('secret_payload');
     expect(JSON.stringify(history)).not.toContain('secret_product_payload');
-    expect(history.revisions[0].snapshot.source_data).toEqual(created.product.source_data);
+    expect(history.revisions[0].snapshot.source_data_summary).toEqual(created.product.source_data_summary);
   });
 });
 
@@ -1247,6 +1366,13 @@ describe('MCP catalog query costs', () => {
         }
       }
       const roots = await client.execute("SELECT id FROM medicine_product WHERE normalized_name = 'source-byte-budget'");
+      for (const kind of ['ingredient', 'product']) {
+        const rows = await client.execute('SELECT id FROM medicine_' + kind + ' LIMIT 1');
+        await catalogTool('get_medicine_catalog_entry').handler(context, {
+          patient_id: 'profile-1', entity_kind: kind, entity_id: rows.rows[0].id,
+          names_offset: 1, identifiers_offset: 1, ingredients_offset: 1,
+        });
+      }
       for (const before of [undefined, 2]) {
         await catalogTool('get_medicine_catalog_history').handler(context, {
           patient_id: 'profile-1', entity_kind: 'product', entity_id: roots.rows[0].id,
@@ -1301,6 +1427,46 @@ describe('MCP catalog query costs', () => {
         isolated.close();
         await unlink(path);
       }
+    }
+  });
+
+  it('continues at the fetched bound when the budget removes every root or revision', async () => {
+    const budget = await import('./budget');
+    const cap = budget.capResult;
+    const spy = vi.spyOn(budget, 'capResult').mockImplementation((payload) => {
+      const result = cap(payload);
+      for (const key of ['ingredients', 'products', 'revisions']) {
+        if (key in result) (result as Record<string, unknown>)[key] = [];
+      }
+      return result;
+    });
+    try {
+      const roots = await client.execute('SELECT id FROM medicine_product ORDER BY id LIMIT 2');
+      const ingredients = await client.execute('SELECT id FROM medicine_ingredient ORDER BY id LIMIT 2');
+      const page = await catalogTool('list_medicine_catalog').handler(context, {
+        patient_id: 'profile-1', limit: 1,
+      }) as any;
+      expect(page.products).toEqual([]);
+      expect(page.ingredients).toEqual([]);
+      expect(page.next_product_id).toBe(roots.rows[0].id);
+      expect(page.next_ingredient_id).toBe(ingredients.rows[0].id);
+      const next = await catalogTool('list_medicine_catalog').handler(context, {
+        patient_id: 'profile-1', limit: 1,
+        after_product_id: page.next_product_id, after_ingredient_id: page.next_ingredient_id,
+      }) as any;
+      expect(next.next_product_id).toBe(roots.rows[1].id);
+      expect(next.next_ingredient_id).toBe(ingredients.rows[1].id);
+      const history = await catalogTool('get_medicine_catalog_history').handler(context, {
+        patient_id: 'profile-1', entity_kind: 'product', entity_id: roots.rows[0].id, limit: 1,
+      }) as any;
+      const revisions = await client.execute({
+        sql: 'SELECT revision FROM medicine_catalog_revision WHERE entity_kind = ? AND entity_id = ? ORDER BY revision DESC LIMIT 1',
+        args: ['product', roots.rows[0].id],
+      });
+      expect(history.revisions).toEqual([]);
+      expect(history.next_before_revision).toBe(revisions.rows[0].revision);
+    } finally {
+      spy.mockRestore();
     }
   });
 

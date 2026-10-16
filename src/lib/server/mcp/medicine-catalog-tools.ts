@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, gt, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   medicineCatalogStatuses,
   medicineProductTypes,
@@ -320,7 +320,7 @@ function serializeIngredient(value: MedicineIngredientRecord & SourceSize) {
       provider: value.originProvider,
       external_id: value.originExternalId,
     },
-    source_data: sourceDataSummary(value),
+    source_data_summary: sourceDataSummary(value),
     revision: value.revision,
     created_at: value.createdAt,
     updated_at: value.updatedAt,
@@ -364,7 +364,7 @@ function serializeProduct(value: MedicineProductRecord & SourceSize) {
       provider: value.originProvider,
       external_id: value.originExternalId,
     },
-    source_data: sourceDataSummary(value),
+    source_data_summary: sourceDataSummary(value),
     revision: value.revision,
     created_at: value.createdAt,
     updated_at: value.updatedAt,
@@ -659,13 +659,141 @@ const listMedicineCatalog: ToolDefinition = {
       truncated:
         ingredientPage.length > limit || productPage.length > limit,
     });
-    // A budget-trimmed page must resume after the last returned match.
+    // Resume after the last returned match, or the candidate bound if all were trimmed.
     result.next_ingredient_id = result.ingredients.length < ingredients.length
-      ? result.ingredients.at(-1)?.ingredient_id ?? null
+      ? result.ingredients.at(-1)?.ingredient_id ?? ingredientIds.at(-1) ?? null
       : ingredientPage.length > limit ? ingredientIds.at(-1) ?? null : null;
     result.next_product_id = result.products.length < products.length
-      ? result.products.at(-1)?.product_id ?? null
+      ? result.products.at(-1)?.product_id ?? productIds.at(-1) ?? null
       : productPage.length > limit ? productIds.at(-1) ?? null : null;
+    return result;
+  },
+};
+
+const childCollections = ['names', 'identifiers', 'ingredients'] as const;
+
+function childPage(args: Record<string, unknown>, collection: typeof childCollections[number]) {
+  const offset = args[`${collection}_offset`] ?? 0;
+  const limit = args[`${collection}_limit`] ?? 5;
+  if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) {
+    throw new ToolError(`${collection}_offset must be a non-negative integer`);
+  }
+  if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 0 || limit > 30) {
+    throw new ToolError(`${collection}_limit must be an integer from 0 through 30`);
+  }
+  return { offset, limit };
+}
+
+const getMedicineCatalogEntry: ToolDefinition = {
+  name: 'get_medicine_catalog_entry',
+  title: 'Get medicine catalog entry',
+  description:
+    'Read the identity, revision and complete child rows of one current ingredient or product in bounded pages. Use list_medicine_catalog for root fields. Continue each collection using its next offset. Offsets are zero-based stored positions; a limit of zero skips a collection. Check that revision stays the same while assembling pages.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      patient_id: { type: 'string' },
+      entity_kind: { type: 'string', enum: ['ingredient', 'product'] },
+      entity_id: { type: 'string', maxLength: 128 },
+      ...Object.fromEntries(childCollections.flatMap((collection) => [
+        [`${collection}_offset`, { type: 'integer', minimum: 0 }],
+        [`${collection}_limit`, { type: 'integer', minimum: 0, maximum: 30 }],
+      ])),
+    },
+    required: ['patient_id', 'entity_kind', 'entity_id'],
+    additionalProperties: false,
+  },
+  handler: async (ctx, args) => {
+    const profile = await requirePatient(ctx, args.patient_id);
+    const kind = text(args.entity_kind, 'entity_kind', 40, true);
+    if (kind !== 'ingredient' && kind !== 'product') {
+      throw new ToolError('entity_kind must be ingredient or product');
+    }
+    const id = text(args.entity_id, 'entity_id', 128, true) || '';
+    const pages = {
+      names: childPage(args, 'names'),
+      identifiers: childPage(args, 'identifiers'),
+      ingredients: childPage(args, 'ingredients'),
+    };
+    const ingredientRoots = kind === 'ingredient' ? await db.select(readColumns(medicineIngredient))
+      .from(medicineIngredient).where(and(eq(medicineIngredient.patientId, profile.id), eq(medicineIngredient.id, id))).limit(1) : [];
+    const productRoots = kind === 'product' ? await db.select(readColumns(medicineProduct))
+      .from(medicineProduct).where(and(eq(medicineProduct.patientId, profile.id), eq(medicineProduct.id, id))).limit(1) : [];
+    const root = ingredientRoots[0] ?? productRoots[0];
+    if (!root) throw new ToolError('No such medicine catalog entry');
+    // Owner/order indexes bound each child query, including large continuation offsets.
+    const names = await db.select().from(medicineCatalogName).where(and(
+      eq(medicineCatalogName.patientId, profile.id),
+      eq(kind === 'ingredient' ? medicineCatalogName.ingredientId : medicineCatalogName.productId, id),
+      gte(medicineCatalogName.orderIndex, pages.names.offset),
+    )).orderBy(medicineCatalogName.orderIndex).limit(pages.names.limit + 1);
+    const identifiers = await db.select().from(medicineCatalogIdentifier).where(and(
+      eq(medicineCatalogIdentifier.patientId, profile.id),
+      eq(kind === 'ingredient' ? medicineCatalogIdentifier.ingredientId : medicineCatalogIdentifier.productId, id),
+      gte(medicineCatalogIdentifier.orderIndex, pages.identifiers.offset),
+    )).orderBy(medicineCatalogIdentifier.orderIndex).limit(pages.identifiers.limit + 1);
+    const components = kind === 'product' ? await db.select({
+      ...getTableColumns(medicineProductIngredient), ingredient: readColumns(medicineIngredient),
+    }).from(medicineProductIngredient).innerJoin(medicineIngredient, and(
+      eq(medicineIngredient.id, medicineProductIngredient.ingredientId),
+      eq(medicineIngredient.patientId, medicineProductIngredient.patientId),
+    )).where(and(
+      eq(medicineProductIngredient.patientId, profile.id), eq(medicineProductIngredient.productId, id),
+      gte(medicineProductIngredient.orderIndex, pages.ingredients.offset),
+    )).orderBy(medicineProductIngredient.orderIndex).limit(pages.ingredients.limit + 1) : [];
+    const table = kind === 'ingredient' ? medicineIngredient : medicineProduct;
+    const latest = await db.select({ revision: table.revision }).from(table)
+      .where(and(eq(table.patientId, profile.id), eq(table.id, id))).limit(1);
+    if (latest[0]?.revision !== root.revision) {
+      throw new ToolError('Medicine catalog entry changed while reading; restart child pagination');
+    }
+    const record = kind === 'ingredient'
+      ? { ...serializeIngredient({ ...buildMedicineIngredientRecords(ingredientRoots,
+        names.slice(0, pages.names.limit), identifiers.slice(0, pages.identifiers.limit))[0],
+        sourceDataBytes: root.sourceDataBytes }), ingredients: [] }
+      : serializeProduct({ ...buildMedicineProductRecords(productRoots,
+        names.slice(0, pages.names.limit), identifiers.slice(0, pages.identifiers.limit),
+        components.slice(0, pages.ingredients.limit),
+        buildMedicineIngredientRecords(components.map((row) => row.ingredient), [], []))[0],
+        sourceDataBytes: root.sourceDataBytes });
+    // Root notes and product descriptions can exceed the whole response budget.
+    // Keep this projection small so every child remains reachable independently.
+    const entry = {
+      ...(kind === 'ingredient'
+        ? { ingredient_id: id, canonical_name: ingredientRoots[0].canonicalName }
+        : { product_id: id, display_name: productRoots[0].displayName }),
+      revision: root.revision,
+      source_data_summary: sourceDataSummary(root),
+      names: record.names,
+      identifiers: record.identifiers,
+      ingredients: record.ingredients,
+    };
+    const fetched = { names, identifiers, ingredients: components };
+    const result = {
+      patient_id: profile.id, entity_kind: kind, entity_id: id, entry,
+      next_names_offset: null as number | null,
+      next_identifiers_offset: null as number | null,
+      next_ingredients_offset: null as number | null,
+    };
+    function updateOffsets() {
+      for (const collection of childCollections) {
+        const count = entry[collection].length;
+        result[`next_${collection}_offset`] = fetched[collection].length > count
+          ? count ? fetched[collection][count - 1].orderIndex + 1 : pages[collection].offset
+          : null;
+      }
+    }
+    updateOffsets();
+    // Remove only whole child rows. Never shorten their text or lose a continuation.
+    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_RESULT_BYTES) {
+      const collection = childCollections.filter((key) => entry[key].length > 0)
+        .sort((a, b) => JSON.stringify(entry[b]).length - JSON.stringify(entry[a]).length)[0];
+      if (!collection || childCollections.reduce((count, key) => count + entry[key].length, 0) <= 1) {
+        throw new ToolError('Medicine catalog child exceeds the response budget');
+      }
+      entry[collection].pop();
+      updateOffsets();
+    }
     return result;
   },
 };
@@ -751,7 +879,7 @@ const getMedicineCatalogHistory: ToolDefinition = {
       truncated: rows.length > revisions.length,
     });
     result.next_before_revision = rows.length > result.revisions.length
-      ? result.revisions.at(-1)?.revision ?? null
+      ? result.revisions.at(-1)?.revision ?? rows.slice(0, limit).at(-1)?.revision ?? null
       : null;
     return result;
   },
@@ -1099,6 +1227,7 @@ const updateMedicineProductTool: ToolDefinition = {
 
 export const medicineCatalogTools: ToolDefinition[] = [
   listMedicineCatalog,
+  getMedicineCatalogEntry,
   getMedicineCatalogHistory,
   readMedicineCatalogSource,
   createMedicineIngredientTool,
