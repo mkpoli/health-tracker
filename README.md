@@ -32,23 +32,32 @@ the schema so the `mcp_client`, `mcp_grant` and `mcp_auth_code` tables exist:
 bun run db:push
 ```
 
+When upgrading a database that already has `medicine_claim`, create a backup and prepare its nullable catalog link before Drizzle rebuilds the table:
+
+```bash
+bun run db:prepare:medicine-catalog -- --apply
+bun run db:push -- --force
+```
+
 In the assistant, add `https://<host>/mcp` as a connector. It opens the consent
 screen, where the account holder picks the profiles it may read, demographic
 sharing, measurement writes, and medicine or energy writes. Reference-range
 selection uses assigned gender at birth and age; withholding them yields general
 ranges. Connections are listed and withdrawn under **Connected assistants**.
 
-Ten tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
+Thirteen tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
 `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`,
-`list_medicines`, `list_energy_entries`, and `get_claim_history`.
+`list_medicine_catalog`, `get_medicine_catalog_history`,
+`read_medicine_catalog_source`, `list_medicines`, `list_energy_entries`, and
+`get_claim_history`.
 
-Five tools write. `log_measurement` requires `health:write`.
-`create_medicine`, `update_medicine`, `log_energy_entry`, and
-`update_energy_entry` require `health:claims:write`. The consent screen grants
-these scopes separately. Existing measurement-write grants retain their original
-capability. The two creation tools require a `request_id` for retry safety.
-Updates require the current revision so a newer edit cannot be overwritten.
-Laboratory results continue through the uploaded report review flow.
+Nine tools write. `log_measurement` requires `health:write`. Medicine-plan,
+energy-entry, medicine-ingredient, and medicine-product mutations require
+`health:claims:write`. The consent screen grants these scopes separately.
+Existing measurement-write grants retain their original capability. Creation
+tools require a `request_id` for retry safety. Updates require the current
+revision so a newer edit cannot be overwritten. Laboratory results continue
+through the uploaded report review flow.
 
 Uploaded documents, calorie photos, and the R2 bucket holding them stay outside
 the MCP grant. Energy tools report how many source files are retained.

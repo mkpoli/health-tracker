@@ -13,7 +13,7 @@ The archive contains:
 
 - profile details;
 - reports and recorded values;
-- current medicine entries and their saved revisions;
+- medicine ingredients, packaged products, localized names, identifiers, provenance, saved catalog versions, current medicine plans, and saved plan revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
 - exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
 - import records and retained source files, including Hevy workout CSV files;
@@ -58,7 +58,7 @@ Messages used to prepare Medicine or Calories drafts are copied into the claim's
 
 The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
 
-Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 7 carries source imports and exercise definitions before workouts during restoration, then restores workout revisions after the current records exist.
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 8 carries medicine ingredients before products and medicine plans. It carries source imports and exercise definitions before workouts. Saved revisions are restored after their current records exist.
 
 ## Hevy workout CSV import
 
@@ -122,22 +122,35 @@ curl 'https://<host>/mcp' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicines`, `list_energy_entries`, and `get_claim_history`.
+Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicine_catalog`, `get_medicine_catalog_history`, `read_medicine_catalog_source`, `list_medicines`, `list_energy_entries`, and `get_claim_history`.
 
 A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
 
-- `create_medicine` and `update_medicine` manage the current medicine catalog and schedule claims.
+- `create_medicine_ingredient` and `update_medicine_ingredient` manage reusable active ingredients.
+- `create_medicine_product` and `update_medicine_product` manage packaged or compounded products linked to those ingredients.
+- `create_medicine` and `update_medicine` manage current medicine plans and schedule claims. The optional `product_id` links a plan to an exact catalog product.
 - `log_energy_entry` and `update_energy_entry` manage food intake and energy expenditure. Exercise can be recorded as `direction: "expenditure"` with optional duration and kilocalories.
 
 The consent screen grants each write scope independently. Connections created before claim writes existed retain their measurement capability and require fresh consent for `health:claims:write`.
 
-`create_medicine` and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and claim type. A retry with the same identifier returns the existing claim. Reusing it with different values still returns the first stored claim.
+`create_medicine_ingredient`, `create_medicine_product`, `create_medicine`, and `log_energy_entry` require a caller-generated `request_id` of up to 128 characters. The identifier is scoped to the MCP client, selected profile, and record type. A retry with the same identifier returns the existing record. Reusing it with different values still returns the first stored record.
 
-Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the claim again before proposing another change. Every successful create and update appears in `get_claim_history` with its change source.
+Update calls require `expected_revision` from a previous read. A concurrent edit causes a revision-conflict result carrying the current revision. The caller reads the record again before proposing another change. Medicine plan and energy versions appear in `get_claim_history`. Ingredient and product versions appear in `get_medicine_catalog_history`.
 
 Energy timestamps require ISO form with `Z` or a numeric UTC offset. The profile's IANA timezone is used when the call omits `timezone`. Day filters on `list_energy_entries` use each entry's retained local date. Totals include recorded entries with known kilocalories; drafts and excluded entries remain visible according to the selected filters.
 
-Medicine claims describe the catalog, plan, and schedule. Dose-taking events will use a separate event model. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
+Medicine plan claims describe intended use and schedules. Dose-taking events will use a separate event model. MCP energy tools expose retained-file counts while source photos and their storage URLs remain private. Photo capture and analysis continue through the application.
+
+### Medicine catalog workflow for agents
+
+1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks canonical names, product display names, and localized names.
+2. Create each reusable ingredient with `create_medicine_ingredient`. `names` may carry BCP 47 language tags, name type, country, preferred status, and source details. `identifiers` may carry RxNorm, YJ, HOT, GS1, Wikidata, or another declared code system.
+3. Create the packaged product with `create_medicine_product`. Each item in `ingredients` uses an `ingredient_id` from step 2. Structured strengths use numerator and denominator values with units. `strength_text` preserves the label wording.
+4. Pass the returned `product_id` to `create_medicine` when a medicine plan concerns that exact product. The plan keeps its own editable name, form, strength, route, and schedule snapshot.
+
+Catalog update tools accept selected fields and keep omitted fields unchanged. Updating `names`, `identifiers`, or `ingredients` replaces that collection, so a caller should send the complete desired collection. Every update requires `expected_revision`. The list tool returns the child row IDs needed to preserve a name, identifier, or ingredient component across an update.
+
+`source_data` accepts JSON up to 2 MB on ingredient and product writes. It is suitable for a retained terminology response or regulator payload when the caller has permission to store it. Catalog reads report whether this payload exists and its byte size. `read_medicine_catalog_source` returns bounded JSON chunks with a SHA-256 checksum and continuation offset; an optional `revision` reads the payload saved with that version. Name, identifier, and ingredient-component rows carry their own source type, provider, URL, and retrieval time. Public database labels remain attributed to their source and language.
 
 The MCP endpoint and versioned archive are the supported external integration surfaces. Page actions and retained-file routes serve the web application and may change with its implementation.
 
