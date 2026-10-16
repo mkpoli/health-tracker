@@ -93,7 +93,7 @@ export const medicineProduct = sqliteTable(
 			.notNull()
 			.references(() => patient.id, { onDelete: 'cascade' }),
 		displayName: text('display_name').notNull(),
-		normalizedName: text('normalized_name').notNull(),
+		normalizedName: text('normalized_name').notNull().default(''),
 		productType: text('product_type').notNull().default('other'),
 		status: text('status').notNull().default('active'),
 		doseFormText: text('dose_form_text'),

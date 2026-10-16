@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { medicineProduct } from './db/schema';
 import { createClient } from '@libsql/client';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -31,6 +32,9 @@ describe('medicine catalog schema preparation', () => {
         productNamesNeedPreparation: true, nextCommand: 'bun run db:prepare:medicine-catalog -- --apply',
       });
       expect(run(true)).toMatchObject({ nextCommand: 'bun run db:push' });
+      const normalized = await client.execute("SELECT dflt_value FROM pragma_table_info('medicine_product') WHERE name = 'normalized_name'");
+      expect(normalized.rows[0].dflt_value).toBe("''");
+      expect(medicineProduct.normalizedName.default).toBe('');
       const names = await client.execute('SELECT DISTINCT normalized_name FROM medicine_product ORDER BY normalized_name');
       expect(names.rows.map((row) => row.normalized_name)).toEqual(['abc', 'ärzte']);
       const columns = await client.execute("PRAGMA index_info('medicine_product_patient_name_idx')");
