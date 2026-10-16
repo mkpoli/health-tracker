@@ -509,43 +509,79 @@ function mergedProductArgs(current: MedicineProductRecord, args: Record<string, 
   return { ...args, ...fallback };
 }
 
-async function loadIngredientRecords(roots: Array<typeof medicineIngredient.$inferSelect>) {
+async function loadIngredientRecords(
+  patientId: string,
+  roots: Array<typeof medicineIngredient.$inferSelect>,
+) {
   if (roots.length === 0) return [];
   const ids = roots.map((root) => root.id);
   const names = await db
     .select()
     .from(medicineCatalogName)
-    .where(inArray(medicineCatalogName.ingredientId, ids));
+    .where(
+      and(
+        eq(medicineCatalogName.patientId, patientId),
+        inArray(medicineCatalogName.ingredientId, ids),
+      ),
+    );
   const identifiers = await db
     .select()
     .from(medicineCatalogIdentifier)
-    .where(inArray(medicineCatalogIdentifier.ingredientId, ids));
+    .where(
+      and(
+        eq(medicineCatalogIdentifier.patientId, patientId),
+        inArray(medicineCatalogIdentifier.ingredientId, ids),
+      ),
+    );
   return buildMedicineIngredientRecords(roots, names, identifiers);
 }
 
-async function loadProductRecords(roots: Array<typeof medicineProduct.$inferSelect>) {
+async function loadProductRecords(
+  patientId: string,
+  roots: Array<typeof medicineProduct.$inferSelect>,
+) {
   if (roots.length === 0) return [];
   const ids = roots.map((root) => root.id);
   const names = await db
     .select()
     .from(medicineCatalogName)
-    .where(inArray(medicineCatalogName.productId, ids));
+    .where(
+      and(
+        eq(medicineCatalogName.patientId, patientId),
+        inArray(medicineCatalogName.productId, ids),
+      ),
+    );
   const identifiers = await db
     .select()
     .from(medicineCatalogIdentifier)
-    .where(inArray(medicineCatalogIdentifier.productId, ids));
+    .where(
+      and(
+        eq(medicineCatalogIdentifier.patientId, patientId),
+        inArray(medicineCatalogIdentifier.productId, ids),
+      ),
+    );
   const components = await db
     .select()
     .from(medicineProductIngredient)
-    .where(inArray(medicineProductIngredient.productId, ids));
+    .where(
+      and(
+        eq(medicineProductIngredient.patientId, patientId),
+        inArray(medicineProductIngredient.productId, ids),
+      ),
+    );
   const ingredientIds = [...new Set(components.map((component) => component.ingredientId))];
   const ingredientRoots = ingredientIds.length
     ? await db
         .select()
         .from(medicineIngredient)
-        .where(inArray(medicineIngredient.id, ingredientIds))
+        .where(
+          and(
+            eq(medicineIngredient.patientId, patientId),
+            inArray(medicineIngredient.id, ingredientIds),
+          ),
+        )
     : [];
-  const ingredients = await loadIngredientRecords(ingredientRoots);
+  const ingredients = await loadIngredientRecords(patientId, ingredientRoots);
   return buildMedicineProductRecords(roots, names, identifiers, components, ingredients);
 }
 
@@ -581,16 +617,24 @@ const listMedicineCatalog: ToolDefinition = {
       productConditions.push(eq(medicineProduct.status, status));
     }
     if (query && normalizedQuery) {
+      // SQLite's lower() folds ASCII only, so display names are folded here.
+      const displayNames = await db
+        .select({ id: medicineProduct.id, displayName: medicineProduct.displayName })
+        .from(medicineProduct)
+        .where(eq(medicineProduct.patientId, profile.id));
+      const matchedProductIds = displayNames
+        .filter((row) => normalizedMedicineCatalogName(row.displayName).includes(normalizedQuery))
+        .map((row) => row.id);
       ingredientConditions.push(
         or(
           sql`instr(${medicineIngredient.normalizedName}, ${normalizedQuery}) > 0`,
-          sql`exists (select 1 from medicine_catalog_name where medicine_catalog_name.ingredient_id = ${medicineIngredient.id} and instr(medicine_catalog_name.normalized_name, ${normalizedQuery}) > 0)`,
+          sql`exists (select 1 from medicine_catalog_name where medicine_catalog_name.patient_id = ${profile.id} and medicine_catalog_name.ingredient_id = ${medicineIngredient.id} and instr(medicine_catalog_name.normalized_name, ${normalizedQuery}) > 0)`,
         ) as typeof ingredientConditions[number],
       );
       productConditions.push(
         or(
-          sql`instr(lower(${medicineProduct.displayName}), lower(${normalizedQuery})) > 0`,
-          sql`exists (select 1 from medicine_catalog_name where medicine_catalog_name.product_id = ${medicineProduct.id} and instr(medicine_catalog_name.normalized_name, ${normalizedQuery}) > 0)`,
+          matchedProductIds.length ? inArray(medicineProduct.id, matchedProductIds) : sql`0`,
+          sql`exists (select 1 from medicine_catalog_name where medicine_catalog_name.patient_id = ${profile.id} and medicine_catalog_name.product_id = ${medicineProduct.id} and instr(medicine_catalog_name.normalized_name, ${normalizedQuery}) > 0)`,
         ) as typeof productConditions[number],
       );
     }
@@ -617,8 +661,8 @@ const listMedicineCatalog: ToolDefinition = {
       .select({ value: count() })
       .from(medicineProduct)
       .where(productWhere);
-    const ingredients = await loadIngredientRecords(ingredientRoots);
-    const products = await loadProductRecords(productRoots);
+    const ingredients = await loadIngredientRecords(profile.id, ingredientRoots);
+    const products = await loadProductRecords(profile.id, productRoots);
     return capResult({
       patient_id: profile.id,
       ingredient_total: ingredientTotal[0]?.value ?? 0,
