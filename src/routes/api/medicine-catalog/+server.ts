@@ -1,11 +1,25 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { isMedicineCatalogEntityKind } from '$lib/medicine-catalog';
+import {
+  isMedicineCatalogEntityKind,
+  type MedicineCatalogRevisionSnapshot,
+} from '$lib/medicine-catalog';
 import {
   loadMedicineCatalog,
   loadMedicineCatalogRevisions,
 } from '$lib/server/medicine-catalog-load';
 import { getOwnedPatient, requireUserId } from '$lib/server/ownership';
+
+function archiveSnapshot(snapshot: MedicineCatalogRevisionSnapshot) {
+  if (!('ingredients' in snapshot)) return snapshot;
+  return {
+    ...snapshot,
+    ingredients: snapshot.ingredients.map((component) => {
+      const { sourceData: _sourceData, ...ingredient } = component.ingredient;
+      return { ...component, ingredient };
+    }),
+  };
+}
 
 /**
  * The catalogue with its source payloads and saved versions. The dashboard
@@ -31,11 +45,15 @@ export const GET: RequestHandler = async ({ url, locals }) => {
   }
 
   const catalog = await loadMedicineCatalog(patientId, { sourceData: true });
+  const revisions = await loadMedicineCatalogRevisions(patientId);
   return json(
     {
       medicineIngredients: catalog.ingredients,
-      medicineProducts: catalog.products,
-      medicineCatalogRevisions: await loadMedicineCatalogRevisions(patientId),
+      medicineProducts: catalog.products.map(archiveSnapshot),
+      medicineCatalogRevisions: revisions.map((revision) => ({
+        ...revision,
+        snapshot: archiveSnapshot(revision.snapshot),
+      })),
     },
     { headers },
   );

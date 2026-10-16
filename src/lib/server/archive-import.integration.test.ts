@@ -769,6 +769,113 @@ describe('archive import storage', () => {
     }
   });
 
+  it('exports nested ingredients without source payloads and restores the catalogue', async () => {
+    const patientId = 'catalog-export';
+    const restoredPatientId = 'catalog-restored';
+    for (const id of [patientId, restoredPatientId]) {
+      await client.execute({
+        sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+        args: [id, 'owner-1', id],
+      });
+    }
+    try {
+      for (const batch of [
+        { kind: 'medicineIngredients' as const, items: [medicineIngredientCurrent] },
+        { kind: 'medicineProducts' as const, items: [medicineProductCurrent] },
+        {
+          kind: 'medicineCatalogRevisions' as const,
+          items: [medicineIngredientCurrent, medicineProductFirst, medicineProductCurrent].map(
+            (snapshot) => ({
+              id: `revision-${snapshot.id}-${snapshot.revision}`,
+              patientId: snapshot.patientId,
+              entityKind: 'canonicalName' in snapshot ? 'ingredient' : 'product',
+              entityId: snapshot.id,
+              revision: snapshot.revision,
+              snapshot,
+              changedAt: snapshot.updatedAt,
+              changeOriginKind: 'manual',
+              changeOriginProvider: null,
+            }),
+          ),
+        },
+      ]) {
+        await archiveModule.importArchiveBatch({
+          patientId,
+          sourcePatientId: 'source-patient',
+          ...batch,
+        });
+      }
+
+      const { GET } = await import('../../routes/api/medicine-catalog/+server');
+      const response = await GET({
+        url: new URL(`https://health.example/api/medicine-catalog?patientId=${patientId}`),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(response.status).toBe(200);
+      const exported = await response.json() as {
+        medicineIngredients: unknown[];
+        medicineProducts: unknown[];
+        medicineCatalogRevisions: unknown[];
+      };
+      const loader = await import('./medicine-catalog-load');
+      const catalog = await loader.loadMedicineCatalog(patientId, { sourceData: true });
+      const revisions = await loader.loadMedicineCatalogRevisions(patientId);
+      const expected = {
+        medicineIngredients: structuredClone(catalog.ingredients),
+        medicineProducts: structuredClone(catalog.products),
+        medicineCatalogRevisions: structuredClone(revisions),
+      };
+      const products = [
+        ...expected.medicineProducts,
+        ...expected.medicineCatalogRevisions.flatMap(({ snapshot }) =>
+          'ingredients' in snapshot ? [snapshot] : [],
+        ),
+      ];
+      expect(products).toHaveLength(3);
+      for (const product of products) {
+        expect(product.ingredients).toHaveLength(1);
+        for (const component of product.ingredients) {
+          expect(component.ingredient.sourceData).toEqual({ retained: true });
+          Reflect.deleteProperty(component.ingredient, 'sourceData');
+        }
+      }
+      expect(exported).toEqual(expected);
+      expect(exported.medicineIngredients[0]).toMatchObject({ sourceData: { retained: true } });
+      expect(exported.medicineCatalogRevisions).toHaveLength(3);
+
+      const versions = await GET({
+        url: new URL(
+          `https://health.example/api/medicine-catalog?patientId=${patientId}&entityKind=product&entityId=${catalog.products[0].id}`,
+        ),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(await versions.json()).toEqual({
+        medicineCatalogRevisions: revisions.filter((revision) => revision.entityKind === 'product'),
+      });
+
+      for (const kind of ['medicineIngredients', 'medicineProducts', 'medicineCatalogRevisions'] as const) {
+        await archiveModule.importArchiveBatch({
+          patientId: restoredPatientId,
+          sourcePatientId: patientId,
+          kind,
+          items: exported[kind],
+        });
+      }
+      const restored = await loader.loadMedicineCatalog(restoredPatientId, { sourceData: true });
+      expect(restored.ingredients[0].sourceData).toEqual({ retained: true });
+      expect(restored.products[0].sourceData).toEqual({ label: 'retained' });
+      expect(restored.products[0].ingredients[0].ingredientId).toBe(restored.ingredients[0].id);
+      expect(await loader.loadMedicineCatalogRevisionCounts(restoredPatientId)).toEqual({
+        [`ingredient:${restored.ingredients[0].id}`]: 1,
+        [`product:${restored.products[0].id}`]: 2,
+      });
+    } finally {
+      for (const id of [patientId, restoredPatientId]) {
+        await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [id] });
+      }
+    }
+  });
+
   it('remaps parents, preserves revisions, and stays idempotent', async () => {
     const importFile = new File(['hevy-source'], 'hevy.csv', { type: 'text/csv' });
     const importFileSha256 = await sha256Hex(new Uint8Array(await importFile.arrayBuffer()));
