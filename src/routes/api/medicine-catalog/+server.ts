@@ -10,9 +10,26 @@ import {
 } from '$lib/server/medicine-catalog-load';
 import { getOwnedPatient, requireUserId } from '$lib/server/ownership';
 
+function equalSourceData(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left == null || right == null || typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((value, index) => equalSourceData(value, right[index]));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = Object.keys(leftRecord);
+  return keys.length === Object.keys(rightRecord).length && keys.every((key) =>
+    Object.hasOwn(rightRecord, key) && equalSourceData(leftRecord[key], rightRecord[key]),
+  );
+}
+
 function archiveSnapshot(
   snapshot: MedicineCatalogRevisionSnapshot,
-  ingredientIdsWithSourceData: Set<string>,
+  ingredientSourceData: Map<string, unknown>,
 ) {
   if (!('ingredients' in snapshot) || !Array.isArray(snapshot.ingredients)) return snapshot;
   return {
@@ -24,7 +41,8 @@ function archiveSnapshot(
         !component.ingredient ||
         typeof component.ingredient !== 'object' ||
         Array.isArray(component.ingredient) ||
-        !ingredientIdsWithSourceData.has(component.ingredient.id)
+        !ingredientSourceData.has(component.ingredient.id) ||
+        !equalSourceData(component.ingredient.sourceData, ingredientSourceData.get(component.ingredient.id))
       ) {
         return component;
       }
@@ -59,20 +77,20 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
   const catalog = await loadMedicineCatalog(patientId, { sourceData: true });
   const revisions = await loadMedicineCatalogRevisions(patientId);
-  const ingredientIdsWithSourceData = new Set(
+  const ingredientSourceData = new Map(
     catalog.ingredients
       .filter((ingredient) => ingredient.sourceData != null)
-      .map((ingredient) => ingredient.id),
+      .map((ingredient) => [ingredient.id, ingredient.sourceData]),
   );
   return json(
     {
       medicineIngredients: catalog.ingredients,
       medicineProducts: catalog.products.map((product) =>
-        archiveSnapshot(product, ingredientIdsWithSourceData),
+        archiveSnapshot(product, ingredientSourceData),
       ),
       medicineCatalogRevisions: revisions.map((revision) => ({
         ...revision,
-        snapshot: archiveSnapshot(revision.snapshot, ingredientIdsWithSourceData),
+        snapshot: archiveSnapshot(revision.snapshot, ingredientSourceData),
       })),
     },
     { headers },

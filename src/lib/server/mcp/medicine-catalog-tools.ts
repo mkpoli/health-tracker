@@ -673,30 +673,128 @@ const listMedicineCatalog: ToolDefinition = {
 const childCollections = ['names', 'identifiers', 'ingredients'] as const;
 
 function childPage(args: Record<string, unknown>, collection: typeof childCollections[number]) {
-  const offset = args[`${collection}_offset`] ?? 0;
+  const offset = args[`${collection}_offset`] === undefined ? 0 : args[`${collection}_offset`];
   const limit = args[`${collection}_limit`] ?? 5;
-  if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) {
-    throw new ToolError(`${collection}_offset must be a non-negative integer`);
+  if (offset !== null && (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0)) {
+    throw new ToolError(`${collection}_offset must be a non-negative integer or null`);
   }
   if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 0 || limit > 30) {
     throw new ToolError(`${collection}_limit must be an integer from 0 through 30`);
   }
-  return { offset, limit };
+  return { offset, limit: offset === null ? 0 : limit };
+}
+
+type ChildPages = Record<typeof childCollections[number], ReturnType<typeof childPage>>;
+
+type EntryChildren = {
+  names: ReturnType<typeof inputName>[];
+  identifiers: ReturnType<typeof inputIdentifier>[];
+  ingredients: ReturnType<typeof serializeComponent>[];
+};
+
+function entryPage<T extends EntryChildren>(
+  patientId: string,
+  kind: string,
+  id: string,
+  entry: T,
+  fetched: Record<typeof childCollections[number], Array<{ orderIndex: number }>>,
+  pages: ChildPages,
+) {
+  const result = {
+    patient_id: patientId, entity_kind: kind, entity_id: id, entry,
+    truncated: false,
+    next_names_offset: null as number | null,
+    next_identifiers_offset: null as number | null,
+    next_ingredients_offset: null as number | null,
+  };
+  function updateOffsets() {
+    for (const collection of childCollections) {
+      const count = entry[collection].length;
+      result[`next_${collection}_offset`] = pages[collection].limit > 0 && fetched[collection].length > count
+        ? count ? fetched[collection][count - 1].orderIndex + 1 : pages[collection].offset
+        : null;
+    }
+  }
+  updateOffsets();
+  // Remove only whole child rows. Never shorten their text or lose a continuation.
+  while (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_RESULT_BYTES) {
+    const collection = childCollections.filter((key) => entry[key].length > 0)
+      .sort((a, b) => JSON.stringify(entry[b]).length - JSON.stringify(entry[a]).length)[0];
+    if (!collection || childCollections.reduce((count, key) => count + entry[key].length, 0) <= 1) {
+      throw new ToolError('Medicine catalog child exceeds the response budget');
+    }
+    entry[collection].pop();
+    result.truncated = true;
+    updateOffsets();
+  }
+  return result;
+}
+
+function snapshotChildren(collection: typeof childCollections[number], page: ReturnType<typeof childPage>) {
+  if (page.limit === 0) return sql<string>`'[]'`;
+  // Only the selected revision is visited; each saved collection has at most
+  // 30 children. Imports may store them out of order. Strip nested source data.
+  const value = collection === 'ingredients'
+    ? sql`json_set(value, '$.ingredient', json_object(
+      'id', json_extract(value, '$.ingredient.id'),
+      'canonicalName', json_extract(value, '$.ingredient.canonicalName')))`
+    : sql`value`;
+  return sql<string>`(select json_group_array(json(child)) from (
+    select ${value} as child from json_each(${medicineCatalogRevision.snapshot}, ${'$.' + collection})
+    where json_extract(value, '$.orderIndex') >= ${page.offset}
+    order by json_extract(value, '$.orderIndex')
+    limit ${page.limit + 1}))`;
+}
+
+async function savedEntryPage(patientId: string, kind: string, id: string, revision: number, pages: ChildPages) {
+  const rows = await db.select({
+    canonicalName: sql<string>`json_extract(${medicineCatalogRevision.snapshot}, '$.canonicalName')`,
+    displayName: sql<string>`json_extract(${medicineCatalogRevision.snapshot}, '$.displayName')`,
+    revision: medicineCatalogRevision.revision,
+    sourceDataBytes: sql<number | null>`case
+      when json_type(${medicineCatalogRevision.snapshot}, '$.sourceData') in ('null') then null
+      else length(cast(${medicineCatalogRevision.snapshot} -> '$.sourceData' as blob)) end`,
+    names: snapshotChildren('names', pages.names),
+    identifiers: snapshotChildren('identifiers', pages.identifiers),
+    ingredients: kind === 'product' ? snapshotChildren('ingredients', pages.ingredients) : sql<string>`'[]'`,
+  }).from(medicineCatalogRevision).where(and(
+    eq(medicineCatalogRevision.patientId, patientId),
+    eq(medicineCatalogRevision.entityKind, kind),
+    eq(medicineCatalogRevision.entityId, id),
+    eq(medicineCatalogRevision.revision, revision),
+  )).limit(1);
+  const root = rows[0];
+  if (!root) throw new ToolError('No such medicine catalog revision');
+  const names = JSON.parse(root.names) as MedicineCatalogNameRecord[];
+  const identifiers = JSON.parse(root.identifiers) as MedicineCatalogIdentifierRecord[];
+  const ingredients = JSON.parse(root.ingredients) as MedicineProductIngredientRecord[];
+  const entry = {
+    ...(kind === 'ingredient'
+      ? { ingredient_id: id, canonical_name: root.canonicalName }
+      : { product_id: id, display_name: root.displayName }),
+    revision: root.revision,
+    source_data_summary: sourceDataSummary({ sourceData: null, sourceDataBytes: root.sourceDataBytes }),
+    names: names.slice(0, pages.names.limit).map(inputName),
+    identifiers: identifiers.slice(0, pages.identifiers.limit).map(inputIdentifier),
+    ingredients: ingredients.slice(0, pages.ingredients.limit).map(serializeComponent),
+  };
+  return entryPage(patientId, kind, id, entry, { names, identifiers, ingredients }, pages);
 }
 
 const getMedicineCatalogEntry: ToolDefinition = {
   name: 'get_medicine_catalog_entry',
   title: 'Get medicine catalog entry',
   description:
-    'Read the identity, revision and complete child rows of one current ingredient or product in bounded pages. Use list_medicine_catalog for root fields. Continue each collection using its next offset. Offsets are zero-based stored positions; a limit of zero skips a collection. Check that revision stays the same while assembling pages.',
+    'Read the identity, revision and complete child rows of one current or saved ingredient or product in bounded pages. Set revision to read a saved snapshot. Use list_medicine_catalog for root fields. Continue each collection using its next offset. Offsets are zero-based stored positions; a null offset or zero limit skips a collection. If truncated leaves a collection empty with an unchanged offset, request it separately. Check that revision stays the same while assembling current pages.',
   inputSchema: {
     type: 'object',
     properties: {
       patient_id: { type: 'string' },
       entity_kind: { type: 'string', enum: ['ingredient', 'product'] },
       entity_id: { type: 'string', maxLength: 128 },
+      revision: { type: 'integer', minimum: 1 },
       ...Object.fromEntries(childCollections.flatMap((collection) => [
-        [`${collection}_offset`, { type: 'integer', minimum: 0 }],
+        [`${collection}_offset`, { type: ['integer', 'null'], minimum: 0 }],
         [`${collection}_limit`, { type: 'integer', minimum: 0, maximum: 30 }],
       ])),
     },
@@ -715,6 +813,9 @@ const getMedicineCatalogEntry: ToolDefinition = {
       identifiers: childPage(args, 'identifiers'),
       ingredients: childPage(args, 'ingredients'),
     };
+    if (args.revision !== undefined) {
+      return savedEntryPage(profile.id, kind, id, positiveInteger(args.revision, 'revision'), pages);
+    }
     const ingredientRoots = kind === 'ingredient' ? await db.select(readColumns(medicineIngredient))
       .from(medicineIngredient).where(and(eq(medicineIngredient.patientId, profile.id), eq(medicineIngredient.id, id))).limit(1) : [];
     const productRoots = kind === 'product' ? await db.select(readColumns(medicineProduct))
@@ -722,24 +823,24 @@ const getMedicineCatalogEntry: ToolDefinition = {
     const root = ingredientRoots[0] ?? productRoots[0];
     if (!root) throw new ToolError('No such medicine catalog entry');
     // Owner/order indexes bound each child query, including large continuation offsets.
-    const names = await db.select().from(medicineCatalogName).where(and(
+    const names = pages.names.limit > 0 ? await db.select().from(medicineCatalogName).where(and(
       eq(medicineCatalogName.patientId, profile.id),
       eq(kind === 'ingredient' ? medicineCatalogName.ingredientId : medicineCatalogName.productId, id),
-      gte(medicineCatalogName.orderIndex, pages.names.offset),
-    )).orderBy(medicineCatalogName.orderIndex).limit(pages.names.limit + 1);
-    const identifiers = await db.select().from(medicineCatalogIdentifier).where(and(
+      gte(medicineCatalogName.orderIndex, pages.names.offset!),
+    )).orderBy(medicineCatalogName.orderIndex).limit(pages.names.limit + 1) : [];
+    const identifiers = pages.identifiers.limit > 0 ? await db.select().from(medicineCatalogIdentifier).where(and(
       eq(medicineCatalogIdentifier.patientId, profile.id),
       eq(kind === 'ingredient' ? medicineCatalogIdentifier.ingredientId : medicineCatalogIdentifier.productId, id),
-      gte(medicineCatalogIdentifier.orderIndex, pages.identifiers.offset),
-    )).orderBy(medicineCatalogIdentifier.orderIndex).limit(pages.identifiers.limit + 1);
-    const components = kind === 'product' ? await db.select({
+      gte(medicineCatalogIdentifier.orderIndex, pages.identifiers.offset!),
+    )).orderBy(medicineCatalogIdentifier.orderIndex).limit(pages.identifiers.limit + 1) : [];
+    const components = kind === 'product' && pages.ingredients.limit > 0 ? await db.select({
       ...getTableColumns(medicineProductIngredient), ingredient: readColumns(medicineIngredient),
     }).from(medicineProductIngredient).innerJoin(medicineIngredient, and(
       eq(medicineIngredient.id, medicineProductIngredient.ingredientId),
       eq(medicineIngredient.patientId, medicineProductIngredient.patientId),
     )).where(and(
       eq(medicineProductIngredient.patientId, profile.id), eq(medicineProductIngredient.productId, id),
-      gte(medicineProductIngredient.orderIndex, pages.ingredients.offset),
+      gte(medicineProductIngredient.orderIndex, pages.ingredients.offset!),
     )).orderBy(medicineProductIngredient.orderIndex).limit(pages.ingredients.limit + 1) : [];
     const table = kind === 'ingredient' ? medicineIngredient : medicineProduct;
     const latest = await db.select({ revision: table.revision }).from(table)
@@ -768,33 +869,7 @@ const getMedicineCatalogEntry: ToolDefinition = {
       identifiers: record.identifiers,
       ingredients: record.ingredients,
     };
-    const fetched = { names, identifiers, ingredients: components };
-    const result = {
-      patient_id: profile.id, entity_kind: kind, entity_id: id, entry,
-      next_names_offset: null as number | null,
-      next_identifiers_offset: null as number | null,
-      next_ingredients_offset: null as number | null,
-    };
-    function updateOffsets() {
-      for (const collection of childCollections) {
-        const count = entry[collection].length;
-        result[`next_${collection}_offset`] = fetched[collection].length > count
-          ? count ? fetched[collection][count - 1].orderIndex + 1 : pages[collection].offset
-          : null;
-      }
-    }
-    updateOffsets();
-    // Remove only whole child rows. Never shorten their text or lose a continuation.
-    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_RESULT_BYTES) {
-      const collection = childCollections.filter((key) => entry[key].length > 0)
-        .sort((a, b) => JSON.stringify(entry[b]).length - JSON.stringify(entry[a]).length)[0];
-      if (!collection || childCollections.reduce((count, key) => count + entry[key].length, 0) <= 1) {
-        throw new ToolError('Medicine catalog child exceeds the response budget');
-      }
-      entry[collection].pop();
-      updateOffsets();
-    }
-    return result;
+    return entryPage(profile.id, kind, id, entry, { names, identifiers, ingredients: components }, pages);
   },
 };
 
@@ -802,7 +877,7 @@ const getMedicineCatalogHistory: ToolDefinition = {
   name: 'get_medicine_catalog_history',
   title: 'Get medicine catalog history',
   description:
-    'Saved versions of one medicine ingredient or product, newest first. Each version includes its snapshot and change source, with source payloads available separately. Continue with next_before_revision.',
+    'Saved versions of one medicine ingredient or product, newest first. Each version includes its snapshot and change source, with source payloads available separately. Continue with next_before_revision. For truncated snapshot children, call get_medicine_catalog_entry with that revision and child offsets and limits.',
   inputSchema: {
     type: 'object',
     properties: {
