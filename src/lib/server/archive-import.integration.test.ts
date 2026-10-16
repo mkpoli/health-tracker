@@ -954,6 +954,52 @@ describe('archive import storage', () => {
     }
   });
 
+  it('exports catalogue entries ordered by updatedAt then id', async () => {
+    const patientId = 'catalog-export-order';
+    await client.execute({
+      sql: 'INSERT INTO patient (id, owner_user_id, name) VALUES (?, ?, ?)',
+      args: [patientId, 'owner-1', patientId],
+    });
+    try {
+      for (const [suffix, name, updatedAt] of [
+        ['b', 'Alpha', '2026-01-02T00:00:00.000Z'],
+        ['z', 'Beta', '2026-01-01T00:00:00.000Z'],
+        ['a', 'Gamma', '2026-01-02T00:00:00.000Z'],
+      ]) {
+        await client.execute({
+          sql: `INSERT INTO medicine_ingredient
+            (id, patient_id, canonical_name, normalized_name, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [`${patientId}-ingredient-${suffix}`, patientId, name, name.toLowerCase(), updatedAt],
+        });
+        await client.execute({
+          sql: `INSERT INTO medicine_product (id, patient_id, display_name, updated_at)
+            VALUES (?, ?, ?, ?)`,
+          args: [`${patientId}-product-${suffix}`, patientId, name, updatedAt],
+        });
+      }
+
+      const { GET } = await import('../../routes/api/medicine-catalog/+server');
+      const response = await GET({
+        url: new URL(`https://health.example/api/medicine-catalog?patientId=${patientId}`),
+        locals: { user: { sub: 'owner-1' } },
+      } as Parameters<typeof GET>[0]);
+      expect(response.status).toBe(200);
+      const exported = await response.json() as {
+        medicineIngredients: Array<{ id: string }>;
+        medicineProducts: Array<{ id: string }>;
+      };
+      expect(exported.medicineIngredients.map(({ id }) => id)).toEqual(
+        ['z', 'a', 'b'].map((suffix) => `${patientId}-ingredient-${suffix}`),
+      );
+      expect(exported.medicineProducts.map(({ id }) => id)).toEqual(
+        ['z', 'a', 'b'].map((suffix) => `${patientId}-product-${suffix}`),
+      );
+    } finally {
+      await client.execute({ sql: 'DELETE FROM patient WHERE id = ?', args: [patientId] });
+    }
+  });
+
   it('exports nested ingredients without source payloads and restores the catalogue', async () => {
     const patientId = 'catalog-export';
     const restoredPatientId = 'catalog-restored';
