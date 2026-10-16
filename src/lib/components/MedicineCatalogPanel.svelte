@@ -3,7 +3,7 @@
   import { invalidateAll } from '$app/navigation';
   import type { SubmitFunction } from '@sveltejs/kit';
   import * as m from '$lib/paraglide/messages.js';
-  import { createModalController } from '$lib/modal';
+  import { createModalController, refreshAfterSave } from '$lib/modal';
   import { getLocale } from '$lib/paraglide/runtime';
   import { fetchMedicineCatalogRevisions } from '$lib/medicine-catalog-client';
   import {
@@ -394,32 +394,36 @@
     }),
   );
 
-  const submitCatalog: SubmitFunction = () => {
+  const submitCatalog: SubmitFunction = ({ cancel }) => {
+    if (saving) { cancel(); return; }
     saving = true;
     saveError = '';
     return async ({ result, update }) => {
-      if (result.type === 'success') {
-        await update({ reset: true, invalidateAll: true });
-        saving = false;
-        editorKind = null;
-        return;
-      }
-      if (result.type === 'failure' && result.status === 409) {
-        await invalidateAll();
-        const code = 'data' in result && result.data && typeof result.data === 'object'
-          ? String((result.data as Record<string, unknown>).code || '')
-          : '';
-        saveError = code === 'medicine_catalog_ingredient_in_use'
-          ? m.medicine_catalog_ingredient_in_use()
-          : m.claim_revision_stale();
-      } else {
+      try {
+        if (result.type === 'success') {
+          await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
+          editorKind = null;
+          return;
+        }
+        if (result.type === 'failure' && result.status === 409) {
+          await invalidateAll();
+          const code = String(result.data?.code ?? '');
+          saveError = code === 'medicine_catalog_ingredient_in_use'
+            ? m.medicine_catalog_ingredient_in_use()
+            : m.claim_revision_stale();
+        } else {
+          saveError = m.medicine_catalog_save_failed();
+        }
+      } catch {
         saveError = m.medicine_catalog_save_failed();
+      } finally {
+        saving = false;
       }
-      saving = false;
     };
   };
 
   const submitDelete: SubmitFunction = (submission) => {
+    if (saving) { submission.cancel(); return; }
     const message = editorKind === 'ingredient'
       ? m.medicine_catalog_delete_ingredient_confirm({ name: ingredientDraft.canonicalName })
       : m.medicine_catalog_delete_product_confirm({ name: productDraft.displayName });
