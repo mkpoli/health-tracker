@@ -31,7 +31,7 @@ export async function loadMedicineCatalog(patientId: string, options: { sourceDa
             .select()
             .from(medicineIngredient)
             .where(eq(medicineIngredient.patientId, patientId))
-            .orderBy(medicineIngredient.canonicalName)
+            .orderBy(medicineIngredient.updatedAt, medicineIngredient.id)
         : readDb
             .select(ingredientColumns)
             .from(medicineIngredient)
@@ -43,7 +43,7 @@ export async function loadMedicineCatalog(patientId: string, options: { sourceDa
             .select()
             .from(medicineProduct)
             .where(eq(medicineProduct.patientId, patientId))
-            .orderBy(desc(medicineProduct.updatedAt))
+            .orderBy(medicineProduct.updatedAt, medicineProduct.id)
         : readDb
             .select(productColumns)
             .from(medicineProduct)

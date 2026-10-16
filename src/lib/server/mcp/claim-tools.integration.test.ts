@@ -67,6 +67,7 @@ beforeAll(async () => {
       id TEXT PRIMARY KEY NOT NULL,
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
       display_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
       product_type TEXT NOT NULL DEFAULT 'other',
       status TEXT NOT NULL DEFAULT 'active',
       dose_form_text TEXT,
@@ -287,6 +288,17 @@ beforeAll(async () => {
   `);
   claimTools = await import('./claim-tools');
   catalogTools = await import('./medicine-catalog-tools');
+  const schema = await import('../db/schema');
+  const { getTableConfig } = await import('drizzle-orm/sqlite-core');
+  for (const table of [schema.medicineIngredient, schema.medicineProduct, schema.medicineCatalogName,
+    schema.medicineCatalogIdentifier, schema.medicineProductIngredient, schema.medicineCatalogRevision]) {
+    const config = getTableConfig(table);
+    for (const index of config.indexes) {
+      const columns = index.config.columns.map((column) => '"' + ('name' in column ? column.name : '') + '"');
+      await client.execute('CREATE ' + (index.config.unique ? 'UNIQUE ' : '') + 'INDEX IF NOT EXISTS "' +
+        index.config.name + '" ON "' + config.name + '" (' + columns.join(', ') + ')');
+    }
+  }
   catalogMutations = await import('../medicine-catalog-mutations');
   toolsModule = await import('./tools');
   protocolModule = await import('./protocol');
@@ -401,13 +413,13 @@ describe('MCP medicine catalog', () => {
       patient_id: 'profile-1',
       query: 'ウゴービ',
     })) as any;
-    expect(listed.product_total).toBe(1);
+    expect(listed.product_count).toBe(1);
     expect(listed.products[0].identifiers[0]).toMatchObject({ system: 'YJ', code: '2499418G1020' });
     const normalizedSearch = (await catalogTool('list_medicine_catalog').handler(context, {
       patient_id: 'profile-1',
       query: 'Ｗｅｇｏｖｙ',
     })) as any;
-    expect(normalizedSearch.product_total).toBe(1);
+    expect(normalizedSearch.product_count).toBe(1);
 
     const medicine = (await tool('create_medicine').handler(context, {
       patient_id: 'profile-1',
@@ -492,7 +504,7 @@ describe('MCP medicine catalog', () => {
       catalogMutations.deleteMedicineIngredient({
         patientId: 'profile-1',
         id: ingredient.ingredient_id,
-        expectedRevision: ingredient.revision,
+        expectedRevision: 1,
       }),
     ).rejects.toBeInstanceOf(catalogMutations.MedicineCatalogIngredientInUseError);
     await expect(
@@ -543,7 +555,7 @@ describe('MCP medicine catalog', () => {
     await catalogMutations.deleteMedicineIngredient({
       patientId: 'profile-1',
       id: ingredient.ingredient_id,
-      expectedRevision: ingredient.revision,
+      expectedRevision: 1,
     });
     const ingredientRows = await client.execute({
       sql: `SELECT
@@ -955,5 +967,361 @@ describe('MCP claim permissions', () => {
       args: ['Should stay absent'],
     });
     expect(absent.rows[0]?.count).toBe(0);
+  });
+});
+
+describe('MCP catalog review regressions', () => {
+  async function ingredient(key: string, extra: Record<string, unknown> = {}) {
+    return await catalogTool('create_medicine_ingredient').handler(context, {
+      patient_id: 'profile-1', request_id: key, canonical_name: key, ...extra,
+    }) as any;
+  }
+
+  async function product(key: string, extra: Record<string, unknown> = {}) {
+    return await catalogTool('create_medicine_product').handler(context, {
+      patient_id: 'profile-1', request_id: key, display_name: key, ...extra,
+    }) as any;
+  }
+
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+  it('updates ingredients, retains omitted fields, and rejects stale revisions', async () => {
+    const first = await ingredient('ingredient-update', {
+      names: [{ name: 'Original name', language_tag: 'en' }],
+      identifiers: [{ system: 'test', code: '123' }],
+      source_data: { retained: '原文' },
+    });
+    const changed = await catalogTool('update_medicine_ingredient').handler(context, {
+      patient_id: 'profile-1', ingredient_id: first.ingredient.ingredient_id,
+      expected_revision: 1, canonical_name: 'Updated ingredient', notes: 'Correction',
+    }) as any;
+    expect(changed.ingredient).toMatchObject({
+      canonical_name: 'Updated ingredient', revision: 2,
+      names: first.ingredient.names, identifiers: first.ingredient.identifiers,
+      source_data: first.ingredient.source_data,
+    });
+    await expect(catalogTool('update_medicine_ingredient').handler(context, {
+      patient_id: 'profile-1', ingredient_id: first.ingredient.ingredient_id,
+      expected_revision: 1, notes: 'Stale change',
+    })).rejects.toThrow('Revision conflict; current_revision is 2');
+    const history = await catalogTool('get_medicine_catalog_history').handler(context, {
+      patient_id: 'profile-1', entity_kind: 'ingredient', entity_id: first.ingredient.ingredient_id,
+    }) as any;
+    expect(history.revisions.map((row: any) => row.revision)).toEqual([2, 1]);
+    expect(history.revisions[0].snapshot.source_data).toEqual(first.ingredient.source_data);
+    expect(JSON.stringify(history)).not.toContain('原文');
+  });
+
+  it.each(['ingredient', 'product'] as const)('resolves overlapping %s creates inside the transaction', async (kind) => {
+    const name = kind === 'ingredient' ? 'canonical_name' : 'display_name';
+    const args = { patient_id: 'profile-1', request_id: 'overlap-' + kind, [name]: 'Original' };
+    const create = catalogTool('create_medicine_' + kind);
+    const results = await Promise.all([
+      create.handler(context, args),
+      create.handler(context, { ...args, [name]: 'Concurrent retry' }),
+    ]) as any[];
+    expect(results.map((row) => row.created).sort()).toEqual([false, true]);
+    expect(results[0][kind]).toEqual(results[1][kind]);
+    const id = results[0][kind][kind + '_id'];
+    const revisions = await client.execute({
+      sql: 'SELECT count(*) AS count FROM medicine_catalog_revision WHERE entity_kind = ? AND entity_id = ?',
+      args: [kind, id],
+    });
+    expect(revisions.rows[0].count).toBe(1);
+    await client.execute({ sql: 'UPDATE medicine_' + kind + ' SET origin_provider = ? WHERE id = ?', args: ['other-client', id] });
+    await expect(create.handler(context, args)).rejects.toThrow('identifier collision');
+  });
+
+  it.each(['name_id', 'identifier_id', 'component_id'] as const)('rejects an unknown %s without advancing the revision', async (field) => {
+    const base = await ingredient('child-reference-' + field);
+    const first = await product('child-reference-product-' + field, {
+      names: [{ name: 'Existing name' }],
+      identifiers: [{ system: 'test', code: 'existing' }],
+      ingredients: [{ ingredient_id: base.ingredient.ingredient_id }],
+    });
+    const fields = field === 'name_id' ? { names: [{ name_id: 'missing', name: 'Invalid' }] }
+      : field === 'identifier_id' ? { identifiers: [{ identifier_id: 'missing', system: 'test', code: '123' }] }
+      : { ingredients: [{ component_id: 'missing', ingredient_id: base.ingredient.ingredient_id }] };
+    await expect(catalogTool('update_medicine_product').handler(context, {
+      patient_id: 'profile-1', product_id: first.product.product_id, expected_revision: 1, ...fields,
+    })).rejects.toThrow('Unknown ' + field);
+    const stored = await catalogMutations.getMedicineProductRecord('profile-1', first.product.product_id);
+    expect(stored?.revision).toBe(1);
+    expect(stored?.names[0].id).toBe(first.product.names[0].name_id);
+    if (field !== 'component_id') {
+      await expect(catalogTool('update_medicine_ingredient').handler(context, {
+        patient_id: 'profile-1', ingredient_id: base.ingredient.ingredient_id, expected_revision: 1, ...fields,
+      })).rejects.toThrow('Unknown ' + field);
+    }
+  });
+
+  it.each([
+    { market_country: 'JPN' },
+    { names: [{ name: 'Country', jurisdiction: 'JPN' }] },
+    { identifiers: [{ system: 'test', code: '123', jurisdiction: 'JPN' }] },
+  ])('reports invalid_country before field length for %j', async (fields) => {
+    await expect(product('invalid-country-' + JSON.stringify(fields), fields)).rejects.toThrow('invalid_country');
+  });
+
+  it('round-trips product form, route, appearance, names, and identifiers', async () => {
+    const linked = await ingredient('round-trip-component');
+    const first = await product('round-trip', {
+      dose_form: 'Tablet', dose_form_system: 'form-system', dose_form_code: 'tablet',
+      route: 'Oral', route_system: 'route-system', route_code: 'oral',
+      imprint: 'A1', color: 'white', shape: 'round', market_country: 'jp',
+      names: [{ name: 'Read and write', jurisdiction: 'jp' }],
+      identifiers: [{ system: 'test', code: 'abc', jurisdiction: 'jp' }],
+      ingredients: [{ ingredient_id: linked.ingredient.ingredient_id }],
+    });
+    const read = await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1', query: 'round-trip',
+    }) as any;
+    const record = read.products[0];
+    expect(record).toMatchObject({
+      dose_form_code: 'tablet', dose_form_system: 'form-system',
+      route_code: 'oral', route_system: 'route-system',
+      imprint: 'A1', color: 'white', shape: 'round', market_country: 'JP',
+    });
+    expect(record).not.toHaveProperty('appearance');
+    const schema = catalogTool('update_medicine_product').inputSchema as any;
+    expect(Object.keys(record.ingredients[0]).every((key) => key in schema.properties.ingredients.items.properties)).toBe(true);
+    const fields = Object.fromEntries(Object.keys(catalogTool('update_medicine_product').inputSchema.properties as object)
+      .filter((key) => key in record && key !== 'source_data').map((key) => [key, record[key]]));
+    const changed = await catalogTool('update_medicine_product').handler(context, {
+      ...fields, patient_id: 'profile-1', product_id: first.product.product_id, expected_revision: 1,
+    }) as any;
+    expect(changed.product).toMatchObject({ ...record, revision: 2, updated_at: expect.any(String) });
+  });
+
+  it('rejects source_data over 2 MB before inserting', async () => {
+    await expect(ingredient('oversized-ingredient', { source_data: 'x'.repeat(2 * 1024 * 1024) }))
+      .rejects.toThrow('source_data must be valid JSON smaller than 2 MB');
+    await expect(product('oversized-product', { source_data: '語'.repeat(700_000) }))
+      .rejects.toThrow('source_data must be valid JSON smaller than 2 MB');
+    const absent = await client.execute({
+      sql: 'SELECT id FROM medicine_ingredient WHERE patient_id = ? AND normalized_name = ?',
+      args: ['profile-1', 'oversized-ingredient'],
+    });
+    expect(absent.rows).toHaveLength(0);
+  });
+
+  it('keeps source chunks within the byte budget and reconstructs Unicode and escaped JSON', async () => {
+    const source = { text: '😀'.repeat(21_000) + '"\n\\'.repeat(6_000) + '終わり' };
+    const first = await product('source-byte-budget', { source_data: source });
+    const args = { patient_id: 'profile-1', entity_kind: 'product', entity_id: first.product.product_id };
+    let offset = 0;
+    let reconstructed = '';
+    let checksum: string | null = null;
+    for (;;) {
+      const part = await catalogTool('read_medicine_catalog_source').handler(context, {
+        ...args, offset, limit: 10_000, revision: 1,
+      }) as any;
+      expect(bytes(part)).toBeLessThanOrEqual(40_000);
+      expect(part.chunk).not.toMatch(/[\ud800-\udbff]$/u);
+      expect(part.sha256).toBe(checksum ?? part.sha256);
+      checksum = part.sha256;
+      reconstructed += part.chunk;
+      if (part.complete) break;
+      expect(part.next_offset).toBeGreaterThan(offset);
+      offset = part.next_offset;
+    }
+    expect(JSON.parse(reconstructed)).toEqual(source);
+    const end = Array.from(reconstructed).length;
+    const atEnd = await catalogTool('read_medicine_catalog_source').handler(context, { ...args, offset: end }) as any;
+    expect(atEnd).toMatchObject({ chunk: '', complete: true, next_offset: null });
+    await expect(catalogTool('read_medicine_catalog_source').handler(context, { ...args, offset: end + 1 }))
+      .rejects.toThrow('offset is past the source payload');
+  });
+
+  it('budgets continuation metadata when an otherwise final chunk must be clipped', async () => {
+    const first = await product('source-final-chunk', { source_data: '😀'.repeat(9_998) });
+    const args = { patient_id: 'profile-1', entity_kind: 'product', entity_id: first.product.product_id, limit: 10_000 };
+    const part = await catalogTool('read_medicine_catalog_source').handler(context, args) as any;
+    expect(bytes(part)).toBeLessThanOrEqual(40_000);
+    expect(part.complete).toBe(false);
+    const last = await catalogTool('read_medicine_catalog_source').handler(context, { ...args, offset: part.next_offset }) as any;
+    expect(last.complete).toBe(true);
+    expect(JSON.parse(part.chunk + last.chunk)).toBe('😀'.repeat(9_998));
+  });
+
+  it('lets a read-only grant reach the source reader through the protocol', async () => {
+    const first = await ingredient('read-only-source', { source_data: { value: 'readable' } });
+    const readContext = { ...context, canWriteClaims: false, canWriteMeasurements: false,
+      grant: { ...context.grant, lastUsedAt: new Date().toISOString() } };
+    const response = await protocolModule.dispatch({
+      jsonrpc: '2.0', id: 101, method: 'tools/call',
+      params: { name: 'read_medicine_catalog_source', arguments: {
+        patient_id: 'profile-1', entity_kind: 'ingredient', entity_id: first.ingredient.ingredient_id,
+      } },
+    }, readContext) as any;
+    expect(response.result.isError).toBe(false);
+    expect(JSON.parse(response.result.structuredContent.chunk)).toEqual({ value: 'readable' });
+  });
+
+  it('reaches every revision beyond the first 100, including budget-trimmed pages', async () => {
+    const first = await ingredient('history-pagination');
+    const id = first.ingredient.ingredient_id;
+    await client.batch(Array.from({ length: 124 }, (_, index) => ({
+      sql: `INSERT INTO medicine_catalog_revision
+        (id, patient_id, entity_kind, entity_id, revision, snapshot, changed_at, change_origin_kind)
+        SELECT ?, patient_id, entity_kind, entity_id, ?, json_set(snapshot, '$.revision', ?, '$.notes', ?), changed_at, change_origin_kind
+        FROM medicine_catalog_revision WHERE entity_kind = 'ingredient' AND entity_id = ? AND revision = 1`,
+      args: [crypto.randomUUID(), index + 2, index + 2, '履歴'.repeat(1_000), id],
+    })), 'write');
+    await client.execute({ sql: 'UPDATE medicine_ingredient SET revision = 125 WHERE id = ?', args: [id] });
+    const seen: number[] = [];
+    let before: number | undefined;
+    do {
+      const page = await catalogTool('get_medicine_catalog_history').handler(context, {
+        patient_id: 'profile-1', entity_kind: 'ingredient', entity_id: id, limit: 100,
+        ...(before === undefined ? {} : { before_revision: before }),
+      }) as any;
+      expect(bytes(page)).toBeLessThanOrEqual(40_000);
+      expect(page.revisions.length).toBeGreaterThan(0);
+      seen.push(...page.revisions.map((row: any) => row.revision));
+      if (page.next_before_revision === null) break;
+      expect(page.next_before_revision).toBe(page.revisions.at(-1).revision);
+      before = page.next_before_revision;
+    } while (seen.length <= 125);
+    expect(seen).toEqual(Array.from({ length: 125 }, (_, index) => 125 - index));
+  });
+
+  it('bounds single-entry create, update, list, and history results with large components', async () => {
+    const first = await ingredient('large-linked-ingredient', {
+      names: Array.from({ length: 30 }, (_, i) => ({ name: String(i) + '語'.repeat(290), source_url: 'https://example.com/' + 'a'.repeat(1_900) })),
+      notes: '語'.repeat(4_000), source_data: { secret_payload: 'x'.repeat(100_000) },
+    });
+    expect(bytes(first)).toBeLessThanOrEqual(40_000);
+    const others = [];
+    for (let i = 1; i < 30; i += 1) others.push(await ingredient(`large-linked-ingredient-${i}`));
+    const ingredientIds = [first, ...others].map((value) => value.ingredient.ingredient_id);
+    const created = await product('large-single-product', {
+      ingredients: ingredientIds.map((ingredient_id) => ({ ingredient_id,
+        strength_text: '語'.repeat(300), source_url: 'https://example.com/' + 'a'.repeat(1_900) })),
+      notes: '語'.repeat(4_000), source_data: { secret_product_payload: 'x'.repeat(100_000) },
+    });
+    expect(bytes(created)).toBeLessThanOrEqual(40_000);
+    expect(created.truncated).toBe(true);
+    expect(created.product.ingredients[0].ingredient).toEqual({
+      ingredient_id: first.ingredient.ingredient_id, canonical_name: 'large-linked-ingredient',
+    });
+    const changed = await catalogTool('update_medicine_product').handler(context, {
+      patient_id: 'profile-1', product_id: created.product.product_id, expected_revision: 1, color: 'white',
+    }) as any;
+    expect(bytes(changed)).toBeLessThanOrEqual(40_000);
+    const listed = await catalogTool('list_medicine_catalog').handler(context, {
+      patient_id: 'profile-1', query: 'large-single-product',
+    }) as any;
+    expect(bytes(listed)).toBeLessThanOrEqual(40_000);
+    expect(listed.products).toHaveLength(1);
+    const history = await catalogTool('get_medicine_catalog_history').handler(context, {
+      patient_id: 'profile-1', entity_kind: 'product', entity_id: created.product.product_id,
+    }) as any;
+    expect(bytes(history)).toBeLessThanOrEqual(40_000);
+    expect(JSON.stringify(history)).not.toContain('secret_payload');
+    expect(JSON.stringify(history)).not.toContain('secret_product_payload');
+    expect(history.revisions[0].snapshot.source_data).toEqual(created.product.source_data);
+  });
+});
+
+describe('MCP catalog query costs', () => {
+  it('uses schema indexes for bounded candidate pages and every catalogue read shape', async () => {
+    const { db } = await import('../db');
+    const ormClient = (db as any).session.client as Client;
+    const execute = ormClient.execute.bind(ormClient);
+    const queries: Array<{ sql: string; args: any }> = [];
+    const spy = vi.spyOn(ormClient, 'execute').mockImplementation(async (statement: any) => {
+      if (typeof statement === 'object' && /^select /i.test(statement.sql)) queries.push(statement);
+      return execute(statement);
+    });
+    try {
+      for (const query of [undefined, 'large', 'no-such-catalog-name']) {
+        for (const status of [undefined, 'active', 'archived']) {
+          await catalogTool('list_medicine_catalog').handler(context, {
+            patient_id: 'profile-1', query, status, limit: 100,
+          });
+          await catalogTool('list_medicine_catalog').handler(context, {
+            patient_id: 'profile-1', query, status, limit: 100,
+            after_ingredient_id: '0', after_product_id: '0',
+          });
+        }
+      }
+      const roots = await client.execute("SELECT id FROM medicine_product WHERE normalized_name = 'source-byte-budget'");
+      for (const before of [undefined, 2]) {
+        await catalogTool('get_medicine_catalog_history').handler(context, {
+          patient_id: 'profile-1', entity_kind: 'product', entity_id: roots.rows[0].id,
+          before_revision: before,
+        });
+      }
+      for (const revision of [undefined, 1]) {
+        await catalogTool('read_medicine_catalog_source').handler(context, {
+          patient_id: 'profile-1', entity_kind: 'product', entity_id: roots.rows[0].id, revision,
+        });
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(queries.length).toBeGreaterThan(20);
+    for (const query of queries) {
+      expect(query.args.length).toBeLessThanOrEqual(110);
+      const plan = await client.execute({ sql: 'EXPLAIN QUERY PLAN ' + query.sql, args: query.args });
+      const details = plan.rows.map((row) => String(row.detail));
+      expect(details.join('\n'), query.sql).not.toContain('USE TEMP B-TREE FOR ORDER BY');
+      for (const detail of details) {
+        if (detail.startsWith('SCAN ') && !detail.includes('VIRTUAL TABLE')) {
+          expect(detail, query.sql).toMatch(/USING (COVERING )?INDEX/);
+        }
+        if (/SEARCH (medicine_catalog_name|medicine_catalog_identifier|medicine_product_ingredient) /.test(detail)) {
+          expect(detail, query.sql).toMatch(/(?:ingredient_id|product_id)=\?/);
+        }
+      }
+    }
+    for (const table of ['medicine_ingredient', 'medicine_product']) {
+      const query = queries.find((entry) => entry.sql.startsWith('select "id" from "' + table + '"') && entry.sql.includes(' > '));
+      expect(query).toBeDefined();
+      const index = table + '_patient_cursor_idx';
+      const assertCursorPlan = (details: string) => {
+        if (!details.includes(index) || details.includes('USE TEMP B-TREE')) throw new Error('missing cursor index');
+      };
+      const path = join(tmpdir(), 'catalog-query-plan-' + crypto.randomUUID() + '.db');
+      let isolated = createClient({ url: 'file:' + path });
+      try {
+        const schema = await client.execute({ sql: 'SELECT sql FROM sqlite_schema WHERE tbl_name = ? AND sql IS NOT NULL ORDER BY type DESC', args: [table] });
+        for (const row of schema.rows) await isolated.execute(String(row.sql));
+        const plan = async () => (await isolated.execute({ sql: 'EXPLAIN QUERY PLAN ' + query!.sql, args: query!.args }))
+          .rows.map((row) => String(row.detail)).join('\n');
+        assertCursorPlan(await plan());
+        // Closing finalizes EXPLAIN's prepared statements before changing the schema.
+        isolated.close();
+        isolated = createClient({ url: 'file:' + path });
+        await isolated.execute('DROP INDEX ' + index);
+        const withoutIndex = await plan();
+        expect(() => assertCursorPlan(withoutIndex)).toThrow('missing cursor index');
+      } finally {
+        isolated.close();
+        await unlink(path);
+      }
+    }
+  });
+
+  it('continues through empty search pages without scanning past the candidate bound', async () => {
+    const seen: string[] = [];
+    let ingredientCursor: string | null | undefined;
+    let productCursor: string | null | undefined;
+    let pages = 0;
+    do {
+      const page = await catalogTool('list_medicine_catalog').handler(context, {
+        patient_id: 'profile-1', query: 'round-trip', limit: 1,
+        after_ingredient_id: ingredientCursor, after_product_id: productCursor,
+      }) as any;
+      expect(page.products.length).toBeLessThanOrEqual(1);
+      seen.push(...page.products.map((entry: any) => entry.display_name));
+      ingredientCursor = page.next_ingredient_id;
+      productCursor = page.next_product_id;
+      pages += 1;
+      expect(pages).toBeLessThan(100);
+    } while (ingredientCursor !== null || productCursor !== null);
+    expect(seen).toEqual(['round-trip']);
+    expect(pages).toBeGreaterThan(1);
   });
 });

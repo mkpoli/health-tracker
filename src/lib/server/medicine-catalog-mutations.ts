@@ -41,7 +41,7 @@ export interface MedicineCatalogOrigin extends ClaimRevisionSource {
 }
 
 export class InvalidMedicineCatalogReferenceError extends Error {
-  constructor(public readonly code: 'ingredient') {
+  constructor(public readonly code: 'ingredient' | 'name_id' | 'identifier_id' | 'component_id') {
     super(code);
     this.name = 'InvalidMedicineCatalogReferenceError';
   }
@@ -55,6 +55,27 @@ export class MedicineCatalogIngredientInUseError extends Error {
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export class MedicineCatalogIdentifierCollisionError extends Error {
+  constructor() {
+    super('Medicine catalog identifier collision');
+  }
+}
+
+function checkOrigin<T extends typeof medicineIngredient.$inferSelect | typeof medicineProduct.$inferSelect>(
+  root: T | undefined,
+  origin: MedicineCatalogOrigin,
+) {
+  if (
+    !root ||
+    root.originKind !== origin.kind ||
+    root.originProvider !== origin.provider ||
+    root.originExternalId !== (origin.externalId ?? null)
+  ) {
+    throw new MedicineCatalogIdentifierCollisionError();
+  }
+  return root;
+}
 
 function revisionValues(
   entityKind: MedicineCatalogEntityKind,
@@ -73,6 +94,15 @@ function revisionValues(
   };
 }
 
+function childId(
+  id: string | null,
+  allowedIds: Set<string> | undefined,
+  field: 'name_id' | 'identifier_id' | 'component_id',
+) {
+  if (id && !allowedIds?.has(id)) throw new InvalidMedicineCatalogReferenceError(field);
+  return id ?? crypto.randomUUID();
+}
+
 function nameValues(options: {
   patientId: string;
   ingredientId?: string | null;
@@ -81,7 +111,7 @@ function nameValues(options: {
   allowedIds?: Set<string>;
 }) {
   return options.values.map((value, orderIndex) => ({
-    id: value.id && options.allowedIds?.has(value.id) ? value.id : crypto.randomUUID(),
+    id: childId(value.id, options.allowedIds, 'name_id'),
     patientId: options.patientId,
     ingredientId: options.ingredientId ?? null,
     productId: options.productId ?? null,
@@ -107,7 +137,7 @@ function identifierValues(options: {
   allowedIds?: Set<string>;
 }) {
   return options.values.map((value, orderIndex) => ({
-    id: value.id && options.allowedIds?.has(value.id) ? value.id : crypto.randomUUID(),
+    id: childId(value.id, options.allowedIds, 'identifier_id'),
     patientId: options.patientId,
     ingredientId: options.ingredientId ?? null,
     productId: options.productId ?? null,
@@ -129,7 +159,7 @@ function componentValues(options: {
   allowedIds?: Set<string>;
 }) {
   return options.values.map((value, orderIndex) => ({
-    id: value.id && options.allowedIds?.has(value.id) ? value.id : crypto.randomUUID(),
+    id: childId(value.id, options.allowedIds, 'component_id'),
     patientId: options.patientId,
     productId: options.productId,
     ingredientId: value.ingredientId,
@@ -291,6 +321,7 @@ function ingredientRootValues(input: MedicineIngredientInput) {
 function productRootValues(input: MedicineProductInput) {
   return {
     displayName: input.displayName,
+    normalizedName: normalizedMedicineCatalogName(input.displayName),
     productType: input.productType,
     status: input.status,
     doseFormText: input.doseFormText,
@@ -329,8 +360,17 @@ export async function createMedicineIngredient(options: {
         originExternalId: options.origin.externalId ?? null,
         sourceData: options.origin.sourceData ?? null,
       })
+      .onConflictDoNothing({ target: medicineIngredient.id })
       .returning();
     const root = rows[0];
+    if (!root) {
+      const existing = await tx.select().from(medicineIngredient).where(and(
+        eq(medicineIngredient.id, options.id as string),
+        eq(medicineIngredient.patientId, options.patientId),
+      )).limit(1);
+      const stored = checkOrigin(existing[0], options.origin);
+      return { ingredient: await ingredientSnapshot(tx, stored), created: false };
+    }
     const names = nameValues({
       patientId: options.patientId,
       ingredientId: root.id,
@@ -347,7 +387,7 @@ export async function createMedicineIngredient(options: {
     await tx
       .insert(medicineCatalogRevision)
       .values(revisionValues('ingredient', snapshot, options.origin));
-    return snapshot;
+    return { ingredient: snapshot, created: true };
   });
 }
 
@@ -427,7 +467,6 @@ export async function createMedicineProduct(options: {
   id?: string;
 }) {
   return db.transaction(async (tx) => {
-    await validateIngredientReferences(tx, options.patientId, options.input.ingredients);
     const rows = await tx
       .insert(medicineProduct)
       .values({
@@ -439,8 +478,18 @@ export async function createMedicineProduct(options: {
         originExternalId: options.origin.externalId ?? null,
         sourceData: options.origin.sourceData ?? null,
       })
+      .onConflictDoNothing({ target: medicineProduct.id })
       .returning();
     const root = rows[0];
+    if (!root) {
+      const existing = await tx.select().from(medicineProduct).where(and(
+        eq(medicineProduct.id, options.id as string),
+        eq(medicineProduct.patientId, options.patientId),
+      )).limit(1);
+      const stored = checkOrigin(existing[0], options.origin);
+      return { product: await productSnapshot(tx, stored), created: false };
+    }
+    await validateIngredientReferences(tx, options.patientId, options.input.ingredients);
     const names = nameValues({
       patientId: options.patientId,
       productId: root.id,
@@ -463,7 +512,7 @@ export async function createMedicineProduct(options: {
     await tx
       .insert(medicineCatalogRevision)
       .values(revisionValues('product', snapshot, options.origin));
-    return snapshot;
+    return { product: snapshot, created: true };
   });
 }
 

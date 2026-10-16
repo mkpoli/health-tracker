@@ -13,7 +13,8 @@ The archive contains:
 
 - profile details;
 - reports and recorded values;
-- medicine ingredients, packaged products, localized names, identifiers, provenance, saved catalog versions, current medicine plans, and saved plan revisions;
+- medicine ingredients, packaged products, localized names, identifiers, provenance, and saved catalog versions;
+- current medicine plans and saved plan revisions;
 - calorie intake and energy expenditure entries, their saved revisions, and meal photos;
 - exercise definitions, workout sessions, reusable workout plans, nested sets, and saved revisions;
 - import records and retained source files, including Hevy workout CSV files;
@@ -47,6 +48,7 @@ Profile replacement stays off by default. The structured import runs in bounded 
 - Repeating the same restore reuses those IDs and fills missing records.
 - Provider and external IDs identify calorie and workout records that already arrived through a connector.
 - Existing current records retain their local values when identities meet. Missing historical revisions are added.
+- Restoring an existing catalog entry keeps its stored names and identifiers.
 - Existing retained files remain in place. A missing storage object can be repaired from the ZIP.
 - A current-format ZIP requires byte counts and SHA-256 checksums for every retained file.
 
@@ -58,7 +60,9 @@ Messages used to prepare Medicine or Calories drafts are copied into the claim's
 
 The Calories section stores workout sessions and reusable plans in Health Tracker. Each workout contains ordered exercises and sets. A set can retain load, repetitions, duration, distance, effort, state, type, and notes. Exercise names, categories, and equipment are copied into the workout snapshot so historical records stay readable after the exercise catalog changes.
 
-Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure. Archive version 8 carries medicine ingredients before products and medicine plans. It carries source imports and exercise definitions before workouts. Saved revisions are restored after their current records exist.
+Choosing **Use plan** creates an editable session linked to its source plan. Session edits create saved revisions containing the full nested exercise and set structure.
+
+Archive version 8 restores medicine ingredients before products and medicine plans, source imports and exercise definitions before workouts, and saved revisions after their current records.
 
 ## Hevy workout CSV import
 
@@ -124,6 +128,8 @@ curl 'https://<host>/mcp' \
 
 Read access exposes `list_patients`, `get_health_summary`, `get_metric_history`, `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`, `list_medicine_catalog`, `get_medicine_catalog_history`, `read_medicine_catalog_source`, `list_medicines`, `get_medicine_plan`, `list_energy_entries`, `get_claim_history`, and `list_dose_occurrences`.
 
+An existing `health:claims:write` grant also permits creating and updating catalogue ingredients and products for its selected profiles, including names, identifiers, composition, and retained source data. No new consent is requested for these catalogue tools.
+
 A grant with `health:write` exposes `log_measurement` for body measurements and vital signs. A separate `health:claims:write` grant exposes these tools:
 
 - `create_medicine_ingredient` and `update_medicine_ingredient` manage reusable active ingredients.
@@ -148,7 +154,7 @@ Medicine claims describe the catalog; the dose plan lives on courses and regimen
 
 ### Product catalog workflow for agents
 
-1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks canonical names, product display names, and localized names.
+1. Call `list_medicine_catalog` with the selected `patient_id`. A search checks normalized canonical names, product display names, and localized names within a bounded page. Pass `next_ingredient_id` and `next_product_id` back as `after_ingredient_id` and `after_product_id` until both are null, including after empty search pages. Counts describe the current page.
 2. Create each reusable ingredient with `create_medicine_ingredient`. `names` may carry BCP 47 language tags, name type, country, preferred status, and source details. `identifiers` may carry RxNorm, YJ, HOT, GS1, Wikidata, or another declared code system.
 3. Create the packaged product with `create_medicine_product`. Each item in `ingredients` uses an `ingredient_id` from step 2. Structured strengths use numerator and denominator values with units. `strength_text` preserves the label wording.
 4. Pass the returned `product_id` to `create_medicine` when a medicine concerns that exact product. The medicine keeps its own editable name, form, strength and route.
@@ -156,6 +162,8 @@ Medicine claims describe the catalog; the dose plan lives on courses and regimen
 Catalog update tools accept selected fields and keep omitted fields unchanged. Updating `names`, `identifiers`, or `ingredients` replaces that collection, so a caller should send the complete desired collection. Every update requires `expected_revision`. The list tool returns the child row IDs needed to preserve a name, identifier, or ingredient component across an update.
 
 `source_data` accepts JSON up to 2 MB on ingredient and product writes. It is suitable for a retained terminology response or regulator payload when the caller has permission to store it. Catalog reads report whether this payload exists and its byte size. `read_medicine_catalog_source` returns bounded JSON chunks with a SHA-256 checksum and continuation offset; an optional `revision` reads the payload saved with that version. Name, identifier, and ingredient-component rows carry their own source type, provider, URL, and retrieval time. Public database labels remain attributed to their source and language.
+
+History pages return `next_before_revision`; pass it as `before_revision` to read older versions. A response marked `truncated` may omit list entries or shorten text. Read the needed entry with a narrower request before using it in an update.
 
 The MCP endpoint and versioned archive are the supported external integration surfaces. Page actions and retained-file routes serve the web application and may change with its implementation.
 

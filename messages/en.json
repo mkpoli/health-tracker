@@ -656,6 +656,7 @@
   "import_archive_file_hint": "Health Tracker ZIP or JSON; Apple Health ZIP or XML",
   "import_archive_invalid": "This Health Tracker archive is damaged, unsafe, or uses an unsupported format.",
   "import_archive_failed": "The archive import stopped. You can retry the same file safely.",
+  "import_archive_item_too_large": "An archive entry exceeds the 12 MiB import limit.",
   "import_archive_version": "Format {version}",
   "import_archive_reports": "Reports",
   "import_archive_values": "Recorded values",

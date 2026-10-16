@@ -19,7 +19,6 @@ const limits = {
   id: 128,
   name: 300,
   languageTag: 100,
-  jurisdiction: 2,
   sourceKind: 80,
   sourceProvider: 200,
   sourceUrl: 2_000,
@@ -159,8 +158,11 @@ function languageTag(value: unknown) {
   }
 }
 
-function jurisdiction(value: unknown) {
-  const raw = textValue(value, limits.jurisdiction);
+export function parseMedicineCatalogCountry(value: unknown) {
+  if (value !== null && value !== undefined && typeof value !== 'string') {
+    throw new InvalidMedicineCatalogInputError('invalid_country');
+  }
+  const raw = typeof value === 'string' ? value.normalize('NFKC').trim() : '';
   if (!raw) return null;
   if (!/^[A-Za-z]{2}$/.test(raw)) {
     throw new InvalidMedicineCatalogInputError('invalid_country');
@@ -208,7 +210,7 @@ function parseName(value: unknown): MedicineCatalogNameInput {
     name,
     languageTag: languageTag(value.languageTag),
     nameType: nameTypeValue,
-    jurisdiction: jurisdiction(value.jurisdiction),
+    jurisdiction: parseMedicineCatalogCountry(value.jurisdiction),
     preferred: value.preferred === true,
     ...source(value),
   };
@@ -224,7 +226,7 @@ function parseIdentifier(value: unknown): MedicineCatalogIdentifierInput {
     id: optionalId(value.id),
     system,
     code,
-    jurisdiction: jurisdiction(value.jurisdiction),
+    jurisdiction: parseMedicineCatalogCountry(value.jurisdiction),
     ...source(value),
   };
 }
@@ -351,6 +353,9 @@ export function parseMedicineProductInput(data: FormData): MedicineProductInput 
     throw new InvalidMedicineCatalogInputError('invalid_structure');
   }
   const ingredients = parsedStructure.ingredients.map(parseProductIngredient);
+  if (new Set(ingredients.map((item) => item.ingredientId)).size !== ingredients.length) {
+    throw new InvalidMedicineCatalogInputError('invalid_ingredient');
+  }
   const ingredientRowIds = ingredients.flatMap((item) => (item.id ? [item.id] : []));
   if (new Set(ingredientRowIds).size !== ingredientRowIds.length) {
     throw new InvalidMedicineCatalogInputError('invalid_structure');
@@ -373,7 +378,7 @@ export function parseMedicineProductInput(data: FormData): MedicineProductInput 
       'marketingAuthorizationHolder',
       limits.manufacturer,
     ),
-    marketCountry: jurisdiction(data.get('marketCountry')),
+    marketCountry: parseMedicineCatalogCountry(data.get('marketCountry')),
     packageDescription: formText(data, 'packageDescription', limits.packageDescription),
     imprint: formText(data, 'imprint', limits.appearance),
     color: formText(data, 'color', limits.appearance),

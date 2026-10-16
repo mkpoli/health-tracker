@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { normalizedMedicineCatalogName } from '../src/lib/medicine-catalog';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -32,6 +33,35 @@ try {
     await client.execute('ALTER TABLE medicine_claim ADD COLUMN product_id text');
   }
 
+  const products = await client.execute(
+    `SELECT name FROM pragma_table_info('medicine_product')`,
+  );
+  const needsProductNames = products.rows.length > 0 &&
+    !products.rows.some((row) => row.name === 'normalized_name');
+  if (apply && products.rows.length > 0) {
+    if (needsProductNames) {
+      await client.execute(`ALTER TABLE medicine_product ADD COLUMN normalized_name text NOT NULL DEFAULT ''`);
+    }
+    // Keyset batches also finish a backfill interrupted after adding the column.
+    let afterId = '';
+    while (true) {
+      const batch = await client.execute({
+        sql: 'SELECT id, display_name FROM medicine_product WHERE id > ? ORDER BY id LIMIT 100',
+        args: [afterId],
+      });
+      if (!batch.rows.length) break;
+      await client.batch(batch.rows.map((row) => ({
+        sql: 'UPDATE medicine_product SET normalized_name = ? WHERE id = ?',
+        args: [normalizedMedicineCatalogName(String(row.display_name)), row.id],
+      })), 'write');
+      afterId = String(batch.rows[batch.rows.length - 1].id);
+    }
+    await client.batch([
+      'DROP INDEX IF EXISTS medicine_product_patient_name_idx',
+      'CREATE INDEX medicine_product_patient_name_idx ON medicine_product(patient_id, normalized_name)',
+    ], 'write');
+  }
+
   const after = tableExists ? await productColumnExists() : false;
   console.log(
     JSON.stringify(
@@ -40,9 +70,10 @@ try {
         medicineClaimTable: tableExists ? 'present' : 'absent',
         productIdColumnBefore: before,
         productIdColumnAfter: after,
+        productNamesNeedPreparation: needsProductNames,
         nextCommand: !tableExists
           ? 'bun run db:push'
-          : after
+          : after && (!needsProductNames || apply)
             ? 'bun run db:push'
             : 'bun run db:prepare:medicine-catalog -- --apply',
       },

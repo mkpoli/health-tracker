@@ -656,6 +656,7 @@
   "import_archive_file_hint": "Health TrackerのZIP・JSON、またはApple ヘルスケアのZIP・XML",
   "import_archive_invalid": "このHealth Trackerアーカイブは破損しているか、安全でない内容または未対応の形式を含んでいます。",
   "import_archive_failed": "アーカイブの取り込みが停止しました。同じファイルで安全に再試行できます。",
+  "import_archive_item_too_large": "アーカイブ内の1件の項目が、取り込み上限の12 MiBを超えています。",
   "import_archive_version": "形式 {version}",
   "import_archive_reports": "報告書",
   "import_archive_values": "記録値",

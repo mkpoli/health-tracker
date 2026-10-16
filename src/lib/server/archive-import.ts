@@ -1001,6 +1001,7 @@ async function planMedicineProduct(
       id: snapshot.id,
       patientId,
       displayName: snapshot.displayName,
+      normalizedName: normalizedMedicineCatalogName(snapshot.displayName),
       productType: snapshot.productType,
       status: snapshot.status,
       doseFormText: snapshot.doseFormText,
@@ -2411,6 +2412,22 @@ async function importRevisions(patientId: string, sourcePatientId: string, items
       };
     }),
   );
+
+  const productIds = [
+    ...new Set(planned.flatMap(({ claimKind, snapshot }) => {
+      const productId = claimKind === 'medicine' ? (snapshot as MedicineClaimRecord).productId : null;
+      return productId ? [productId] : [];
+    })),
+  ];
+  const storedProducts = productIds.length
+    ? await db
+        .select({ id: medicineProduct.id })
+        .from(medicineProduct)
+        .where(and(eq(medicineProduct.patientId, patientId), inArray(medicineProduct.id, productIds)))
+    : [];
+  if (storedProducts.length !== productIds.length) {
+    throw new ArchiveImportError('missing_medicine_catalog_reference');
+  }
 
   const medicineIds = [...new Set(planned.filter((row) => row.claimKind === 'medicine').map((row) => row.claimId))];
   const energyIds = [...new Set(planned.filter((row) => row.claimKind === 'energy').map((row) => row.claimId))];
