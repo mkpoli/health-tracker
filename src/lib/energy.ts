@@ -112,7 +112,7 @@ export function suggestEnergyDiaryDate(
   const continuesPreviousDay =
     direction === 'intake' &&
     hour < 5 &&
-    ['dinner', 'late_dinner', 'snack', 'drink'].includes(category || '');
+    ['meal', 'dinner', 'snack', 'drink'].includes(category || '');
   if (!continuesPreviousDay) return calendarDate;
 
   const date = new Date(`${calendarDate}T00:00:00.000Z`);

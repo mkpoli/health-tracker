@@ -49,7 +49,8 @@ describe('parseEnergyInput', () => {
     ['2026-08-19T00:04', 'snack', '2026-08-18'],
     ['2026-08-19T04:59', 'dinner', '2026-08-18'],
     ['2026-08-19T00:04', 'breakfast', '2026-08-19'],
-    ['2026-01-01T02:30', 'meal', '2026-01-01'],
+    ['2026-01-02T02:30', 'meal', '2026-01-01'],
+    ['2026-01-02T02:30', 'lunch', '2026-01-02'],
   ])('suggests diary day %s for a %s entry', (occurredLocal, category, localDate) => {
     const parsed = parseEnergyInput(
       form({ ...base, occurredLocal, category, energyKcal: '100' }),
