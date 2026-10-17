@@ -305,7 +305,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(energyFoodItem)
         .where(eq(energyFoodItem.patientId, patientId))
         .orderBy(energyFoodItem.orderIndex),
-      db
+      readDb
         .select()
         .from(energySource)
         .where(eq(energySource.patientId, patientId))
