@@ -120,8 +120,9 @@ function optionalFoodNumber(
   maximum = 1_000_000,
 ) {
   const value = row[key];
-  if (value === null || value === undefined || value === '') return null;
-  const parsed = typeof value === 'number' ? value : Number(value);
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number') throw new InvalidEnergyInputError('invalid_food_items');
+  const parsed = value;
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > maximum) {
     throw new InvalidEnergyInputError('invalid_food_items');
   }

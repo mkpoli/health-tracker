@@ -105,4 +105,11 @@ describe('parseEnergyInput', () => {
     expect(parsed.claim.energyKcal).toBeNull();
     expect(parsed.claim.status).toBe('draft');
   });
+
+  it.each([true, [], '  ', '12', {}])('rejects a non-numeric food amount %j', (energyKcal) => {
+    const data = form({ ...base, label: 'Lunch' });
+    data.set('foodItems', JSON.stringify([{ name: 'Rice', energyKcal, dataSource: 'unknown' }]));
+
+    expect(() => parseEnergyInput(data)).toThrowError(new InvalidEnergyInputError('invalid_food_items'));
+  });
 });
