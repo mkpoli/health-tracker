@@ -900,16 +900,63 @@
   "calories_previous_day": "Previous day",
   "calories_next_day": "Next day",
   "calories_today": "Today",
-  "calories_entry_count": "{count} entries",
+  "calories_entry_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} entry",
+        "countPlural=*": "{count} entries"
+      }
+    }
+  ],
   "calories_day_empty": "Nothing logged for this day",
   "calories_day_empty_hint": "Add a meal or activity to begin the day’s diary.",
   "calories_meals": "Meals",
-  "calories_meal_group_summary": "{meals} meals · {foods} foods",
+  "calories_meal_group_summary": [
+    {
+      "declarations": [
+        "input meals",
+        "input foods",
+        "local mealsPlural = meals: plural",
+        "local foodsPlural = foods: plural"
+      ],
+      "selectors": [
+        "mealsPlural",
+        "foodsPlural"
+      ],
+      "match": {
+        "mealsPlural=one foodsPlural=one": "{meals} meal · {foods} food",
+        "mealsPlural=one foodsPlural=*": "{meals} meal · {foods} foods",
+        "mealsPlural=* foodsPlural=one": "{meals} meals · {foods} food",
+        "mealsPlural=* foodsPlural=*": "{meals} meals · {foods} foods"
+      }
+    }
+  ],
   "calories_activities": "Activities",
   "calories_meal_name": "Meal name (optional)",
   "calories_meal_name_placeholder": "Sunday lunch, Lawson dinner…",
   "calories_foods_in_meal": "Foods in this meal",
-  "calories_food_count": "{count} foods",
+  "calories_food_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} food",
+        "countPlural=*": "{count} foods"
+      }
+    }
+  ],
   "calories_foods_hint": "Add one row for each food or drink consumed.",
   "calories_meal_total": "Meal total",
   "calories_add_food_item": "Add another food",
