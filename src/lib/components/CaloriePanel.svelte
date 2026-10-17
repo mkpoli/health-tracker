@@ -291,14 +291,6 @@
   }
 
   function openEdit(entry: EnergyClaimRecord) {
-    const legacyFood =
-      entry.direction === 'intake' && entry.foodItems.length === 0
-        ? [{
-            ...blankFood(),
-            name: entry.label || m.calories_unnamed_food(),
-            energyKcal: numberInput(entry.energyKcal),
-          }]
-        : entry.foodItems.map(foodDraft);
     draft = {
       id: entry.id,
       revision: entry.revision,
@@ -312,7 +304,7 @@
       durationMinutes: numberInput(entry.durationMinutes),
       status: entry.status,
       notes: entry.notes || '',
-      foods: legacyFood,
+      foods: entry.foodItems.map(foodDraft),
     };
     saveError = '';
     captureReview = false;
@@ -803,7 +795,9 @@
         {#if draft.id}<input type="hidden" name="id" value={draft.id} /><input type="hidden" name="revision" value={draft.revision} />{/if}
         <input type="hidden" name="timezone" value={draft.timezone} />
         <input type="hidden" name="timezoneOffsetMinutes" value={draft.timezoneOffsetMinutes} />
-        {#if draft.direction === 'intake'}<input type="hidden" name="foodItems" value={draftFoodItems} />{/if}
+        {#if draft.direction === 'intake'}
+          {#if draft.foods.length > 0}<input type="hidden" name="foodItems" value={draftFoodItems} />{:else}<input type="hidden" name="energyKcal" value={draft.energyKcal} />{/if}
+        {/if}
 
         <div class="space-y-6 px-5 py-5 sm:px-6 sm:py-6">
           {#if captureReview}<p class="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-800">{m.capture_editor_notice()}</p>{/if}
@@ -873,7 +867,7 @@
                 </div>
                 <div class="text-right">
                   <p class="text-xs text-slate-400">{m.calories_meal_total()}</p>
-                  <p class={draftMealTotal === null ? 'font-semibold text-amber-700' : 'font-semibold text-slate-900'}>{draftMealTotal === null ? m.calories_pending_short() : `${formatKcal(draftMealTotal)} kcal`}</p>
+                  <p class={draftMealTotal === null && !(draft.foods.length === 0 && finiteDraftNumber(draft.energyKcal) !== null) ? 'font-semibold text-amber-700' : 'font-semibold text-slate-900'}>{draft.foods.length === 0 && finiteDraftNumber(draft.energyKcal) !== null ? `${formatKcal(finiteDraftNumber(draft.energyKcal) || 0)} kcal` : draftMealTotal === null ? m.calories_pending_short() : `${formatKcal(draftMealTotal)} kcal`}</p>
                 </div>
               </div>
 
