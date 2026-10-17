@@ -85,6 +85,7 @@
   let saveError = $state('');
   let captureReview = $state(false);
   let diaryDateEdited = $state(false);
+  let diaryDateTouched = $state(false);
   let selectedDate = $state(todayLocalDate());
   let draft = $state<Draft>(newDraft('intake'));
 
@@ -302,6 +303,7 @@
   function openCreate(direction: EnergyDirection) {
     draft = newDraft(direction);
     diaryDateEdited = false;
+    diaryDateTouched = false;
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -324,7 +326,12 @@
       notes: entry.notes || '',
       foods: entry.foodItems.map(foodDraft),
     };
-    diaryDateEdited = true;
+    // A stored date that differs from the suggestion was chosen by hand; keep it unless the time moves.
+    diaryDateEdited =
+      entry.localDate !==
+      (suggestEnergyDiaryDate(draft.occurredLocal, draft.direction, draft.category) ||
+        draft.occurredLocal.slice(0, 10));
+    diaryDateTouched = false;
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -375,8 +382,8 @@
     draft.timezoneOffsetMinutes = -localDate.getTimezoneOffset();
   }
 
-  function updateDiaryDateSuggestion() {
-    if (diaryDateEdited) return;
+  function updateDiaryDateSuggestion(timeChanged = false) {
+    if (timeChanged ? diaryDateTouched : diaryDateEdited) return;
     const suggestion = suggestEnergyDiaryDate(
       draft.occurredLocal,
       draft.direction,
@@ -387,7 +394,7 @@
 
   function handleOccurredLocalChange() {
     updateDraftTimeZone();
-    updateDiaryDateSuggestion();
+    updateDiaryDateSuggestion(true);
   }
 
   function handleCategoryChange() {
@@ -876,7 +883,7 @@
             </label>
             <label>
               <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_diary_date()}</span>
-              <input name="diaryDate" type="date" bind:value={draft.diaryDate} onchange={() => (diaryDateEdited = true)} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" />
+              <input name="diaryDate" type="date" bind:value={draft.diaryDate} onchange={() => { diaryDateEdited = true; diaryDateTouched = true; }} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" />
             </label>
             <p class="-mt-2 text-xs leading-relaxed text-slate-500 sm:col-span-2">{m.calories_diary_date_hint()}</p>
             {#if draft.direction === 'intake'}
