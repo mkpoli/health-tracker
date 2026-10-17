@@ -1,5 +1,6 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { foodItemsEnergyKcal } from './energy';
 import { ACTIVITY_REPORT_KIND, isReportKind } from '$lib/report-kind';
 import { getMetricDefinition } from '$lib/metrics/catalog';
 import { parseNumber } from '$lib/metrics/normalization';
@@ -1199,8 +1200,11 @@ export function parseEnergy(value: unknown, patientId: string, id: string): Ener
     updatedAt,
   };
   const foodItems = parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt);
+  // A meal whose foods all carry energy totals their sum, as the editor does on save.
+  const foodTotal = foodItemsEnergyKcal(foodItems);
   return {
     ...snapshot,
+    energyKcal: foodTotal ?? snapshot.energyKcal,
     foodItems,
   };
 }

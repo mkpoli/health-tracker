@@ -143,4 +143,31 @@ describe('archive energy food items', () => {
       parseEnergy({ ...claim, foodItems: [{ name: 'Rice', nutritionData }] }, 'patient-1', 'energy-1'),
     ).toThrowError(new ArchiveImportError('invalid_energy'));
   });
+
+  it('totals the foods when every food has energy', () => {
+    const parsed = parseEnergy(
+      {
+        ...claim,
+        energyKcal: 999,
+        foodItems: [
+          { name: 'Rice', energyKcal: 281 },
+          { name: 'Tofu', energyKcal: 108 },
+        ],
+      },
+      'patient-1',
+      'energy-1',
+    );
+
+    expect(parsed.energyKcal).toBe(389);
+  });
+
+  it('keeps the claim total when a food has no energy', () => {
+    const parsed = parseEnergy(
+      { ...claim, energyKcal: 500, foodItems: [{ name: 'Rice', energyKcal: 281 }, { name: 'Tea' }] },
+      'patient-1',
+      'energy-1',
+    );
+
+    expect(parsed.energyKcal).toBe(500);
+  });
 });
