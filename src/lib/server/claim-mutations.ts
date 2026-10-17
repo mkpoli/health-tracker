@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import {
   isEnergyDirection,
   isEnergyFoodDataSource,
@@ -16,7 +16,7 @@ import {
   medicineClaim,
   medicineProduct,
 } from '$lib/server/db/schema';
-import type { EnergyFoodItemInput, EnergyInput } from '$lib/server/energy';
+import { planFoodItemChanges, type EnergyFoodItemInput, type EnergyInput } from '$lib/server/energy';
 import type { MedicineInput } from '$lib/server/medicines';
 import {
   claimRevisionValues,
@@ -97,11 +97,13 @@ function foodItemValues(
   energyClaimId: string,
   items: EnergyFoodItemInput[],
 ) {
-  return items.map((item, orderIndex) => ({
+  return items.map(({ id: _id, nutritionData, originExternalId, ...item }, orderIndex) => ({
     patientId,
     energyClaimId,
     orderIndex,
     ...item,
+    originExternalId: originExternalId ?? null,
+    nutritionData: nutritionData ?? null,
   }));
 }
 
@@ -281,14 +283,44 @@ export async function updateEnergyClaim(options: {
     if (!updated[0]) throw new StaleClaimRevisionError();
 
     let updatedItems = currentItems;
-    if (options.foodItems) {
-      await tx.delete(energyFoodItem).where(eq(energyFoodItem.energyClaimId, options.current.id));
-      updatedItems = options.foodItems.length
-        ? await tx
-            .insert(energyFoodItem)
-            .values(foodItemValues(options.current.patientId, options.current.id, options.foodItems))
-            .returning()
-        : [];
+    const submitted = options.input.direction === 'intake' ? options.foodItems : [];
+    if (submitted) {
+      const normalizedCurrent = currentItems.map(normalizeEnergyFoodItem);
+      const plan = planFoodItemChanges(normalizedCurrent, submitted);
+      const now = options.changedAt ?? new Date().toISOString();
+      if (plan.deletes.length) {
+        await tx.delete(energyFoodItem).where(inArray(energyFoodItem.id, plan.deletes));
+      }
+      const moved = plan.updates.filter(
+        (update) => normalizedCurrent.find((item) => item.id === update.id)?.orderIndex !== update.orderIndex,
+      );
+      for (const [index, update] of moved.entries()) {
+        await tx.update(energyFoodItem).set({ orderIndex: -(index + 1) }).where(eq(energyFoodItem.id, update.id));
+      }
+      for (const update of plan.updates) {
+        await tx
+          .update(energyFoodItem)
+          .set({ ...update.values, updatedAt: now })
+          .where(eq(energyFoodItem.id, update.id));
+      }
+      if (plan.inserts.length) {
+        await tx
+          .insert(energyFoodItem)
+          .values(
+            plan.inserts.map(({ id: _id, nutritionData, originExternalId, ...item }) => ({
+              patientId: options.current.patientId,
+              energyClaimId: options.current.id,
+              ...item,
+              originExternalId: originExternalId ?? null,
+              nutritionData: nutritionData ?? null,
+            })),
+          );
+      }
+      updatedItems = await tx
+        .select()
+        .from(energyFoodItem)
+        .where(eq(energyFoodItem.energyClaimId, options.current.id))
+        .orderBy(energyFoodItem.orderIndex);
     }
 
     const snapshot = normalizeEnergyClaim(updated[0], updatedItems.map(normalizeEnergyFoodItem));

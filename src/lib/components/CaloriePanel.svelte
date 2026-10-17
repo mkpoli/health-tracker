@@ -44,6 +44,9 @@
 
   type FoodDraft = {
     key: string;
+    id: string | null;
+    originExternalId: string | null;
+    nutritionData: Record<string, number> | null;
     name: string;
     quantityValue: string;
     quantityUnit: string;
@@ -211,6 +214,9 @@
   function blankFood(): FoodDraft {
     return {
       key: crypto.randomUUID(),
+      id: null,
+      originExternalId: null,
+      nutritionData: null,
       name: '',
       quantityValue: '',
       quantityUnit: '',
@@ -230,6 +236,9 @@
   function foodDraft(item: EnergyFoodItemRecord): FoodDraft {
     return {
       key: item.id,
+      id: item.id,
+      originExternalId: item.originExternalId,
+      nutritionData: item.nutritionData,
       name: item.name,
       quantityValue: numberInput(item.quantityValue),
       quantityUnit: item.quantityUnit || '',

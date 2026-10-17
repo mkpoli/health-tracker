@@ -4,6 +4,7 @@ import {
   isEnergyStatus,
   type EnergyDirection,
   type EnergyFoodDataSource,
+  type EnergyFoodItemRecord,
   type EnergyStatus,
 } from '$lib/energy';
 
@@ -18,6 +19,8 @@ const foodFieldLimits = {
   name: 300,
   quantityUnit: 40,
   notes: 1000,
+  id: 100,
+  originExternalId: 1000,
 } as const;
 
 const MAX_FOOD_ITEMS = 100;
@@ -38,6 +41,11 @@ export type EnergyInput = {
 };
 
 export type EnergyFoodItemInput = {
+  /** Id of a stored food of the same meal; the row is updated in place. */
+  id?: string | null;
+  /** Omitted keeps the stored value of a matched food. */
+  originExternalId?: string | null;
+  nutritionData?: Record<string, number> | null;
   name: string;
   quantityValue: number | null;
   quantityUnit: string | null;
@@ -129,6 +137,25 @@ function optionalFoodNumber(
   return Math.round(parsed * 1000) / 1000;
 }
 
+function optionalNutritionData(row: Record<string, unknown>) {
+  const value = row.nutritionData;
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new InvalidEnergyInputError('invalid_food_items');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > 100) throw new InvalidEnergyInputError('invalid_food_items');
+  const result: Record<string, number> = {};
+  for (const [key, amount] of entries) {
+    if (!key || key.length > 120 || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+      throw new InvalidEnergyInputError('invalid_food_items');
+    }
+    result[key] = amount;
+  }
+  return result;
+}
+
 function readFoodItems(data: FormData, direction: EnergyDirection) {
   const raw = data.get('foodItems');
   if (direction !== 'intake' || raw === null) return null;
@@ -146,6 +173,8 @@ function readFoodItems(data: FormData, direction: EnergyDirection) {
     throw new InvalidEnergyInputError('invalid_food_items');
   }
 
+  const seenIds = new Set<string>();
+  const seenOrigins = new Set<string>();
   return value.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new InvalidEnergyInputError('invalid_food_items');
@@ -170,7 +199,22 @@ function readFoodItems(data: FormData, direction: EnergyDirection) {
       throw new InvalidEnergyInputError('invalid_food_items');
     }
 
+    const id = optionalFoodText(row, 'id');
+    const originExternalId =
+      row.originExternalId === undefined ? undefined : optionalFoodText(row, 'originExternalId');
+    if (id) {
+      if (seenIds.has(id)) throw new InvalidEnergyInputError('invalid_food_items');
+      seenIds.add(id);
+    }
+    if (originExternalId) {
+      if (seenOrigins.has(originExternalId)) throw new InvalidEnergyInputError('invalid_food_items');
+      seenOrigins.add(originExternalId);
+    }
+
     return {
+      id,
+      originExternalId,
+      nutritionData: optionalNutritionData(row),
       name,
       quantityValue: optionalFoodNumber(row, 'quantityValue'),
       quantityUnit: optionalFoodText(row, 'quantityUnit'),
@@ -186,6 +230,49 @@ function readFoodItems(data: FormData, direction: EnergyDirection) {
       notes: optionalFoodText(row, 'notes'),
     };
   });
+}
+
+type StoredFoodItem = EnergyFoodItemRecord;
+
+const foodItemFields = [
+  'name', 'quantityValue', 'quantityUnit', 'energyKcal', 'energyKcalMin', 'energyKcalMax',
+  'proteinG', 'carbohydrateG', 'fatG', 'fiberG', 'sodiumMg', 'dataSource', 'notes',
+] as const;
+
+/**
+ * Matches submitted foods to the stored ones by id. Matched rows are updated in place
+ * (keeping id, creation time, origin and nutrition data the submission omits); unmatched
+ * submissions are inserted; stored rows not submitted are deleted.
+ */
+export function planFoodItemChanges(current: StoredFoodItem[], items: EnergyFoodItemInput[]) {
+  const stored = new Map(current.map((item) => [item.id, item]));
+  const matched = new Set<string>();
+  const updates: { id: string; orderIndex: number; changed: boolean; values: Record<string, unknown> }[] = [];
+  const inserts: (EnergyFoodItemInput & { orderIndex: number })[] = [];
+
+  items.forEach((item, orderIndex) => {
+    const existing = item.id ? stored.get(item.id) : undefined;
+    if (!existing || matched.has(existing.id)) {
+      inserts.push({ ...item, id: undefined, orderIndex });
+      return;
+    }
+    matched.add(existing.id);
+    const values: Record<string, unknown> = { orderIndex };
+    for (const field of foodItemFields) values[field] = item[field];
+    if (item.originExternalId !== undefined) values.originExternalId = item.originExternalId;
+    if (item.nutritionData !== undefined) values.nutritionData = item.nutritionData;
+    const changed = Object.entries(values).some(
+      ([key, value]) =>
+        JSON.stringify(value) !== JSON.stringify((existing as unknown as Record<string, unknown>)[key]),
+    );
+    updates.push({ id: existing.id, orderIndex, changed, values });
+  });
+
+  return {
+    deletes: current.filter((item) => !matched.has(item.id)).map((item) => item.id),
+    updates: updates.filter((update) => update.changed),
+    inserts,
+  };
 }
 
 export function foodItemsEnergyKcal(items: EnergyFoodItemInput[]) {
