@@ -954,6 +954,63 @@ describe('MCP energy claims', () => {
     expect(history.current.retained_file_count).toBe(1);
     expect(history.revisions[0].snapshot.retained_file_count).toBe(1);
   });
+
+  it('edits foods in place and drops them when the meal becomes expenditure', async () => {
+    const created = (await tool('log_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'in-place-foods',
+      direction: 'intake',
+      label: 'In place',
+      food_items: [
+        { name: 'Rice', energy_kcal: 281, data_source: 'database' },
+        { name: 'Tea', energy_kcal: 0, data_source: 'database' },
+      ],
+      occurred_at: '2026-08-17T08:00:00+09:00',
+    })) as any;
+    const [rice, tea] = created.entry.food_items;
+    await client.execute({
+      sql: `UPDATE energy_food_item SET origin_external_id = 'ext-rice', nutrition_data = '{"potassiumMg":35}' WHERE id = ?`,
+      args: [rice.food_item_id],
+    });
+
+    const edited = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: created.entry.revision,
+      food_items: [
+        { food_item_id: rice.food_item_id, name: 'Rice', energy_kcal: 300, data_source: 'database' },
+        { name: 'Natto', energy_kcal: 90, data_source: 'label' },
+      ],
+    })) as any;
+    expect(edited.entry.food_items.map((item: any) => item.name)).toEqual(['Rice', 'Natto']);
+    expect(edited.entry.food_items[0].food_item_id).toBe(rice.food_item_id);
+    expect(edited.entry.energy_kcal).toBe(390);
+    const kept = await client.execute({
+      sql: 'SELECT origin_external_id, nutrition_data, created_at FROM energy_food_item WHERE id = ?',
+      args: [rice.food_item_id],
+    });
+    expect(kept.rows[0].origin_external_id).toBe('ext-rice');
+    expect(JSON.parse(String(kept.rows[0].nutrition_data))).toEqual({ potassiumMg: 35 });
+    const gone = await client.execute({
+      sql: 'SELECT id FROM energy_food_item WHERE id = ?',
+      args: [tea.food_item_id],
+    });
+    expect(gone.rows).toHaveLength(0);
+
+    const burned = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: edited.entry.revision,
+      direction: 'expenditure',
+      energy_kcal: 120,
+    })) as any;
+    expect(burned.entry.food_items).toEqual([]);
+    const left = await client.execute({
+      sql: 'SELECT id FROM energy_food_item WHERE energy_claim_id = ?',
+      args: [created.entry.energy_entry_id],
+    });
+    expect(left.rows).toHaveLength(0);
+  });
 });
 
 describe('MCP claim permissions', () => {

@@ -3,6 +3,7 @@ import {
   ArchiveImportError,
   archiveEntityId,
   importArchiveBatch,
+  parseEnergy,
   resolveArchiveEntityId,
 } from './archive-import';
 import { ArchiveMediaError, parseArchiveMediaMetadata } from './archive-media';
@@ -112,5 +113,61 @@ describe('archive media metadata', () => {
       fileName: 'scan.pdf',
       mimeType: 'application/pdf',
     });
+  });
+});
+
+describe('archive energy food items', () => {
+  const claim = {
+    direction: 'intake',
+    status: 'recorded',
+    occurredAt: '2026-08-02T03:00:00.000Z',
+    localDate: '2026-08-02',
+    timezoneOffsetMinutes: 0,
+    revision: 1,
+    createdAt: '2026-08-02T03:00:00.000Z',
+    updatedAt: '2026-08-02T03:00:00.000Z',
+  };
+
+  it('keeps nutritionData on imported foods', () => {
+    const parsed = parseEnergy(
+      { ...claim, foodItems: [{ name: 'Rice', energyKcal: 281, nutritionData: { potassiumMg: 35.5 } }] },
+      'patient-1',
+      'energy-1',
+    );
+
+    expect(parsed.foodItems[0].nutritionData).toEqual({ potassiumMg: 35.5 });
+  });
+
+  it.each([[[1]], [{ a: 'x' }], [{ a: -1 }], ['x']])('rejects invalid nutritionData %j', (nutritionData) => {
+    expect(() =>
+      parseEnergy({ ...claim, foodItems: [{ name: 'Rice', nutritionData }] }, 'patient-1', 'energy-1'),
+    ).toThrowError(new ArchiveImportError('invalid_energy'));
+  });
+
+  it('totals the foods when every food has energy', () => {
+    const parsed = parseEnergy(
+      {
+        ...claim,
+        energyKcal: 999,
+        foodItems: [
+          { name: 'Rice', energyKcal: 281 },
+          { name: 'Tofu', energyKcal: 108 },
+        ],
+      },
+      'patient-1',
+      'energy-1',
+    );
+
+    expect(parsed.energyKcal).toBe(389);
+  });
+
+  it('keeps the claim total when a food has no energy', () => {
+    const parsed = parseEnergy(
+      { ...claim, energyKcal: 500, foodItems: [{ name: 'Rice', energyKcal: 281 }, { name: 'Tea' }] },
+      'patient-1',
+      'energy-1',
+    );
+
+    expect(parsed.energyKcal).toBe(500);
   });
 });

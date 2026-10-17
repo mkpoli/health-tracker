@@ -127,6 +127,11 @@ const energyProperties = {
     items: {
       type: 'object',
       properties: {
+        food_item_id: {
+          type: 'string',
+          maxLength: 100,
+          description: 'Id of a food already in this meal; the food is updated in place. Foods without it are added and foods left out are removed.',
+        },
         name: { type: 'string', minLength: 1, maxLength: 300 },
         quantity_value: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
         quantity_unit: { type: ['string', 'null'], maxLength: 40 },
@@ -273,6 +278,7 @@ function energyForm(
           }
           const item = value as Record<string, unknown>;
           return {
+            id: item.food_item_id,
             name: item.name,
             quantityValue: item.quantity_value,
             quantityUnit: item.quantity_unit,
@@ -847,7 +853,7 @@ const updateEnergyEntry: ToolDefinition = {
     const storedFoods = await foodItemsForClaims(profile.id, [stored.id]);
     const current = normalizeEnergyClaim(stored, storedFoods.get(stored.id) || []);
     if (
-      current.direction === 'intake' &&
+      (owns(args, 'direction') ? args.direction : current.direction) === 'intake' &&
       current.foodItems.length > 0 &&
       owns(args, 'energy_kcal') &&
       !owns(args, 'food_items')

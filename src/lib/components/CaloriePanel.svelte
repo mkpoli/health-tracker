@@ -45,6 +45,9 @@
 
   type FoodDraft = {
     key: string;
+    id: string | null;
+    originExternalId: string | null;
+    nutritionData: Record<string, number> | null;
     name: string;
     quantityValue: string;
     quantityUnit: string;
@@ -214,6 +217,9 @@
   function blankFood(): FoodDraft {
     return {
       key: crypto.randomUUID(),
+      id: null,
+      originExternalId: null,
+      nutritionData: null,
       name: '',
       quantityValue: '',
       quantityUnit: '',
@@ -233,6 +239,9 @@
   function foodDraft(item: EnergyFoodItemRecord): FoodDraft {
     return {
       key: item.id,
+      id: item.id,
+      originExternalId: item.originExternalId,
+      nutritionData: item.nutritionData,
       name: item.name,
       quantityValue: numberInput(item.quantityValue),
       quantityUnit: item.quantityUnit || '',
@@ -299,14 +308,6 @@
   }
 
   function openEdit(entry: EnergyClaimRecord) {
-    const legacyFood =
-      entry.direction === 'intake' && entry.foodItems.length === 0
-        ? [{
-            ...blankFood(),
-            name: entry.label || m.calories_unnamed_food(),
-            energyKcal: numberInput(entry.energyKcal),
-          }]
-        : entry.foodItems.map(foodDraft);
     draft = {
       id: entry.id,
       revision: entry.revision,
@@ -321,7 +322,7 @@
       durationMinutes: numberInput(entry.durationMinutes),
       status: entry.status,
       notes: entry.notes || '',
-      foods: legacyFood,
+      foods: entry.foodItems.map(foodDraft),
     };
     diaryDateEdited = true;
     saveError = '';
@@ -405,7 +406,6 @@
   }
 
   function removeFood(key: string) {
-    if (draft.foods.length <= 1) return;
     draft.foods = draft.foods.filter((food) => food.key !== key);
   }
 
@@ -921,7 +921,7 @@
                 </div>
                 <div class="text-right">
                   <p class="text-xs text-slate-400">{m.calories_meal_total()}</p>
-                  <p class={draftMealTotal === null ? 'font-semibold text-amber-700' : 'font-semibold text-slate-900'}>{draftMealTotal === null ? m.calories_pending_short() : `${formatKcal(draftMealTotal)} kcal`}</p>
+                  <p class={draftMealTotal === null && !(draft.foods.length === 0 && finiteDraftNumber(draft.energyKcal) !== null) ? 'font-semibold text-amber-700' : 'font-semibold text-slate-900'}>{draft.foods.length === 0 && finiteDraftNumber(draft.energyKcal) !== null ? `${formatKcal(finiteDraftNumber(draft.energyKcal) || 0)} kcal` : draftMealTotal === null ? m.calories_pending_short() : `${formatKcal(draftMealTotal)} kcal`}</p>
                 </div>
               </div>
 
@@ -930,7 +930,7 @@
                   <div class="rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
                     <div class="mb-3 flex items-center justify-between">
                       <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{m.calories_food_number({ number: index + 1 })}</p>
-                      {#if draft.foods.length > 1}<button type="button" onclick={() => removeFood(food.key)} class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.delete()}</button>{/if}
+                      <button type="button" onclick={() => removeFood(food.key)} class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.delete()}</button>
                     </div>
                     <div class="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
                       <label>
@@ -968,6 +968,12 @@
                   </div>
                 {/each}
               </div>
+              {#if draft.foods.length === 0}
+                <label class="mt-3 block">
+                  <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_energy()}</span>
+                  <div class="relative"><input name="energyKcal" type="number" bind:value={draft.energyKcal} min="0" max="1000000" step="0.1" inputmode="decimal" class="w-full rounded-lg border-slate-300 px-3 py-2.5 pr-14 text-sm shadow-sm focus:border-emerald-500 focus:ring-emerald-500" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-medium text-slate-400">kcal</span></div>
+                </label>
+              {/if}
               <button type="button" onclick={addFood} class="mt-3 inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800 hover:bg-orange-100"><span>+</span>{m.calories_add_food_item()}</button>
             </section>
           {/if}

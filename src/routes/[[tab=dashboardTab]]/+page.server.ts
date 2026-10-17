@@ -203,7 +203,6 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       doseRegimens: [],
       doseOccurrences: [],
       energyEntries: [],
-      energyFoodItems: [],
       energySources: [],
       dataImports: [],
       exerciseDefinitions: [],
@@ -306,7 +305,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(energyFoodItem)
         .where(eq(energyFoodItem.patientId, patientId))
         .orderBy(energyFoodItem.orderIndex),
-      db
+      readDb
         .select()
         .from(energySource)
         .where(eq(energySource.patientId, patientId))
@@ -362,6 +361,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     return normalized ? [normalized] : [];
   });
 
+  const foodItemsByClaim = new Map<string, ReturnType<typeof normalizeEnergyFoodItem>[]>();
+  for (const item of energyFoodItemsList) {
+    const items = foodItemsByClaim.get(item.energyClaimId);
+    if (items) items.push(normalizeEnergyFoodItem(item));
+    else foodItemsByClaim.set(item.energyClaimId, [normalizeEnergyFoodItem(item)]);
+  }
+
   return {
     user: locals.user,
     session: locals.session,
@@ -377,14 +383,8 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     doseRegimens: doseRegimensList.map(normalizeDoseRegimen),
     doseOccurrences: doseOccurrencesList.map(normalizeDoseOccurrence),
     energyEntries: energyEntriesList.map((entry) =>
-      normalizeEnergyClaim(
-        entry,
-        energyFoodItemsList
-          .filter((item) => item.energyClaimId === entry.id)
-          .map(normalizeEnergyFoodItem),
-      ),
+      normalizeEnergyClaim(entry, foodItemsByClaim.get(entry.id) ?? []),
     ),
-    energyFoodItems: energyFoodItemsList.map(normalizeEnergyFoodItem),
     energySources: energySourcesList.map(toEnergySourceRecord),
     dataImports: dataImportsList.map(normalizeDataImport),
     exerciseDefinitions: exerciseDefinitionsList.map(normalizeExerciseDefinition),

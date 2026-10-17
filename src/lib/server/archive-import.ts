@@ -1,5 +1,6 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { foodItemsEnergyKcal } from './energy';
 import { ACTIVITY_REPORT_KIND, isReportKind } from '$lib/report-kind';
 import { getMetricDefinition } from '$lib/metrics/catalog';
 import { parseNumber } from '$lib/metrics/normalization';
@@ -1080,6 +1081,23 @@ function parseMedicine(
   };
 }
 
+function parseNutritionData(value: unknown): Record<string, number> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ArchiveImportError('invalid_energy');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > 100) throw new ArchiveImportError('invalid_energy');
+  const result: Record<string, number> = {};
+  for (const [key, amount] of entries) {
+    if (key.length === 0 || key.length > 120) throw new ArchiveImportError('invalid_energy');
+    const parsed = finiteNumberOrNull(amount, 'invalid_energy', { min: 0, max: 100_000_000_000 });
+    if (parsed === null) throw new ArchiveImportError('invalid_energy');
+    result[key] = parsed;
+  }
+  return result;
+}
+
 function parseArchiveFoodItems(
   value: unknown,
   patientId: string,
@@ -1131,14 +1149,14 @@ function parseArchiveFoodItems(
       originExternalId:
         optionalText(row.originExternalId, 'invalid_energy', 1000) ||
         optionalText(row.id, 'invalid_energy', 1000),
-      nutritionData: null,
+      nutritionData: parseNutritionData(row.nutritionData),
       createdAt,
       updatedAt,
     };
   });
 }
 
-function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
+export function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
   const row = asRecord(value, 'invalid_energy');
   const direction = requiredText(row.direction, 'invalid_energy', 32);
   const status = requiredText(row.status, 'invalid_energy', 32);
@@ -1181,9 +1199,13 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
     createdAt,
     updatedAt,
   };
+  const foodItems = parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt);
+  // A meal whose foods all carry energy totals their sum, as the editor does on save.
+  const foodTotal = foodItemsEnergyKcal(foodItems);
   return {
     ...snapshot,
-    foodItems: parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt),
+    energyKcal: foodTotal ?? snapshot.energyKcal,
+    foodItems,
   };
 }
 
