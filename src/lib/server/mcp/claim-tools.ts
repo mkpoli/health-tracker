@@ -351,7 +351,8 @@ function energyForm(
   data.set('category', optionalTextField(args, 'category', current?.category ?? null));
   data.set('energyKcal', optionalNumberField(args, 'energy_kcal', current?.energyKcal ?? null));
   data.set('occurredLocal', occurredLocal);
-  data.set('diaryDate', optionalTextField(args, 'diary_date', current?.localDate ?? null));
+  // A changed time suggests its own diary date unless the caller names one.
+  data.set('diaryDate', optionalTextField(args, 'diary_date', null));
   data.set('timezoneOffsetMinutes', String(offset));
   data.set('timezone', zone);
   data.set(

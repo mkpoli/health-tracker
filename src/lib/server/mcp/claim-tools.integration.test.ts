@@ -1011,6 +1011,36 @@ describe('MCP energy claims', () => {
     });
     expect(left.rows).toHaveLength(0);
   });
+
+  it('re-suggests the diary date when an entry moves to another day', async () => {
+    const created = (await tool('log_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'moved-breakfast',
+      direction: 'intake',
+      category: 'breakfast',
+      label: 'Toast',
+      energy_kcal: 200,
+      occurred_at: '2026-10-16T08:00:00+09:00',
+    })) as any;
+    expect(created.entry.local_date).toBe('2026-10-16');
+
+    const moved = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: created.entry.revision,
+      occurred_at: '2026-10-19T08:00:00+09:00',
+    })) as any;
+    expect(moved.entry.local_date).toBe('2026-10-19');
+
+    const named = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: moved.entry.revision,
+      occurred_at: '2026-10-20T08:00:00+09:00',
+      diary_date: '2026-10-19',
+    })) as any;
+    expect(named.entry.local_date).toBe('2026-10-19');
+  });
 });
 
 describe('MCP claim permissions', () => {
