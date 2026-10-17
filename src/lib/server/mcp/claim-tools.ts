@@ -1,5 +1,11 @@
 import { and, count, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
-import { energyDirections, energyStatuses, type EnergyClaimRecord } from '$lib/energy';
+import {
+  energyDirections,
+  energyFoodDataSources,
+  energyStatuses,
+  type EnergyClaimRecord,
+  type EnergyFoodItemRecord,
+} from '$lib/energy';
 import { medicineStatuses, type MedicineClaimRecord } from '$lib/medicine';
 import { courseStatusFor } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
@@ -7,6 +13,7 @@ import {
   claimRevision,
   doseRegimen,
   energyClaim,
+  energyFoodItem,
   energySource,
   medicineClaim,
   medicineCourse,
@@ -15,6 +22,7 @@ import {
   createEnergyClaim,
   InvalidMedicineReferenceError,
   normalizeEnergyClaim,
+  normalizeEnergyFoodItem,
   normalizeMedicineClaim,
   updateEnergyClaim,
 } from '$lib/server/claim-mutations';
@@ -83,6 +91,7 @@ const energyFields = [
   'label',
   'category',
   'energy_kcal',
+  'food_items',
   'occurred_at',
   'timezone',
   'duration_minutes',
@@ -110,6 +119,36 @@ const energyProperties = {
   label: { type: ['string', 'null'], maxLength: 300 },
   category: { type: ['string', 'null'], maxLength: 100 },
   energy_kcal: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+  food_items: {
+    type: 'array',
+    maxItems: 100,
+    description: 'Foods eaten in this meal. When supplied, their kilocalories determine the meal total.',
+    items: {
+      type: 'object',
+      properties: {
+        food_item_id: {
+          type: 'string',
+          maxLength: 100,
+          description: 'Id of a food already in this meal; the food is updated in place. Foods without it are added and foods left out are removed.',
+        },
+        name: { type: 'string', minLength: 1, maxLength: 300 },
+        quantity_value: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        quantity_unit: { type: ['string', 'null'], maxLength: 40 },
+        energy_kcal: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        energy_kcal_min: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        energy_kcal_max: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        protein_g: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        carbohydrate_g: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        fat_g: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        fiber_g: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
+        sodium_mg: { type: ['number', 'null'], minimum: 0, maximum: 100_000_000 },
+        data_source: { type: 'string', enum: energyFoodDataSources },
+        notes: { type: ['string', 'null'], maxLength: 1000 },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
   occurred_at: {
     type: 'string',
     description: 'ISO timestamp with Z or a numeric UTC offset. Stored at minute resolution.',
@@ -220,6 +259,38 @@ function energyForm(
   profileMetadata: unknown,
   current?: EnergyClaimRecord,
 ) {
+  function setFoodItems(data: FormData) {
+    if (!owns(args, 'food_items')) return;
+    if (!Array.isArray(args.food_items)) throw new ToolError('food_items must be an array');
+    data.set(
+      'foodItems',
+      JSON.stringify(
+        args.food_items.map((value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new ToolError('Each food item must be an object');
+          }
+          const item = value as Record<string, unknown>;
+          return {
+            id: item.food_item_id,
+            name: item.name,
+            quantityValue: item.quantity_value,
+            quantityUnit: item.quantity_unit,
+            energyKcal: item.energy_kcal,
+            energyKcalMin: item.energy_kcal_min,
+            energyKcalMax: item.energy_kcal_max,
+            proteinG: item.protein_g,
+            carbohydrateG: item.carbohydrate_g,
+            fatG: item.fat_g,
+            fiberG: item.fiber_g,
+            sodiumMg: item.sodium_mg,
+            dataSource: item.data_source ?? 'unknown',
+            notes: item.notes,
+          };
+        }),
+      ),
+    );
+  }
+
   const changesTime = owns(args, 'occurred_at') || owns(args, 'timezone');
   if (current && !changesTime) {
     const fixedLocal = new Date(
@@ -241,6 +312,7 @@ function energyForm(
     );
     data.set('status', optionalTextField(args, 'status', current.status));
     data.set('notes', optionalTextField(args, 'notes', current.notes));
+    setFoodItems(data);
     return data;
   }
 
@@ -279,6 +351,7 @@ function energyForm(
   );
   data.set('status', optionalTextField(args, 'status', current?.status ?? 'auto'));
   data.set('notes', optionalTextField(args, 'notes', current?.notes ?? null));
+  setFoodItems(data);
   return data;
 }
 
@@ -291,7 +364,7 @@ function parseEnergy(
 ) {
   try {
     const parsed = parseEnergyInput(energyForm(ctx, args, profileMetadata, current));
-    validateEnergyEntry(parsed, hasPhoto);
+    validateEnergyEntry(parsed.claim, hasPhoto, parsed.foodItems);
     return parsed;
   } catch (error) {
     if (error instanceof InvalidEnergyInputError) {
@@ -336,6 +409,7 @@ function serializeEnergy(claim: EnergyClaimRecord, retainedFileCount = 0) {
     label: claim.label,
     category: claim.category,
     energy_kcal: claim.energyKcal,
+    food_items: claim.foodItems.map(serializeFoodItem),
     occurred_at: claim.occurredAt,
     local_date: claim.localDate,
     timezone: claim.timezone,
@@ -353,6 +427,46 @@ function serializeEnergy(claim: EnergyClaimRecord, retainedFileCount = 0) {
     created_at: claim.createdAt,
     updated_at: claim.updatedAt,
   };
+}
+
+function serializeFoodItem(item: EnergyFoodItemRecord) {
+  return {
+    food_item_id: item.id,
+    name: item.name,
+    quantity_value: item.quantityValue,
+    quantity_unit: item.quantityUnit,
+    energy_kcal: item.energyKcal,
+    energy_kcal_min: item.energyKcalMin,
+    energy_kcal_max: item.energyKcalMax,
+    protein_g: item.proteinG,
+    carbohydrate_g: item.carbohydrateG,
+    fat_g: item.fatG,
+    fiber_g: item.fiberG,
+    sodium_mg: item.sodiumMg,
+    data_source: item.dataSource,
+    notes: item.notes,
+  };
+}
+
+async function foodItemsForClaims(patientId: string, claimIds: string[]) {
+  const grouped = new Map<string, EnergyFoodItemRecord[]>();
+  if (claimIds.length === 0) return grouped;
+  const rows = await db
+    .select()
+    .from(energyFoodItem)
+    .where(
+      and(
+        eq(energyFoodItem.patientId, patientId),
+        inArray(energyFoodItem.energyClaimId, claimIds),
+      ),
+    )
+    .orderBy(energyFoodItem.orderIndex);
+  for (const row of rows) {
+    const list = grouped.get(row.energyClaimId) || [];
+    list.push(normalizeEnergyFoodItem(row));
+    grouped.set(row.energyClaimId, list);
+  }
+  return grouped;
 }
 
 async function retainedFileCounts(patientId: string, claimIds: string[]) {
@@ -607,6 +721,7 @@ const listEnergyEntries: ToolDefinition = {
           sql`instr(lower(coalesce(${energyClaim.label}, '')), lower(${query})) > 0`,
           sql`instr(lower(coalesce(${energyClaim.category}, '')), lower(${query})) > 0`,
           sql`instr(lower(coalesce(${energyClaim.notes}, '')), lower(${query})) > 0`,
+          sql`exists (select 1 from ${energyFoodItem} where ${energyFoodItem.energyClaimId} = ${energyClaim.id} and instr(lower(${energyFoodItem.name}), lower(${query})) > 0)`,
         ) as typeof conditions[number],
       );
     }
@@ -628,7 +743,8 @@ const listEnergyEntries: ToolDefinition = {
         .from(energyClaim)
         .where(where),
     ]);
-    const normalized = rows.map(normalizeEnergyClaim);
+    const foods = await foodItemsForClaims(profile.id, rows.map((row) => row.id));
+    const normalized = rows.map((row) => normalizeEnergyClaim(row, foods.get(row.id) || []));
     const files = await retainedFileCounts(
       profile.id,
       normalized.map((entry) => entry.id),
@@ -667,13 +783,14 @@ const logEnergyEntry: ToolDefinition = {
   handler: async (ctx, args) => {
     const profile = await requirePatient(ctx, args.patient_id);
     const key = requestId(args.request_id);
-    const input = parseEnergy(ctx, args, profile.extraData, false);
+    const parsed = parseEnergy(ctx, args, profile.extraData, false);
     const provider = mcpProvider(ctx);
     const result = await createEnergyClaim({
       id: await stableClaimId(ctx, profile.id, 'energy', key),
       idempotent: true,
       patientId: profile.id,
-      input,
+      input: parsed.claim,
+      foodItems: parsed.foodItems ?? undefined,
       origin: { kind: 'mcp', provider, externalId: key },
     });
 
@@ -723,13 +840,23 @@ const updateEnergyEntry: ToolDefinition = {
           eq(energySource.energyClaimId, stored.id),
         ),
       );
-    const current = normalizeEnergyClaim(stored);
-    const input = parseEnergy(ctx, args, profile.extraData, Number(sourceCount[0]?.value ?? 0) > 0, current);
+    const storedFoods = await foodItemsForClaims(profile.id, [stored.id]);
+    const current = normalizeEnergyClaim(stored, storedFoods.get(stored.id) || []);
+    if (
+      (owns(args, 'direction') ? args.direction : current.direction) === 'intake' &&
+      current.foodItems.length > 0 &&
+      owns(args, 'energy_kcal') &&
+      !owns(args, 'food_items')
+    ) {
+      throw new ToolError('food_items determine energy_kcal for a structured meal');
+    }
+    const parsed = parseEnergy(ctx, args, profile.extraData, Number(sourceCount[0]?.value ?? 0) > 0, current);
 
     try {
       const updated = await updateEnergyClaim({
         current: stored,
-        input,
+        input: parsed.claim,
+        foodItems: parsed.foodItems ?? undefined,
         expectedRevision,
         source: { kind: 'mcp', provider: mcpProvider(ctx) },
         changedAt: new Date(ctx.now).toISOString(),
@@ -810,8 +937,9 @@ async function currentHistoryRow(kind: HistoryKind, patientId: string, claimId: 
         .limit(1);
       if (!row) return null;
       const retainedFileCount = (await retainedFileCounts(patientId, [claimId])).get(claimId) ?? 0;
+      const foods = (await foodItemsForClaims(patientId, [claimId])).get(claimId) ?? [];
       return {
-        snapshot: serializeEnergy(normalizeEnergyClaim(row), retainedFileCount),
+        snapshot: serializeEnergy(normalizeEnergyClaim(row, foods), retainedFileCount),
         revision: (stored: StoredRevisionRow) => {
           const parsed = toEnergyClaimRevision(stored);
           return revisionOf(parsed, parsed && serializeEnergy(parsed.snapshot, retainedFileCount));

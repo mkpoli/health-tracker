@@ -21,8 +21,10 @@ import {
 } from '$lib/medicine-plan';
 import {
   isEnergyDirection,
+  isEnergyFoodDataSource,
   isEnergyStatus,
   type EnergyClaimRecord,
+  type EnergyFoodItemRecord,
 } from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import {
@@ -108,6 +110,10 @@ export function toEnergyClaimRevision(
   const snapshot = row.snapshot as unknown as EnergyClaimRecord;
   if (snapshot.id !== row.claimId || snapshot.patientId !== row.patientId) return null;
 
+  const foodItems = Array.isArray(snapshot.foodItems)
+    ? snapshot.foodItems.flatMap((item) => normalizeRevisionFoodItem(item, row.patientId, row.claimId))
+    : [];
+
   return {
     ...row,
     claimKind: 'energy',
@@ -115,8 +121,28 @@ export function toEnergyClaimRevision(
       ...snapshot,
       direction: isEnergyDirection(snapshot.direction) ? snapshot.direction : 'intake',
       status: isEnergyStatus(snapshot.status) ? snapshot.status : 'draft',
+      foodItems,
     },
   };
+}
+
+function normalizeRevisionFoodItem(
+  value: unknown,
+  patientId: string,
+  energyClaimId: string,
+): EnergyFoodItemRecord[] {
+  if (!isObject(value)) return [];
+  if (
+    typeof value.id !== 'string' ||
+    value.patientId !== patientId ||
+    value.energyClaimId !== energyClaimId ||
+    typeof value.name !== 'string' ||
+    typeof value.dataSource !== 'string' ||
+    !isEnergyFoodDataSource(value.dataSource)
+  ) {
+    return [];
+  }
+  return [value as unknown as EnergyFoodItemRecord];
 }
 
 export function toWorkoutClaimRevision(

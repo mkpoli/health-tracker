@@ -571,7 +571,7 @@ export const energyClaim = sqliteTable(
 	]
 );
 
-// Meal food items, already present in production. No code reads them yet; declaring the table keeps `db:push` from dropping it.
+// Food items that make up a meal (an energy claim).
 export const energyFoodItem = sqliteTable(
 	'energy_food_item',
 	{

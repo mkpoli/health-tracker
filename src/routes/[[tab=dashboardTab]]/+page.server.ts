@@ -5,6 +5,7 @@ import {
   doseOccurrence,
   doseRegimen,
   energyClaim,
+  energyFoodItem,
   energySource,
   exerciseDefinition,
   medicineClaim,
@@ -94,6 +95,7 @@ import {
   createEnergyClaim,
   InvalidMedicineReferenceError,
   normalizeEnergyClaim,
+  normalizeEnergyFoodItem,
   normalizeMedicineClaim,
   updateEnergyClaim,
 } from '$lib/server/claim-mutations';
@@ -228,6 +230,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   let doseRegimensList: typeof doseRegimen.$inferSelect[] = [];
   let doseOccurrencesList: typeof doseOccurrence.$inferSelect[] = [];
   let energyEntriesList: typeof energyClaim.$inferSelect[] = [];
+  let energyFoodItemsList: typeof energyFoodItem.$inferSelect[] = [];
   let energySourcesList: typeof energySource.$inferSelect[] = [];
   let dataImportsList: typeof dataImport.$inferSelect[] = [];
   let exerciseDefinitionsList: typeof exerciseDefinition.$inferSelect[] = [];
@@ -251,6 +254,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
       doseRegimensList,
       doseOccurrencesList,
       energyEntriesList,
+      energyFoodItemsList,
       energySourcesList,
       dataImportsList,
       exerciseDefinitionsList,
@@ -296,6 +300,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
         .from(energyClaim)
         .where(eq(energyClaim.patientId, patientId))
         .orderBy(desc(energyClaim.occurredAt)),
+      readDb
+        .select()
+        .from(energyFoodItem)
+        .where(eq(energyFoodItem.patientId, patientId))
+        .orderBy(energyFoodItem.orderIndex),
       readDb
         .select()
         .from(energySource)
@@ -352,6 +361,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     return normalized ? [normalized] : [];
   });
 
+  const foodItemsByClaim = new Map<string, ReturnType<typeof normalizeEnergyFoodItem>[]>();
+  for (const item of energyFoodItemsList) {
+    const items = foodItemsByClaim.get(item.energyClaimId);
+    if (items) items.push(normalizeEnergyFoodItem(item));
+    else foodItemsByClaim.set(item.energyClaimId, [normalizeEnergyFoodItem(item)]);
+  }
+
   return {
     user: locals.user,
     session: locals.session,
@@ -366,7 +382,9 @@ export const load: PageServerLoad = async ({ url, locals }) => {
     medicineCourses: medicineCoursesList.map(normalizeMedicineCourse),
     doseRegimens: doseRegimensList.map(normalizeDoseRegimen),
     doseOccurrences: doseOccurrencesList.map(normalizeDoseOccurrence),
-    energyEntries: energyEntriesList.map(normalizeEnergyClaim),
+    energyEntries: energyEntriesList.map((entry) =>
+      normalizeEnergyClaim(entry, foodItemsByClaim.get(entry.id) ?? []),
+    ),
     energySources: energySourcesList.map(toEnergySourceRecord),
     dataImports: dataImportsList.map(normalizeDataImport),
     exerciseDefinitions: exerciseDefinitionsList.map(normalizeExerciseDefinition),
@@ -1086,10 +1104,10 @@ export const actions: Actions = {
     const entryId = crypto.randomUUID();
 
     try {
-      const input = parseEnergyInput(data);
+      const parsed = parseEnergyInput(data);
       const photoValue = data.get('photo');
       const photo = validateEnergyPhoto(photoValue instanceof File ? photoValue : null);
-      validateEnergyEntry(input, Boolean(photo));
+      validateEnergyEntry(parsed.claim, Boolean(photo), parsed.foodItems);
 
       if (photo) {
         storedPhoto = await storeEnergyPhoto({
@@ -1103,7 +1121,8 @@ export const actions: Actions = {
       const { claim: entry } = await createEnergyClaim({
         id: entryId,
         patientId: ownedPatient.id,
-        input,
+        input: parsed.claim,
+        foodItems: parsed.foodItems ?? undefined,
         origin: manualClaimSource,
         source: storedPhoto,
       });
@@ -1140,17 +1159,18 @@ export const actions: Actions = {
     }
 
     try {
-      const input = parseEnergyInput(data);
+      const parsed = parseEnergyInput(data);
       const existingSource = await db
         .select({ id: energySource.id })
         .from(energySource)
         .where(eq(energySource.energyClaimId, current.id))
         .limit(1);
-      validateEnergyEntry(input, existingSource.length > 0);
+      validateEnergyEntry(parsed.claim, existingSource.length > 0, parsed.foodItems);
 
       const entry = await updateEnergyClaim({
         current,
-        input,
+        input: parsed.claim,
+        foodItems: parsed.foodItems ?? undefined,
         expectedRevision,
         source: manualClaimSource,
       });

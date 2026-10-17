@@ -1,5 +1,6 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { foodItemsEnergyKcal } from './energy';
 import { ACTIVITY_REPORT_KIND, isReportKind } from '$lib/report-kind';
 import { getMetricDefinition } from '$lib/metrics/catalog';
 import { parseNumber } from '$lib/metrics/normalization';
@@ -11,6 +12,7 @@ import {
   doseOccurrence,
   doseRegimen,
   energyClaim,
+  energyFoodItem,
   exerciseDefinition,
   medicineCatalogIdentifier,
   medicineCatalogName,
@@ -27,7 +29,13 @@ import {
   workoutExercise,
   workoutSet,
 } from '$lib/server/db/schema';
-import { isEnergyDirection, isEnergyStatus, type EnergyClaimRecord } from '$lib/energy';
+import {
+  isEnergyDirection,
+  isEnergyFoodDataSource,
+  isEnergyStatus,
+  type EnergyClaimRecord,
+  type EnergyFoodItemRecord,
+} from '$lib/energy';
 import { isMedicineStatus, type MedicineClaimRecord } from '$lib/medicine';
 import {
   isMedicineCatalogEntityKind,
@@ -1073,7 +1081,82 @@ function parseMedicine(
   };
 }
 
-function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
+function parseNutritionData(value: unknown): Record<string, number> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ArchiveImportError('invalid_energy');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > 100) throw new ArchiveImportError('invalid_energy');
+  const result: Record<string, number> = {};
+  for (const [key, amount] of entries) {
+    if (key.length === 0 || key.length > 120) throw new ArchiveImportError('invalid_energy');
+    const parsed = finiteNumberOrNull(amount, 'invalid_energy', { min: 0, max: 100_000_000_000 });
+    if (parsed === null) throw new ArchiveImportError('invalid_energy');
+    result[key] = parsed;
+  }
+  return result;
+}
+
+function parseArchiveFoodItems(
+  value: unknown,
+  patientId: string,
+  energyClaimId: string,
+  createdAt: string,
+  updatedAt: string,
+): EnergyFoodItemRecord[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new ArchiveImportError('invalid_energy');
+  }
+
+  return value.map((item, orderIndex) => {
+    const row = asRecord(item, 'invalid_energy');
+    const dataSource = optionalText(row.dataSource, 'invalid_energy', 32) || 'unknown';
+    if (!isEnergyFoodDataSource(dataSource)) throw new ArchiveImportError('invalid_energy');
+
+    const number = (key: string, max = 1_000_000) =>
+      finiteNumberOrNull(row[key], 'invalid_energy', { min: 0, max });
+    const energyKcal = number('energyKcal');
+    const energyKcalMin = number('energyKcalMin');
+    const energyKcalMax = number('energyKcalMax');
+    if (
+      (energyKcalMin !== null && energyKcalMax !== null && energyKcalMin > energyKcalMax) ||
+      (energyKcal !== null && energyKcalMin !== null && energyKcal < energyKcalMin) ||
+      (energyKcal !== null && energyKcalMax !== null && energyKcal > energyKcalMax)
+    ) {
+      throw new ArchiveImportError('invalid_energy');
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      patientId,
+      energyClaimId,
+      orderIndex,
+      name: requiredText(row.name, 'invalid_energy', 300),
+      quantityValue: number('quantityValue'),
+      quantityUnit: optionalText(row.quantityUnit, 'invalid_energy', 40),
+      energyKcal,
+      energyKcalMin,
+      energyKcalMax,
+      proteinG: number('proteinG'),
+      carbohydrateG: number('carbohydrateG'),
+      fatG: number('fatG'),
+      fiberG: number('fiberG'),
+      sodiumMg: number('sodiumMg', 100_000_000),
+      dataSource,
+      notes: optionalText(row.notes, 'invalid_energy', 1000),
+      originExternalId:
+        optionalText(row.originExternalId, 'invalid_energy', 1000) ||
+        optionalText(row.id, 'invalid_energy', 1000),
+      nutritionData: parseNutritionData(row.nutritionData),
+      createdAt,
+      updatedAt,
+    };
+  });
+}
+
+export function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
   const row = asRecord(value, 'invalid_energy');
   const direction = requiredText(row.direction, 'invalid_energy', 32);
   const status = requiredText(row.status, 'invalid_energy', 32);
@@ -1091,7 +1174,7 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
   const createdAt = validDateText(row.createdAt, 'invalid_energy');
   const updatedAt = validDateText(row.updatedAt, 'invalid_energy');
 
-  return {
+  const snapshot = {
     id,
     patientId,
     direction,
@@ -1115,6 +1198,14 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
     revision: positiveRevision(row.revision, 'invalid_energy'),
     createdAt,
     updatedAt,
+  };
+  const foodItems = parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt);
+  // A meal whose foods all carry energy totals their sum, as the editor does on save.
+  const foodTotal = foodItemsEnergyKcal(foodItems);
+  return {
+    ...snapshot,
+    energyKcal: foodTotal ?? snapshot.energyKcal,
+    foodItems,
   };
 }
 
@@ -1737,11 +1828,20 @@ async function importEnergy(patientId: string, sourcePatientId: string, items: u
   assertUniqueSourceIds(planned);
 
   return db.transaction(async (tx) => {
+    const claimRows = planned.map(({ snapshot }) => {
+      const { foodItems: _foodItems, ...claim } = snapshot;
+      return claim;
+    });
     const inserted = await tx
       .insert(energyClaim)
-      .values(planned.map(({ snapshot }) => snapshot))
+      .values(claimRows)
       .onConflictDoNothing()
       .returning({ id: energyClaim.id });
+    const insertedIds = new Set(inserted.map((row) => row.id));
+    const foodRows = planned.flatMap(({ snapshot }) =>
+      insertedIds.has(snapshot.id) ? snapshot.foodItems : [],
+    );
+    if (foodRows.length > 0) await tx.insert(energyFoodItem).values(foodRows);
     const ids = planned.map(({ snapshot }) => snapshot.id);
     const stored = await tx
       .select()
@@ -1752,12 +1852,14 @@ async function importEnergy(patientId: string, sourcePatientId: string, items: u
       await tx
         .insert(claimRevision)
         .values(
-          stored.map((snapshot) =>
-            claimRevisionValues('energy', snapshot as EnergyClaimRecord, {
-              kind: snapshot.originKind,
-              provider: snapshot.originProvider,
-            }),
-          ),
+          stored.map((snapshot) => {
+            const foods = planned.find((item) => item.snapshot.id === snapshot.id)?.snapshot.foodItems || [];
+            return claimRevisionValues(
+              'energy',
+              { ...snapshot, foodItems: foods } as EnergyClaimRecord,
+              { kind: snapshot.originKind, provider: snapshot.originProvider },
+            );
+          }),
         )
         .onConflictDoNothing();
     }
