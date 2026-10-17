@@ -361,7 +361,6 @@
   }
 
   function removeFood(key: string) {
-    if (draft.foods.length <= 1) return;
     draft.foods = draft.foods.filter((food) => food.key !== key);
   }
 
@@ -795,9 +794,7 @@
         {#if draft.id}<input type="hidden" name="id" value={draft.id} /><input type="hidden" name="revision" value={draft.revision} />{/if}
         <input type="hidden" name="timezone" value={draft.timezone} />
         <input type="hidden" name="timezoneOffsetMinutes" value={draft.timezoneOffsetMinutes} />
-        {#if draft.direction === 'intake'}
-          {#if draft.foods.length > 0}<input type="hidden" name="foodItems" value={draftFoodItems} />{:else}<input type="hidden" name="energyKcal" value={draft.energyKcal} />{/if}
-        {/if}
+        {#if draft.direction === 'intake'}<input type="hidden" name="foodItems" value={draftFoodItems} />{/if}
 
         <div class="space-y-6 px-5 py-5 sm:px-6 sm:py-6">
           {#if captureReview}<p class="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-800">{m.capture_editor_notice()}</p>{/if}
@@ -876,7 +873,7 @@
                   <div class="rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
                     <div class="mb-3 flex items-center justify-between">
                       <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{m.calories_food_number({ number: index + 1 })}</p>
-                      {#if draft.foods.length > 1}<button type="button" onclick={() => removeFood(food.key)} class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.delete()}</button>{/if}
+                      <button type="button" onclick={() => removeFood(food.key)} class="text-xs font-semibold text-rose-600 hover:text-rose-700">{m.delete()}</button>
                     </div>
                     <div class="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
                       <label>
@@ -914,6 +911,12 @@
                   </div>
                 {/each}
               </div>
+              {#if draft.foods.length === 0}
+                <label class="mt-3 block">
+                  <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_energy()}</span>
+                  <div class="relative"><input name="energyKcal" type="number" bind:value={draft.energyKcal} min="0" max="1000000" step="0.1" inputmode="decimal" class="w-full rounded-lg border-slate-300 px-3 py-2.5 pr-14 text-sm shadow-sm focus:border-emerald-500 focus:ring-emerald-500" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-medium text-slate-400">kcal</span></div>
+                </label>
+              {/if}
               <button type="button" onclick={addFood} class="mt-3 inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800 hover:bg-orange-100"><span>+</span>{m.calories_add_food_item()}</button>
             </section>
           {/if}

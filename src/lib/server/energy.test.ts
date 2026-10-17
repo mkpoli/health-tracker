@@ -112,4 +112,11 @@ describe('parseEnergyInput', () => {
 
     expect(() => parseEnergyInput(data)).toThrowError(new InvalidEnergyInputError('invalid_food_items'));
   });
+
+  it('reads the manual energy of a meal with no foods', () => {
+    const data = form({ ...base, label: 'Photo meal', energyKcal: '450' });
+    data.set('foodItems', '[]');
+
+    expect(parseEnergyInput(data).claim.energyKcal).toBe(450);
+  });
 });

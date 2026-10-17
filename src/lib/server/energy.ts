@@ -254,7 +254,7 @@ export function parseEnergyInput(data: FormData): ParsedEnergyInput {
   if (!isEnergyDirection(direction)) throw new InvalidEnergyInputError('invalid_direction');
 
   const foodItems = readFoodItems(data, direction);
-  const energyKcal = foodItems === null ? readEnergyKcal(data) : foodItemsEnergyKcal(foodItems);
+  const energyKcal = foodItems === null || foodItems.length === 0 ? readEnergyKcal(data) : foodItemsEnergyKcal(foodItems);
   const statusValue = data.get('status');
   const requestedStatus = typeof statusValue === 'string' ? statusValue : 'auto';
   const status = requestedStatus === 'auto' ? (energyKcal === null ? 'draft' : 'recorded') : requestedStatus;
