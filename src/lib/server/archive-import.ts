@@ -1080,6 +1080,23 @@ function parseMedicine(
   };
 }
 
+function parseNutritionData(value: unknown): Record<string, number> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ArchiveImportError('invalid_energy');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > 100) throw new ArchiveImportError('invalid_energy');
+  const result: Record<string, number> = {};
+  for (const [key, amount] of entries) {
+    if (key.length === 0 || key.length > 120) throw new ArchiveImportError('invalid_energy');
+    const parsed = finiteNumberOrNull(amount, 'invalid_energy', { min: 0, max: 100_000_000_000 });
+    if (parsed === null) throw new ArchiveImportError('invalid_energy');
+    result[key] = parsed;
+  }
+  return result;
+}
+
 function parseArchiveFoodItems(
   value: unknown,
   patientId: string,
@@ -1131,14 +1148,14 @@ function parseArchiveFoodItems(
       originExternalId:
         optionalText(row.originExternalId, 'invalid_energy', 1000) ||
         optionalText(row.id, 'invalid_energy', 1000),
-      nutritionData: null,
+      nutritionData: parseNutritionData(row.nutritionData),
       createdAt,
       updatedAt,
     };
   });
 }
 
-function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
+export function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaimRecord {
   const row = asRecord(value, 'invalid_energy');
   const direction = requiredText(row.direction, 'invalid_energy', 32);
   const status = requiredText(row.status, 'invalid_energy', 32);
@@ -1181,9 +1198,10 @@ function parseEnergy(value: unknown, patientId: string, id: string): EnergyClaim
     createdAt,
     updatedAt,
   };
+  const foodItems = parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt);
   return {
     ...snapshot,
-    foodItems: parseArchiveFoodItems(row.foodItems, patientId, id, createdAt, updatedAt),
+    foodItems,
   };
 }
 
