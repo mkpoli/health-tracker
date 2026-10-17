@@ -818,6 +818,7 @@ describe('MCP energy claims', () => {
         },
       ],
       occurred_at: '2026-08-15T12:15:00+09:00',
+      diary_date: '2026-08-14',
       timezone: 'Asia/Tokyo',
     })) as any;
     const exercise = (await log.handler(context, {
@@ -846,7 +847,8 @@ describe('MCP energy claims', () => {
     });
     expect(meal.entry).toMatchObject({
       occurred_at: '2026-08-15T03:15:00.000Z',
-      local_date: '2026-08-15',
+      diary_date: '2026-08-14',
+      local_date: '2026-08-14',
       timezone_offset_minutes: 540,
       energy_kcal: 640,
       food_items: [
@@ -864,7 +866,7 @@ describe('MCP energy claims', () => {
 
     const listed = (await tool('list_energy_entries').handler(context, {
       patient_id: 'profile-1',
-      from: '2026-08-15',
+      from: '2026-08-14',
       to: '2026-08-15',
     })) as any;
     expect(listed.total).toBe(2);
@@ -911,6 +913,7 @@ describe('MCP energy claims', () => {
     })) as any;
     expect(changed.entry).toMatchObject({
       energy_kcal: 675,
+      diary_date: '2026-08-14',
       revision: 2,
       retained_file_count: 1,
       food_items: [
@@ -1007,6 +1010,36 @@ describe('MCP energy claims', () => {
       args: [created.entry.energy_entry_id],
     });
     expect(left.rows).toHaveLength(0);
+  });
+
+  it('re-suggests the diary date when an entry moves to another day', async () => {
+    const created = (await tool('log_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      request_id: 'moved-breakfast',
+      direction: 'intake',
+      category: 'breakfast',
+      label: 'Toast',
+      energy_kcal: 200,
+      occurred_at: '2026-10-16T08:00:00+09:00',
+    })) as any;
+    expect(created.entry.local_date).toBe('2026-10-16');
+
+    const moved = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: created.entry.revision,
+      occurred_at: '2026-10-19T08:00:00+09:00',
+    })) as any;
+    expect(moved.entry.local_date).toBe('2026-10-19');
+
+    const named = (await tool('update_energy_entry').handler(context, {
+      patient_id: 'profile-1',
+      energy_entry_id: created.entry.energy_entry_id,
+      expected_revision: moved.entry.revision,
+      occurred_at: '2026-10-20T08:00:00+09:00',
+      diary_date: '2026-10-19',
+    })) as any;
+    expect(named.entry.local_date).toBe('2026-10-19');
   });
 });
 

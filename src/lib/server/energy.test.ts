@@ -29,20 +29,54 @@ describe('parseEnergyInput', () => {
 
     expect(parsed).toEqual({
       claim: {
-      direction: 'intake',
-      label: 'Dinner',
-      category: 'dinner',
-      energyKcal: 642.125,
-      occurredAt: '2026-08-15T09:30:00.000Z',
-      localDate: '2026-08-15',
-      timezone: 'Asia/Tokyo',
-      timezoneOffsetMinutes: 540,
-      durationMinutes: null,
-      status: 'recorded',
-      notes: 'Homemade',
+        direction: 'intake',
+        label: 'Dinner',
+        category: 'dinner',
+        energyKcal: 642.125,
+        occurredAt: '2026-08-15T09:30:00.000Z',
+        localDate: '2026-08-15',
+        timezone: 'Asia/Tokyo',
+        timezoneOffsetMinutes: 540,
+        durationMinutes: null,
+        status: 'recorded',
+        notes: 'Homemade',
       },
       foodItems: null,
     });
+  });
+
+  it.each([
+    ['2026-08-19T00:04', 'snack', '2026-08-18'],
+    ['2026-08-19T04:59', 'dinner', '2026-08-18'],
+    ['2026-08-19T00:04', 'breakfast', '2026-08-19'],
+    ['2026-01-02T02:30', 'meal', '2026-01-01'],
+    ['2026-01-02T02:30', 'lunch', '2026-01-02'],
+  ])('suggests diary day %s for a %s entry', (occurredLocal, category, localDate) => {
+    const parsed = parseEnergyInput(
+      form({ ...base, occurredLocal, category, energyKcal: '100' }),
+    );
+
+    expect(parsed.claim.localDate).toBe(localDate);
+  });
+
+  it('accepts an explicit diary date on either side of the calendar date', () => {
+    const previous = parseEnergyInput(
+      form({ ...base, occurredLocal: '2026-08-19T12:00', diaryDate: '2026-08-18', energyKcal: '100' }),
+    );
+    const next = parseEnergyInput(
+      form({ ...base, occurredLocal: '2026-08-19T23:30', diaryDate: '2026-08-20', energyKcal: '100' }),
+    );
+
+    expect(previous.claim.localDate).toBe('2026-08-18');
+    expect(next.claim.localDate).toBe('2026-08-20');
+  });
+
+  it('rejects a diary date more than one day from the timestamp', () => {
+    expect(() =>
+      parseEnergyInput(
+        form({ ...base, occurredLocal: '2026-08-19T12:00', diaryDate: '2026-08-17', energyKcal: '100' }),
+      ),
+    ).toThrowError(new InvalidEnergyInputError('invalid_diary_date'));
   });
 
   it('keeps a photo-first entry pending when energy is unknown', () => {

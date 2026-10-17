@@ -15,6 +15,7 @@
     EnergySourceRecord,
     EnergyStatus,
   } from '$lib/energy';
+  import { suggestEnergyDiaryDate } from '$lib/energy';
   import ClaimRevisionTimeline from './ClaimRevisionTimeline.svelte';
   import HealthCapture from './HealthCapture.svelte';
 
@@ -70,6 +71,7 @@
     category: string;
     energyKcal: string;
     occurredLocal: string;
+    diaryDate: string;
     timezone: string;
     timezoneOffsetMinutes: number;
     durationMinutes: string;
@@ -82,6 +84,8 @@
   let saving = $state(false);
   let saveError = $state('');
   let captureReview = $state(false);
+  let diaryDateEdited = $state(false);
+  let diaryDateTouched = $state(false);
   let selectedDate = $state(todayLocalDate());
   let draft = $state<Draft>(newDraft('intake'));
 
@@ -256,14 +260,18 @@
   }
 
   function newDraft(direction: EnergyDirection): Draft {
+    const occurredLocal = currentLocalDateTime();
+    const category = direction === 'intake' ? 'meal' : '';
     return {
       id: '',
       revision: 0,
       direction,
       label: '',
-      category: direction === 'intake' ? 'meal' : '',
+      category,
       energyKcal: '',
-      occurredLocal: currentLocalDateTime(),
+      occurredLocal,
+      diaryDate:
+        suggestEnergyDiaryDate(occurredLocal, direction, category) || occurredLocal.slice(0, 10),
       timezone: browserTimezone(),
       timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
       durationMinutes: '',
@@ -294,6 +302,8 @@
 
   function openCreate(direction: EnergyDirection) {
     draft = newDraft(direction);
+    diaryDateEdited = false;
+    diaryDateTouched = false;
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -308,6 +318,7 @@
       category: entry.category || '',
       energyKcal: numberInput(entry.energyKcal),
       occurredLocal: entryLocalDateTime(entry),
+      diaryDate: entry.localDate,
       timezone: entry.timezone || '',
       timezoneOffsetMinutes: entry.timezoneOffsetMinutes,
       durationMinutes: numberInput(entry.durationMinutes),
@@ -315,6 +326,12 @@
       notes: entry.notes || '',
       foods: entry.foodItems.map(foodDraft),
     };
+    // A stored date that differs from the suggestion was chosen by hand; keep it unless the time moves.
+    diaryDateEdited =
+      entry.localDate !==
+      (suggestEnergyDiaryDate(draft.occurredLocal, draft.direction, draft.category) ||
+        draft.occurredLocal.slice(0, 10));
+    diaryDateTouched = false;
     saveError = '';
     captureReview = false;
     editorOpen = true;
@@ -324,11 +341,22 @@
     const direction = proposal.direction || 'intake';
     const sourceNote = m.capture_source_note({ message: sourceMessage });
     const next = newDraft(direction);
+    // A date without a time keeps the date and takes the current time of day.
+    const occurredLocal =
+      proposal.occurredLocal ||
+      (proposal.diaryDate
+        ? `${proposal.diaryDate}T${currentLocalDateTime().slice(11, 16)}`
+        : currentLocalDateTime());
+    const category = direction === 'intake' ? proposal.category || 'meal' : '';
     draft = {
       ...next,
-      category: direction === 'intake' ? proposal.category || 'meal' : '',
+      category,
       energyKcal: proposal.energyKcal === null ? '' : String(proposal.energyKcal),
-      occurredLocal: proposal.occurredLocal || currentLocalDateTime(),
+      occurredLocal,
+      diaryDate:
+        proposal.diaryDate ||
+        suggestEnergyDiaryDate(occurredLocal, direction, category) ||
+        occurredLocal.slice(0, 10),
       durationMinutes: proposal.durationMinutes === null ? '' : String(proposal.durationMinutes),
       notes: [proposal.notes, sourceNote].filter(Boolean).join('\n\n').slice(0, 4000),
       foods:
@@ -342,8 +370,9 @@
           : [],
       label: direction === 'expenditure' ? proposal.label || '' : '',
     };
+    diaryDateEdited = proposal.diaryDate !== null;
     updateDraftTimeZone();
-    selectedDate = draft.occurredLocal.slice(0, 10);
+    selectedDate = draft.diaryDate;
     saveError = '';
     captureReview = true;
     editorOpen = true;
@@ -356,6 +385,25 @@
     if (Number.isNaN(localDate.getTime())) return;
     draft.timezone = currentTimezone;
     draft.timezoneOffsetMinutes = -localDate.getTimezoneOffset();
+  }
+
+  function updateDiaryDateSuggestion(timeChanged = false) {
+    if (timeChanged ? diaryDateTouched : diaryDateEdited) return;
+    const suggestion = suggestEnergyDiaryDate(
+      draft.occurredLocal,
+      draft.direction,
+      draft.category,
+    );
+    if (suggestion) draft.diaryDate = suggestion;
+  }
+
+  function handleOccurredLocalChange() {
+    updateDraftTimeZone();
+    updateDiaryDateSuggestion(true);
+  }
+
+  function handleCategoryChange() {
+    updateDiaryDateSuggestion();
   }
 
   function closeEditor() {
@@ -376,6 +424,7 @@
   function changeDirection(direction: EnergyDirection) {
     draft.direction = direction;
     if (direction === 'intake' && draft.foods.length === 0) draft.foods = [blankFood()];
+    updateDiaryDateSuggestion();
   }
 
   function changeSelectedDate(days: number) {
@@ -392,6 +441,7 @@
     return async ({ result, update }) => {
       try {
         if (result.type === 'success') {
+          selectedDate = draft.diaryDate;
           await refreshAfterSave(() => update({ reset: false, invalidateAll: true }));
           editorOpen = false;
           captureReview = false;
@@ -473,11 +523,16 @@
 
   function formatEntryTime(entry: EnergyClaimRecord) {
     const shifted = new Date(Date.parse(entry.occurredAt) + entry.timezoneOffsetMinutes * 60_000);
-    return new Intl.DateTimeFormat(getLocale(), {
+    const time = new Intl.DateTimeFormat(getLocale(), {
       hour: 'numeric',
       minute: '2-digit',
       timeZone: 'UTC',
     }).format(shifted);
+    const calendarDate = shifted.toISOString().slice(0, 10);
+    if (calendarDate === entry.localDate) return time;
+    return calendarDate > entry.localDate
+      ? `${m.calories_next_day()} ${time}`
+      : `${m.calories_previous_day()} ${time}`;
   }
 
   function formatQuantity(item: EnergyFoodItemRecord) {
@@ -829,12 +884,17 @@
             </label>
             <label>
               <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_time()}</span>
-              <input name="occurredLocal" type="datetime-local" bind:value={draft.occurredLocal} onchange={updateDraftTimeZone} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" />
+              <input name="occurredLocal" type="datetime-local" bind:value={draft.occurredLocal} onchange={handleOccurredLocalChange} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" />
             </label>
+            <label>
+              <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_diary_date()}</span>
+              <input name="diaryDate" type="date" bind:value={draft.diaryDate} onchange={() => { diaryDateEdited = true; diaryDateTouched = true; }} required class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" />
+            </label>
+            <p class="-mt-2 text-xs leading-relaxed text-slate-500 sm:col-span-2">{m.calories_diary_date_hint()}</p>
             {#if draft.direction === 'intake'}
               <label>
                 <span class="mb-1.5 block text-sm font-medium text-slate-700">{m.calories_meal_type()}</span>
-                <select name="category" bind:value={draft.category} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                <select name="category" bind:value={draft.category} onchange={handleCategoryChange} class="w-full rounded-lg border-slate-300 px-3 py-2.5 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500">
                   <option value="meal">{m.calories_meal_other()}</option>
                   <option value="breakfast">{m.calories_meal_breakfast()}</option>
                   <option value="lunch">{m.calories_meal_lunch()}</option>

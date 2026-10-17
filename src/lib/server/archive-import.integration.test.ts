@@ -594,7 +594,7 @@ const structuredEnergyCurrent = {
   label: 'Structured breakfast',
   category: 'breakfast',
   energyKcal: 389,
-  occurredAt: '2026-08-03T00:00:00.000Z',
+  occurredAt: '2026-08-02T16:30:00.000Z',
   localDate: '2026-08-03',
   originExternalId: 'entry-structured',
   createdAt: '2026-08-03T00:00:00.000Z',
@@ -1522,8 +1522,8 @@ describe('archive import storage', () => {
     expect(revisions.rows.every((row) => row.snapshot_id === row.claim_id)).toBe(true);
 
     const restoredFoods = await client.execute(`
-      SELECT energy_claim.label, energy_food_item.name, energy_food_item.energy_kcal,
-        energy_food_item.order_index
+      SELECT energy_claim.label, energy_claim.local_date, energy_food_item.name,
+        energy_food_item.energy_kcal, energy_food_item.order_index
       FROM energy_food_item
       JOIN energy_claim ON energy_claim.id = energy_food_item.energy_claim_id
       ORDER BY energy_food_item.order_index
@@ -1531,12 +1531,14 @@ describe('archive import storage', () => {
     expect(restoredFoods.rows).toEqual([
       expect.objectContaining({
         label: 'Structured breakfast',
+        local_date: '2026-08-03',
         name: 'Rice',
         energy_kcal: 281,
         order_index: 0,
       }),
       expect.objectContaining({
         label: 'Structured breakfast',
+        local_date: '2026-08-03',
         name: 'Tofu',
         energy_kcal: 108,
         order_index: 1,
@@ -1544,13 +1546,17 @@ describe('archive import storage', () => {
     ]);
 
     const structuredRevision = await client.execute(`
-      SELECT json_array_length(claim_revision.snapshot, '$.foodItems') AS food_count
+      SELECT json_array_length(claim_revision.snapshot, '$.foodItems') AS food_count,
+        json_extract(claim_revision.snapshot, '$.localDate') AS snapshot_local_date
       FROM claim_revision
       JOIN energy_claim ON energy_claim.id = claim_revision.claim_id
       WHERE claim_revision.claim_kind = 'energy'
         AND energy_claim.label = 'Structured breakfast'
     `);
-    expect(structuredRevision.rows[0]?.food_count).toBe(2);
+    expect(structuredRevision.rows[0]).toMatchObject({
+      food_count: 2,
+      snapshot_local_date: '2026-08-03',
+    });
 
     const workoutRelationship = await client.execute(`
       SELECT session.id AS session_id, plan.id AS plan_id, workout_set.repetitions AS repetitions

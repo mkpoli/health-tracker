@@ -127,6 +127,7 @@ const energySchema = {
     },
     energy_kcal: { type: ['number', 'null'], minimum: 0, maximum: 1_000_000 },
     occurred_local: nullableText(16),
+    diary_date: nullableText(10),
     duration_minutes: { type: ['integer', 'null'], minimum: 0, maximum: 10_080 },
     notes: nullableText(1000),
     uncertain_fields: {
@@ -143,6 +144,7 @@ const energySchema = {
     'category',
     'energy_kcal',
     'occurred_local',
+    'diary_date',
     'duration_minutes',
     'notes',
     'uncertain_fields',
@@ -174,6 +176,7 @@ function systemPrompt(kind: 'medicine' | 'energy') {
           'Copy energy_kcal only when the user states a numeric calorie value.',
           'Never estimate calories from a food name or activity.',
           'Use occurred_local only when the message states a time or provides a relative time that can be resolved.',
+          'Set diary_date to the day the person means this entry to belong to. Resolve words such as yesterday, last night, today and tomorrow. After-midnight entries belong to the previous date only when the wording or meal context indicates a continuation of that day. Use null when the intended diary date is unclear.',
           'Keep notes limited to record details that have no structured field.',
         ];
 
@@ -203,6 +206,7 @@ function systemPrompt(kind: 'medicine' | 'energy') {
           category: null,
           energy_kcal: null,
           occurred_local: null,
+          diary_date: null,
           duration_minutes: null,
           notes: null,
           uncertain_fields: [],

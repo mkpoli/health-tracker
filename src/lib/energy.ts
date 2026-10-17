@@ -75,3 +75,47 @@ export function isEnergyStatus(value: string): value is EnergyStatus {
 export function isEnergyFoodDataSource(value: string): value is EnergyFoodDataSource {
   return energyFoodDataSources.includes(value as EnergyFoodDataSource);
 }
+
+export function energyCalendarDateFromLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+export function suggestEnergyDiaryDate(
+  occurredLocal: string,
+  direction: EnergyDirection,
+  category: string | null,
+) {
+  const calendarDate = energyCalendarDateFromLocalDateTime(occurredLocal);
+  if (!calendarDate) return null;
+  const hour = Number(occurredLocal.slice(11, 13));
+  const continuesPreviousDay =
+    direction === 'intake' &&
+    hour < 5 &&
+    ['meal', 'dinner', 'snack', 'drink'].includes(category || '');
+  if (!continuesPreviousDay) return calendarDate;
+
+  const date = new Date(`${calendarDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
