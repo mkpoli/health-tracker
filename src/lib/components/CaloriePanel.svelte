@@ -341,7 +341,12 @@
     const direction = proposal.direction || 'intake';
     const sourceNote = m.capture_source_note({ message: sourceMessage });
     const next = newDraft(direction);
-    const occurredLocal = proposal.occurredLocal || currentLocalDateTime();
+    // A date without a time keeps the date and takes the current time of day.
+    const occurredLocal =
+      proposal.occurredLocal ||
+      (proposal.diaryDate
+        ? `${proposal.diaryDate}T${currentLocalDateTime().slice(11, 16)}`
+        : currentLocalDateTime());
     const category = direction === 'intake' ? proposal.category || 'meal' : '';
     draft = {
       ...next,
