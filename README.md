@@ -38,11 +38,11 @@ sharing, measurement writes, and medicine or energy writes. Reference-range
 selection uses assigned gender at birth and age; withholding them yields general
 ranges. Connections are listed and withdrawn under **Connected assistants**.
 
-Ten tools read: `list_patients`, `get_health_summary`, `get_metric_history`,
+Read tools include `list_patients`, `get_health_summary`, `get_metric_history`,
 `list_reports`, `get_report`, `search_metrics`, `get_reference_ranges`,
 `list_medicines`, `list_energy_entries`, and `get_claim_history`.
 
-Five tools write. `log_measurement` requires `health:write`.
+`log_measurement` requires `health:write`.
 `create_medicine`, `update_medicine`, `log_energy_entry`, and
 `update_energy_entry` require `health:claims:write`. The consent screen grants
 these scopes separately. Existing measurement-write grants retain their original
@@ -59,6 +59,14 @@ accept an optional `product_id`.
 `get_medicine_catalog_entry` pages through complete child rows; optional `revision` selects a saved ingredient or product snapshot. Pass each `next_*_offset` back as its collection’s offset. A null offset or zero limit skips that collection and returns a null next offset. Budget trimming sets `truncated: true`; request an emptied collection separately if its offset did not advance. Use the saved revision when recovering children from truncated history snapshots.
 
 Catalog responses use `source_data_summary: {available, byte_size}` for retained payload metadata. Write `source_data` only to replace the payload; omitting it preserves the stored JSON.
+
+### Stop a medicine plan
+
+`stop_medicine_courses` requires `health:claims:write`. After confirmation, read `list_medicines` and `get_medicine_plan`, then send `patient_id`, `medicine_id`, `expected_medicine_revision`, `end_date` (inclusive `YYYY-MM-DD`), `request_id`, and `expected_courses`. The latter is the exact set of active courses, each `{course_id, revision, regimens: [{regimen_id, revision}]}` including every regimen on each course. Array order does not matter; duplicates are rejected. A call supports at most 50 active courses and 200 regimens in total.
+
+The transaction checks ownership, the medicine revision, and the complete active snapshot. It sets the medicine status to `stopped` and its end date to the requested day, which must not precede the medicine start date. Matched courses end through that day without extending an earlier course end; a course starting after that day is held. The change takes effect immediately; a future end date still allows slots through that date. Regimens and dose occurrences remain unchanged. The direct MCP `structuredContent` receipt contains `request_id`, the complete updated `medicine`, and `courses` with each `course_id`, `old_revision`, `new_revision`, `old_status`, `new_status`, `old_end_date`, `new_end_date`, and `regimens`. Each regimen entry contains `regimen_id`, `old_revision`, `new_revision`, `old_effective_to`, and `new_effective_to`. Regimens have no status field. `medicine.updated_at` is the mutation time, not a commit timestamp.
+
+The request key is scoped to patient, OAuth client, and operation. An identical retry returns the immutable success receipt, even after a later restart. A committed precondition rejection is returned as an MCP `isError` text beginning `STOP_REJECTED: `; identical retries return that rejection and cannot later apply. Obtain a fresh snapshot and use a new request ID to try again. Reusing a key with a different payload returns `STOP_REQUEST_ID_MISMATCH: request_id already used with a different payload`. Authentication, validation, transport, and internal errors do not settle a timed-out attempt; retry the identical request until a receipt or `STOP_REJECTED` is returned. The database must contain the `mcp_write_receipt` table; apply the schema with `bun run db:push` before enabling this tool.
 
 For dose actions, `record_dose_action` accepts `actual_at: null` when a dose was
 taken at an unknown time. This also clears a previously recorded timestamp.

@@ -407,7 +407,8 @@ export const medicineCourse = sqliteTable(
 			foreignColumns: [table.id]
 		}).onDelete('set null'),
 		index('medicine_course_patient_idx').on(table.patientId),
-		index('medicine_course_medicine_idx').on(table.medicineClaimId)
+		index('medicine_course_medicine_idx').on(table.medicineClaimId),
+		index('medicine_course_active_snapshot_idx').on(table.medicineClaimId, table.patientId, table.status)
 	]
 );
 
@@ -890,6 +891,19 @@ export const claimRevision = sqliteTable(
 		index('claim_revision_patient_idx').on(table.patientId),
 		index('claim_revision_patient_changed_idx').on(table.patientId, table.changedAt)
 	]
+);
+
+export const mcpWriteReceipt = sqliteTable(
+	'mcp_write_receipt',
+	{
+		patientId: text('patient_id').notNull().references(() => patient.id, { onDelete: 'cascade' }),
+		clientId: text('client_id').notNull(),
+		operation: text('operation').notNull(),
+		requestId: text('request_id').notNull(),
+		payloadHash: text('payload_hash').notNull(),
+		receipt: text('receipt', { mode: 'json' }).notNull().$type<unknown>(),
+	},
+	(table) => [uniqueIndex('mcp_write_receipt_key_idx').on(table.patientId, table.clientId, table.operation, table.requestId)]
 );
 
 export const patientRelations = relations(patient, ({ many }) => ({

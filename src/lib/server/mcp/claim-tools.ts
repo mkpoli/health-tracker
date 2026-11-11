@@ -384,7 +384,7 @@ function parseEnergy(
   }
 }
 
-function serializeMedicine(claim: MedicineClaimRecord) {
+export function serializeMedicine(claim: MedicineClaimRecord) {
   return {
     medicine_id: claim.id,
     patient_id: claim.patientId,

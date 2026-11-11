@@ -26,6 +26,7 @@ import { healthClaimTools } from './claim-tools';
 import { medicineCatalogTools } from './medicine-catalog-tools';
 import { doseTools } from './dose-tools';
 import { regimenTools } from './regimen-tools';
+import { stopMedicineCourses } from './stop-medicine-courses';
 
 // The surface follows the questions a reader asks: which profiles are shared,
 // what is current, how has a value moved, which claims exist, and what changed.
@@ -710,6 +711,7 @@ export const tools: ToolDefinition[] = [
   ...medicineCatalogTools,
   ...healthClaimTools,
   ...regimenTools,
+  stopMedicineCourses,
   ...doseTools,
 ];
 
