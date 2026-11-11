@@ -26,6 +26,7 @@ import { healthClaimTools } from './claim-tools';
 import { medicineCatalogTools } from './medicine-catalog-tools';
 import { doseTools } from './dose-tools';
 import { regimenTools } from './regimen-tools';
+import { stopMedicineCourses } from './stop-medicine-courses';
 
 // The surface follows the questions a reader asks: which profiles are shared,
 // what is current, how has a value moved, which claims exist, and what changed.
@@ -710,6 +711,7 @@ export const tools: ToolDefinition[] = [
   ...medicineCatalogTools,
   ...healthClaimTools,
   ...regimenTools,
+  stopMedicineCourses,
   ...doseTools,
 ];
 
@@ -728,7 +730,7 @@ export const serverInstructions = [
   'Call list_patients, then get_health_summary, and only then get_metric_history for the metrics in question.',
   'Use list_medicine_catalog for products, ingredients, localized names, identifiers and provenance. Use list_medicines and list_energy_entries for claim data, and get_medicine_plan for the courses and regimens behind a medicine. A medicine and its regimen are user-editable claims; list_dose_occurrences shows what was recorded as taken.',
   'Use get_medicine_catalog_entry to page complete names, identifiers and components of a current entry, or of a saved version by passing its revision; check its revision across pages. Use get_medicine_catalog_history to list prior product or ingredient versions. read_medicine_catalog_source returns retained source JSON in bounded chunks when the provenance payload is needed.',
-  'Ask the person to confirm values before creating or changing a claim. Use the revision returned by a read when updating. Reuse request_id when retrying the same creation.',
+  'Ask the person to confirm values before creating or changing a claim. Use the revision returned by a read when updating. Read get_medicine_stop_snapshot before stop_medicine_courses. Reuse request_id when retrying the same creation or stop.',
   'Values arrive unit-normalized. A metric marked stale has outlived the period a reading of its kind describes; do not present it as current.',
   'A null status means no interval applied — the report carried none, no published range fits what is known about this person, or the draw conditions do not match the interval. Report the number without calling it normal or abnormal; range_notes says which.',
   'A series with too few readings, or spread over too short a window, cannot show a direction. get_metric_history says so in its evidence block; when it does, report what the record cannot yet answer and what would settle it, and do not describe the points as rising or falling.',

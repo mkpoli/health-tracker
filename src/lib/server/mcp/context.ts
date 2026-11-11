@@ -14,6 +14,8 @@ export type McpContext = {
   userId: string;
   grant: { id: string; lastUsedAt: string | null };
   clientId: string;
+  /** Client identity carried by the signed access token. */
+  tokenClientId?: string;
   patientIds: string[];
   shareDemographics: boolean;
   /** Whether both credentials carry measurement write consent. */
@@ -53,6 +55,7 @@ export async function resolveContext(request: Request, origin: string): Promise<
     userId: claims.sub,
     grant: { id: grant.id, lastUsedAt: grant.lastUsedAt },
     clientId: grant.clientId,
+    tokenClientId: claims.client,
     patientIds: grantPatientIds(grant),
     shareDemographics: grant.shareDemographics === 1,
     // Both sides must carry it: an old token cannot gain a scope its grant was
