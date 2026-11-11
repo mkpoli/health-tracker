@@ -16,8 +16,9 @@ import {
   parseMedicineCourseInput,
   type DoseRegimenInput,
 } from '$lib/server/medicine-plan';
-import { db } from '$lib/server/db';
-import { doseRegimen, medicineCourse } from '$lib/server/db/schema';
+import { db, withReadSnapshot } from '$lib/server/db';
+import { doseRegimen, medicineClaim, medicineCourse, patient } from '$lib/server/db/schema';
+import { mcpGrant } from '$lib/server/db/mcp.schema';
 import { normalizeMedicineClaim, type WriteTx } from '$lib/server/claim-mutations';
 import { StaleClaimRevisionError } from '$lib/server/claim-revisions';
 import {
@@ -33,6 +34,9 @@ import { getOwnedDoseRegimen, getOwnedMedicineClaim } from '$lib/server/ownershi
 import { timeZoneFromMetadata } from '$lib/time-zone';
 import { REQUEST_ID_LIMIT, stableClaimId } from './claim-ids';
 import { requirePatient, ToolError, type McpContext } from './context';
+import { serializeMedicine } from './medicine-serialization';
+import { READ_SCOPE, grantPatientIds } from './oauth';
+import { MAX_STOP_COURSES, MAX_STOP_REGIMENS } from './stop-medicine-limits';
 import type { ToolDefinition } from './tools';
 
 const MAX_SLOTS = 12;
@@ -337,21 +341,54 @@ function serializePlan(plan: Awaited<ReturnType<typeof loadPlan>>) {
     }));
 }
 
+const medicinePlanInputSchema = {
+  type: 'object',
+  properties: { patient_id: { type: 'string' }, medicine_id: { type: 'string' } },
+  required: ['patient_id', 'medicine_id'],
+  additionalProperties: false,
+};
+
+async function readMedicineStopSnapshot(ctx: McpContext, args: Record<string, unknown>) {
+  const profile = await requirePatient(ctx, args.patient_id);
+  const id = text(args.medicine_id);
+  if (!id) throw new ToolError('medicine_id is required');
+  return withReadSnapshot(async (reader) => {
+    const [grant] = await reader.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1);
+    if (!grant || grant.revokedAt || grant.ownerUserId !== ctx.userId || grant.clientId !== ctx.clientId || !grant.scope.split(/\s+/).includes(READ_SCOPE) || !grantPatientIds(grant).includes(profile.id)) {
+      throw new ToolError('This connection is no longer authorized for this profile');
+    }
+    const [owner] = await reader.select({ id: patient.id }).from(patient).where(and(eq(patient.id, profile.id), eq(patient.ownerUserId, ctx.userId))).limit(1);
+    if (!owner) throw new ToolError('No such patient');
+    const [stored] = await reader.select().from(medicineClaim).where(and(eq(medicineClaim.id, id), eq(medicineClaim.patientId, profile.id))).limit(1);
+    if (!stored) throw new ToolError('No such medicine claim');
+    const courseRows = await reader.select().from(medicineCourse).where(and(eq(medicineCourse.patientId, profile.id), eq(medicineCourse.medicineClaimId, id), eq(medicineCourse.status, 'active'))).limit(MAX_STOP_COURSES + 1);
+    if (courseRows.length > MAX_STOP_COURSES) throw new ToolError(`Active plan exceeds ${MAX_STOP_COURSES} courses`);
+    const regimenRows = courseRows.length ? await reader.select().from(doseRegimen).where(inArray(doseRegimen.courseId, courseRows.map((course) => course.id))).limit(MAX_STOP_REGIMENS + 1) : [];
+    if (regimenRows.length > MAX_STOP_REGIMENS) throw new ToolError(`Active plan exceeds ${MAX_STOP_REGIMENS} regimens`);
+    if (regimenRows.some((regimen) => regimen.patientId !== profile.id)) throw new ToolError('Medicine plan is inconsistent');
+    const plan = { courseRows, courses: courseRows.map(normalizeMedicineCourse), regimens: regimenRows.map(normalizeDoseRegimen) };
+    return { medicine_id: id, medicine: serializeMedicine(normalizeMedicineClaim(stored)), courses: serializePlan(plan) };
+  });
+}
+
 const getMedicinePlan: ToolDefinition = {
   name: 'get_medicine_plan',
   title: 'Read a medicine’s courses and regimens',
   description:
     'Every course of one medicine with the regimens that plan its doses, newest first. Read this before set_regimen, update_regimen or update_course: it carries the ids and revisions those calls need.',
-  inputSchema: {
-    type: 'object',
-    properties: { patient_id: { type: 'string' }, medicine_id: { type: 'string' } },
-    required: ['patient_id', 'medicine_id'],
-    additionalProperties: false,
-  },
+  inputSchema: medicinePlanInputSchema,
   handler: async (ctx, args) => {
     const { profile, medicine } = await requireMedicine(ctx, args.patient_id, args.medicine_id);
     return { medicine_id: medicine.id, courses: serializePlan(await loadPlan(db, profile.id, medicine.id)) };
   },
+};
+
+const getMedicineStopSnapshot: ToolDefinition = {
+  name: 'get_medicine_stop_snapshot',
+  title: 'Read active courses for stopping',
+  description: 'The medicine and complete active course and regimen set, from one snapshot. Use this before stop_medicine_courses. Fails if the active plan exceeds 50 courses or 200 regimens.',
+  inputSchema: medicinePlanInputSchema,
+  handler: (ctx, args) => readMedicineStopSnapshot(ctx, args),
 };
 
 const setRegimen: ToolDefinition = {
@@ -598,4 +635,4 @@ const updateCourse: ToolDefinition = {
   },
 };
 
-export const regimenTools: ToolDefinition[] = [getMedicinePlan, setRegimen, updateRegimen, updateCourse];
+export const regimenTools: ToolDefinition[] = [getMedicinePlan, getMedicineStopSnapshot, setRegimen, updateRegimen, updateCourse];

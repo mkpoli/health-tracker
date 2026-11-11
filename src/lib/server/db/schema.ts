@@ -903,7 +903,7 @@ export const mcpWriteReceipt = sqliteTable(
 		payloadHash: text('payload_hash').notNull(),
 		receipt: text('receipt', { mode: 'json' }).notNull().$type<unknown>(),
 	},
-	(table) => [uniqueIndex('mcp_write_receipt_key_idx').on(table.patientId, table.clientId, table.operation, table.requestId)]
+	(table) => [uniqueIndex('mcp_write_receipt_key_idx').on(table.patientId, table.operation, table.requestId)]
 );
 
 export const patientRelations = relations(patient, ({ many }) => ({

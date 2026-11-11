@@ -18,6 +18,7 @@ const context: McpContext = {
   userId: 'owner-1',
   grant: { id: 'grant-1', lastUsedAt: null },
   clientId: 'assistant-client',
+  tokenClientId: 'assistant-client',
   patientIds: ['profile-1'],
   shareDemographics: false,
   canWriteMeasurements: true,
@@ -33,9 +34,11 @@ beforeAll(async () => {
     env: {
       DATABASE_URL: databaseUrl,
       DATABASE_AUTH_TOKEN: 'local-test-token',
+      MCP_TOKEN_SECRET: 'synthetic-test-secret-not-real-0123456789',
     },
   }));
   client = createClient({ url: databaseUrl });
+  await client.execute('PRAGMA journal_mode=WAL');
   await client.executeMultiple(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE patient (
@@ -191,12 +194,19 @@ beforeAll(async () => {
     CREATE INDEX medicine_course_medicine_idx ON medicine_course(medicine_claim_id);
     CREATE INDEX medicine_course_active_snapshot_idx ON medicine_course(medicine_claim_id, patient_id, status);
     CREATE INDEX dose_regimen_course_idx ON dose_regimen(course_id);
+    CREATE TABLE mcp_grant (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, client_id TEXT NOT NULL, patient_ids TEXT NOT NULL, share_demographics INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL, refresh_token_hash TEXT, previous_refresh_token_hash TEXT, refresh_expires_at TEXT, created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z', last_used_at TEXT, revoked_at TEXT);
+    INSERT INTO mcp_grant (id,owner_user_id,client_id,patient_ids,scope) VALUES
+      ('grant-1','owner-1','assistant-client','["profile-1","profile-2"]','health:read health:claims:write'),
+      ('new-grant','owner-1','reauthorized-client','["profile-1"]','health:read health:claims:write'),
+      ('grant-other','owner-1','other-client','["profile-1","profile-2"]','health:read health:claims:write'),
+      ('grant-new','owner-1','new-client','["profile-1"]','health:read health:claims:write'),
+      ('grant-race','owner-1','race-other-client','["profile-1"]','health:read health:claims:write');
     CREATE TABLE mcp_write_receipt (
       patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
       client_id TEXT NOT NULL, operation TEXT NOT NULL, request_id TEXT NOT NULL,
       payload_hash TEXT NOT NULL, receipt TEXT NOT NULL
     );
-    CREATE UNIQUE INDEX mcp_write_receipt_key_idx ON mcp_write_receipt(patient_id, client_id, operation, request_id);
+    CREATE UNIQUE INDEX mcp_write_receipt_key_idx ON mcp_write_receipt(patient_id, operation, request_id);
     INSERT INTO patient (id, owner_user_id, name, extra_data) VALUES
       ('profile-1', 'owner-1', 'Primary', '{"timeZone":"Asia/Tokyo"}'),
       ('profile-2', 'owner-1', 'Outside grant', '{"timeZone":"UTC"}'),
@@ -246,8 +256,14 @@ describe('MCP medicine plans', () => {
       patient_id: 'profile-1',
       medicine_id: medicineId,
     })) as any;
+    expect(plan.medicine_id).toBe(medicineId);
+    const stopSnapshot = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: 'profile-1', medicine_id: medicineId }) as any;
+    expect(stopSnapshot.medicine).toEqual(created.medicine);
+    expect(stopSnapshot.courses[0].regimens).toEqual([created.regimen]);
     expect(plan.courses).toHaveLength(1);
     expect(plan.courses[0].regimens).toEqual([created.regimen]);
+    await expect(tool('get_medicine_plan').handler(context, { patient_id: 'profile-1', medicine_id: 'missing-medicine' })).rejects.toThrow('No such medicine claim');
+    await expect(tool('get_medicine_plan').handler({ ...context, userId: 'owner-2' }, { patient_id: 'profile-1', medicine_id: medicineId })).rejects.toThrow('No such patient');
 
     const set = tool('set_regimen');
     const doubled = (await set.handler(context, {
@@ -581,11 +597,101 @@ describe('stop_medicine_courses', () => {
     expect(JSON.parse(result.content[0].text)).toEqual(expected);
     expect((await client.execute(`SELECT status FROM dose_occurrence WHERE id = 'receipt-dose'`)).rows[0].status).toBe('taken');
     await client.execute(`UPDATE medicine_claim SET status = 'active', revision = 3 WHERE id = 'medicine-receipt'`);
+    const reauthorized = { ...context, clientId: 'reauthorized-client', tokenClientId: 'reauthorized-client', grant: { id: 'new-grant', lastUsedAt: null } };
     expect(await call(args)).toEqual(expected);
-    await expect(call({ ...args, end_date: '2026-02-02' })).rejects.toThrow('different payload');
-    await expect(call(args, { ...context, canWriteClaims: false })).rejects.toThrow('health:claims:write');
-    await expect(call(args, { ...context, patientIds: [] })).rejects.toThrow('No such patient');
-    await expect(call(args, { ...context, userId: 'owner-2' })).rejects.toThrow('No such patient');
+    expect(await call(args, reauthorized)).toEqual(expected);
+    const replay = await protocolModule.dispatch({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'stop_medicine_courses', arguments: args } }, { ...reauthorized, grant: { ...reauthorized.grant, lastUsedAt: new Date().toISOString() } });
+    expect((replay?.result as any).structuredContent).toEqual(expected);
+    await expect(call({ ...args, end_date: '2026-02-02' }, reauthorized)).rejects.toThrow('STOP_REQUEST_ID_MISMATCH');
+    await expect(call(args, { ...reauthorized, canWriteClaims: false })).rejects.toThrow('health:claims:write');
+    await expect(call(args, { ...reauthorized, patientIds: [] })).rejects.toThrow('No such patient');
+    await expect(call(args, { ...reauthorized, userId: 'owner-2' })).rejects.toThrow('No such patient');
+    const receiptRows = await client.execute(`SELECT client_id FROM mcp_write_receipt WHERE request_id='request-receipt'`);
+    expect(receiptRows.rows).toHaveLength(1);
+    expect(receiptRows.rows[0].client_id).toBe(context.clientId);
+  });
+
+  it('reads the stop snapshot consistently during a concurrent stop', async () => {
+    const args = await seed('snapshot-race');
+    const { db } = await import('$lib/server/db');
+    const connection = db.$client;
+    const originalTransaction = connection.transaction.bind(connection);
+    let resume!: () => void;
+    let reached!: () => void;
+    const paused = new Promise<void>((resolve) => { reached = resolve; });
+    const proceed = new Promise<void>((resolve) => { resume = resolve; });
+    const spy = vi.spyOn(connection, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(mode);
+      if (mode === 'read') {
+        const execute = transaction.execute.bind(transaction);
+        vi.spyOn(transaction, 'execute').mockImplementation(async (statement) => {
+          const result = await execute(statement);
+          if (typeof statement === 'object' && statement.sql.includes('from "medicine_claim"')) {
+            reached();
+            await proceed;
+          }
+          return result;
+        });
+      }
+      return transaction;
+    });
+    let reading: Promise<any> | undefined;
+    try {
+      reading = tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id });
+      await paused;
+      expect((await call(args)).medicine.status).toBe('stopped');
+      resume();
+      const before = await reading;
+      expect(before.medicine).toMatchObject({ status: 'active', revision: 1 });
+      expect(before.courses[0]).toMatchObject({ status: 'active', revision: 1 });
+      const after = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id }) as any;
+      expect(after.medicine).toMatchObject({ status: 'stopped', revision: 2 });
+      expect(after.courses).toEqual([]);
+    } finally {
+      resume();
+      await reading?.catch(() => undefined);
+      spy.mockRestore();
+    }
+  }, 20_000);
+
+  it('bounds active snapshots without letting large history block stopping', async () => {
+    const history = await seed('plan-history');
+    await client.execute(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<200) INSERT INTO medicine_course (id, patient_id, medicine_claim_id, status, start_date) SELECT 'history-course-' || i, 'profile-1', 'medicine-plan-history', 'ended', '2026-01-01' FROM n`);
+    await client.execute(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO dose_regimen (id,patient_id,course_id,rule_kind,timezone,effective_from) SELECT 'history-regimen-' || i, 'profile-1', 'history-course-1', 'as_needed', 'UTC', '2026-01-01' FROM n`);
+    const full = await tool('get_medicine_plan').handler(context, { patient_id: history.patient_id, medicine_id: history.medicine_id }) as any;
+    expect(full.courses).toHaveLength(201);
+    expect(full.courses.find((course: any) => course.course_id === 'history-course-1').regimens).toHaveLength(1000);
+    const snapshot = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: history.patient_id, medicine_id: history.medicine_id }) as any;
+    expect(snapshot.medicine.revision).toBe(1);
+    expect(snapshot.courses).toHaveLength(1);
+    expect(snapshot.courses[0].course_id).toBe('course-plan-history');
+    const expectedCourses = snapshot.courses.map((course: any) => ({ course_id: course.course_id, revision: course.revision, regimens: course.regimens.map((regimen: any) => ({ regimen_id: regimen.regimen_id, revision: regimen.revision })) }));
+    expect((await call({ ...history, expected_courses: expectedCourses })).medicine.status).toBe('stopped');
+
+    const courses = await seed('active-course-limit');
+    await client.execute(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50) INSERT INTO medicine_course (id, patient_id, medicine_claim_id, status, start_date) SELECT 'active-limit-course-' || i, 'profile-1', 'medicine-active-course-limit', 'active', '2026-01-01' FROM n`);
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: courses.patient_id, medicine_id: courses.medicine_id })).rejects.toThrow('Active plan exceeds 50 courses');
+    const regimens = await seed('active-regimen-limit');
+    await client.execute(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<200) INSERT INTO dose_regimen (id,patient_id,course_id,rule_kind,timezone,effective_from) SELECT 'active-limit-regimen-' || i, 'profile-1', 'course-active-regimen-limit', 'as_needed', 'UTC', '2026-01-01' FROM n`);
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: regimens.patient_id, medicine_id: regimens.medicine_id })).rejects.toThrow('Active plan exceeds 200 regimens');
+  }, 20_000);
+
+  it('durably refuses a crafted stop containing a cross-profile regimen', async () => {
+    const args = await seed('inconsistent-snapshot');
+    await client.execute(`INSERT INTO dose_regimen (id,patient_id,course_id,rule_kind,timezone,effective_from,effective_to) VALUES ('foreign-regimen','profile-2','course-inconsistent-snapshot','as_needed','UTC','2026-01-01','2026-01-31')`);
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id })).rejects.toThrow('Medicine plan is inconsistent');
+    const crafted = { ...args, expected_courses: [{ ...args.expected_courses[0], regimens: [...args.expected_courses[0].regimens, { regimen_id: 'foreign-regimen', revision: 1 }] }] };
+    const response = await protocolModule.dispatch({ jsonrpc: '2.0', id: 42, method: 'tools/call', params: { name: 'stop_medicine_courses', arguments: crafted } }, context);
+    expect(response?.result).toEqual({ content: [{ type: 'text', text: 'STOP_REJECTED: Medicine plan is inconsistent' }], isError: true });
+    expect((await client.execute(`SELECT status,revision FROM medicine_claim WHERE id='medicine-inconsistent-snapshot'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT status,revision FROM medicine_course WHERE id='course-inconsistent-snapshot'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT count(*) AS n FROM claim_revision WHERE claim_id IN ('medicine-inconsistent-snapshot','course-inconsistent-snapshot')`)).rows[0].n).toBe(0);
+    const stored = (await client.execute(`SELECT receipt FROM mcp_write_receipt WHERE request_id='request-inconsistent-snapshot'`)).rows[0];
+    expect(String(stored.receipt)).not.toContain('foreign-regimen');
+    expect(String(stored.receipt)).not.toContain('2026-01-31');
+    await client.execute(`DELETE FROM dose_regimen WHERE id='foreign-regimen'`);
+    await expect(call(crafted)).rejects.toThrow('STOP_REJECTED: Medicine plan is inconsistent');
+    await expect(call(args)).rejects.toThrow('STOP_REQUEST_ID_MISMATCH');
   });
 
   it('holds future courses and preserves shorter end dates and other courses', async () => {
@@ -635,27 +741,85 @@ describe('stop_medicine_courses', () => {
       args.expected_courses[0].regimens.push({ regimen_id: `large-original-${n}`, revision: 1 });
     }
     await client.executeMultiple(statements);
+    const snapshot = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id }) as any;
+    expect(snapshot.courses).toHaveLength(50);
+    expect(snapshot.courses.reduce((n: number, course: any) => n + course.regimens.length, 0)).toBe(200);
     const result = await call(args);
     expect(result.courses).toHaveLength(50);
     expect(result.courses.reduce((n: number, course: any) => n + course.regimens.length, 0)).toBe(200);
     expect((await client.execute(`SELECT count(*) AS n FROM medicine_course WHERE medicine_claim_id='medicine-large' AND status='ended' AND revision=2`)).rows[0].n).toBe(50);
     expect(await call({ ...args, expected_courses: [...args.expected_courses].reverse() })).toEqual(result);
     await expect(call({ ...args, request_id: 'over-courses', expected_courses: [...args.expected_courses, args.expected_courses[0]] })).rejects.toThrow('at most 50 courses');
-  });
+  }, 20_000);
 
-  it('rejects regimen phantoms and scopes request keys to patient and client', async () => {
+  it('fences reauthorized clients after rejection and scopes request keys to patient', async () => {
     const args = await seed('regimen-phantom');
     await client.execute(`INSERT INTO dose_regimen (id,patient_id,course_id,rule_kind,timezone,effective_from) VALUES ('regimen-added','profile-1','course-regimen-phantom','as_needed','UTC','2026-01-01')`);
     await expect(call(args)).rejects.toThrow('STOP_REJECTED: Active plan snapshot conflict');
     await client.execute(`DELETE FROM dose_regimen WHERE id='regimen-added'`);
     await expect(call(args)).rejects.toThrow('STOP_REJECTED: Active plan snapshot conflict');
-    const otherClient = { ...context, clientId: 'other-client' };
-    expect((await call(args, otherClient)).medicine.status).toBe('stopped');
+    const otherClient = { ...context, clientId: 'other-client', tokenClientId: 'other-client', grant: { id: 'grant-other', lastUsedAt: null } };
+    await expect(call(args, otherClient)).rejects.toThrow('STOP_REJECTED: Active plan snapshot conflict');
+    await expect(call({ ...args, end_date: '2026-01-30' }, otherClient)).rejects.toThrow('STOP_REQUEST_ID_MISMATCH');
+    expect((await client.execute(`SELECT status,revision FROM medicine_claim WHERE id='medicine-regimen-phantom'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await call({ ...args, request_id: 'new-after-regimen-conflict' }, otherClient)).medicine.status).toBe('stopped');
     const other = await seed('other-patient');
     await client.execute(`UPDATE medicine_claim SET patient_id='profile-2' WHERE id='medicine-other-patient'`);
     await client.execute(`UPDATE medicine_course SET patient_id='profile-2' WHERE id='course-other-patient'`);
     await client.execute(`UPDATE dose_regimen SET patient_id='profile-2' WHERE id='regimen-other-patient'`);
+    await expect(tool('get_medicine_plan').handler(context, { patient_id: 'profile-1', medicine_id: 'medicine-other-patient' })).rejects.toThrow('No such medicine claim');
+    await expect(tool('get_medicine_plan').handler(context, { patient_id: 'profile-2', medicine_id: 'medicine-other-patient' })).rejects.toThrow('No such patient');
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: 'profile-1', medicine_id: 'medicine-other-patient' })).rejects.toThrow('No such medicine claim');
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: 'profile-2', medicine_id: 'medicine-other-patient' })).rejects.toThrow('No such patient');
     expect((await call({ ...other, patient_id: 'profile-2', request_id: args.request_id }, { ...context, patientIds: ['profile-1', 'profile-2'] })).medicine.patient_id).toBe('profile-2');
+  });
+
+  it('fences an old client after a reauthorized client rejects first', async () => {
+    const args = await seed('reauthorized-fence');
+    const reauthorized = { ...context, clientId: 'new-client', tokenClientId: 'new-client', grant: { id: 'grant-new', lastUsedAt: null } };
+    await client.execute(`INSERT INTO medicine_course (id,patient_id,medicine_claim_id,status,start_date) VALUES ('reauth-phantom','profile-1','medicine-reauthorized-fence','active','2026-01-01')`);
+    await expect(call(args, reauthorized)).rejects.toThrow('STOP_REJECTED: Active plan snapshot conflict');
+    await client.execute(`DELETE FROM medicine_course WHERE id='reauth-phantom'`);
+    await expect(call(args)).rejects.toThrow('STOP_REJECTED: Active plan snapshot conflict');
+    expect((await client.execute(`SELECT status,revision FROM medicine_claim WHERE id='medicine-reauthorized-fence'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT client_id FROM mcp_write_receipt WHERE request_id='request-reauthorized-fence'`)).rows[0].client_id).toBe('new-client');
+  });
+
+  it('binds an access token to its exact current client', async () => {
+    const oauth = await import('./oauth');
+    const claims = { sub: 'owner-1', grant: 'grant-1', client: 'assistant-client', scope: 'health:read health:claims:write', aud: 'https://health.example/mcp' };
+    const resolve = async (token: string) => contextModule.resolveContext(new Request('https://health.example/mcp', { headers: { authorization: `Bearer ${token}` } }), 'https://health.example');
+    expect((await resolve(await oauth.issueAccessToken(claims)))?.clientId).toBe('assistant-client');
+    expect(await resolve(await oauth.issueAccessToken({ ...claims, client: 'other-client' }))).toBeNull();
+    const legacy = await resolve(await oauth.issueAccessToken({ ...claims, client: '' }));
+    expect(legacy).not.toBeNull();
+    const args = await seed('legacy-token');
+    expect((await tool('get_medicine_stop_snapshot').handler(legacy!, { patient_id: args.patient_id, medicine_id: args.medicine_id }) as any).medicine.medicine_id).toBe(args.medicine_id);
+    await expect(call(args, legacy!)).rejects.toThrow('no longer authorized');
+  });
+
+  it('rechecks revocation, grant scope, profiles, owner and client inside the transaction', async () => {
+    const args = await seed('grant-gate');
+    try {
+      for (const change of [
+        `revoked_at='2026-01-01T00:00:00Z'`,
+        `scope='health:read'`,
+        `scope='health:claims:write'`,
+        `patient_ids='[]'`,
+        `owner_user_id='owner-2'`,
+        `client_id='other-client'`,
+      ]) {
+        await client.execute(`UPDATE mcp_grant SET ${change} WHERE id='grant-1'`);
+        await expect(call(args)).rejects.toThrow('no longer authorized');
+        await client.execute(`UPDATE mcp_grant SET revoked_at=NULL, scope='health:read health:claims:write', patient_ids='["profile-1","profile-2"]', owner_user_id='owner-1', client_id='assistant-client' WHERE id='grant-1'`);
+      }
+      expect((await client.execute(`SELECT count(*) AS n FROM mcp_write_receipt WHERE request_id='request-grant-gate'`)).rows[0].n).toBe(0);
+      await call(args);
+      await client.execute(`UPDATE mcp_grant SET revoked_at='2026-01-01T00:00:00Z' WHERE id='grant-1'`);
+      await expect(call(args)).rejects.toThrow('no longer authorized');
+    } finally {
+      await client.execute(`UPDATE mcp_grant SET revoked_at=NULL, scope='health:read health:claims:write', patient_ids='["profile-1","profile-2"]', owner_user_id='owner-1', client_id='assistant-client' WHERE id='grant-1'`);
+    }
   });
 
   it('rolls back all changes when receipt insertion fails', async () => {
@@ -671,7 +835,8 @@ describe('stop_medicine_courses', () => {
 
   it('serializes concurrent retries and conflicting edits', async () => {
     const args = await seed('race');
-    const results = await Promise.allSettled([call(args), call(args), call({ ...args, end_date: '2026-01-31' })]);
+    const reauthorized = { ...context, clientId: 'race-other-client', tokenClientId: 'race-other-client', grant: { id: 'grant-race', lastUsedAt: null } };
+    const results = await Promise.allSettled([call(args), call(args, reauthorized), call({ ...args, end_date: '2026-01-31' }, reauthorized)]);
     const success = results.filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled');
     expect(success.length).toBeGreaterThanOrEqual(1);
     expect(success.every((result) => JSON.stringify(result.value) === JSON.stringify(success[0].value))).toBe(true);
@@ -700,13 +865,36 @@ describe('stop_medicine_courses', () => {
     }
   });
 
+  it.each([
+    { table: 'dose_regimen', create: `CREATE TABLE dose_regimen (course_id TEXT, patient_id TEXT, payload TEXT); CREATE INDEX probe_idx ON dose_regimen(course_id)`, query: `SELECT * FROM dose_regimen WHERE course_id IN ('x','y') LIMIT 201` },
+    { table: 'mcp_write_receipt', create: `CREATE TABLE mcp_write_receipt (patient_id TEXT, operation TEXT, request_id TEXT, receipt TEXT); CREATE UNIQUE INDEX probe_idx ON mcp_write_receipt(patient_id, operation, request_id)`, query: `SELECT * FROM mcp_write_receipt WHERE patient_id='p' AND operation='o' AND request_id='r' LIMIT 1` },
+  ])('detects missing $table lookup index', async ({ table, create, query }) => {
+    const path = join(tmpdir(), `stop-query-index-${crypto.randomUUID()}.db`);
+    let probe = createClient({ url: `file:${path}` });
+    try {
+      await probe.executeMultiple(create);
+      expect((await probe.execute(`EXPLAIN QUERY PLAN ${query}`)).rows.map((row) => String(row.detail)).join(' ')).toContain('USING INDEX probe_idx');
+      probe.close();
+      probe = createClient({ url: `file:${path}` });
+      await probe.execute('DROP INDEX probe_idx');
+      expect((await probe.execute(`EXPLAIN QUERY PLAN ${query}`)).rows.map((row) => String(row.detail)).join(' ')).toContain(`SCAN ${table}`);
+    } finally {
+      probe.close();
+      await Promise.allSettled([unlink(path), unlink(`${path}-shm`), unlink(`${path}-wal`)]);
+    }
+  });
+
   it('uses indexes for bounded snapshot and receipt lookups', async () => {
     const coursePlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM medicine_course WHERE medicine_claim_id='x' AND patient_id='p' AND status='active' LIMIT 51`)).rows.map((row) => String(row.detail)).join(' ');
     expect(coursePlan).toMatch(/medicine_course_active_snapshot_idx \(medicine_claim_id=\? AND patient_id=\? AND status=\?\)/);
+    const regimenPlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM dose_regimen WHERE course_id IN ('x','y') LIMIT 201`)).rows.map((row) => String(row.detail)).join(' ');
+    expect(regimenPlan).toMatch(/dose_regimen_course_idx \(course_id=\?\)/);
+    const receiptPlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM mcp_write_receipt WHERE patient_id='p' AND operation='o' AND request_id='r' LIMIT 1`)).rows.map((row) => String(row.detail)).join(' ');
+    expect(receiptPlan).toMatch(/mcp_write_receipt_key_idx \(patient_id=\? AND operation=\? AND request_id=\?\)/);
     for (const sql of [
       `EXPLAIN QUERY PLAN SELECT * FROM medicine_course WHERE medicine_claim_id='x' AND patient_id='p' AND status='active' LIMIT 51`,
       `EXPLAIN QUERY PLAN SELECT * FROM dose_regimen WHERE course_id IN ('x','y') LIMIT 201`,
-      `EXPLAIN QUERY PLAN SELECT * FROM mcp_write_receipt WHERE patient_id='p' AND client_id='c' AND operation='o' AND request_id='r' LIMIT 1`,
+      `EXPLAIN QUERY PLAN SELECT * FROM mcp_write_receipt WHERE patient_id='p' AND operation='o' AND request_id='r' LIMIT 1`,
     ]) {
       const plan = (await client.execute(sql)).rows.map((row) => String(row.detail)).join(' ');
       expect(plan).toMatch(/USING INDEX/);

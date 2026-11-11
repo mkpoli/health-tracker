@@ -2,16 +2,16 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { isDateOnly } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
 import { claimRevision, doseRegimen, mcpWriteReceipt, medicineClaim, medicineCourse, patient } from '$lib/server/db/schema';
+import { mcpGrant } from '$lib/server/db/mcp.schema';
 import { normalizeMedicineClaim } from '$lib/server/claim-mutations';
 import { claimRevisionValues } from '$lib/server/claim-revisions';
 import { normalizeMedicineCourse } from '$lib/server/medicine-plan-mutations';
 import { positiveInteger, requestId, mcpProvider } from './claim-tool-input';
-import { serializeMedicine } from './claim-tools';
+import { serializeMedicine } from './medicine-serialization';
 import { requirePatient, ToolError } from './context';
+import { CLAIM_WRITE_SCOPE, READ_SCOPE, grantPatientIds } from './oauth';
 import type { ToolDefinition } from './tools';
-
-const MAX_COURSES = 50;
-const MAX_REGIMENS = 200;
+import { MAX_STOP_COURSES as MAX_COURSES, MAX_STOP_REGIMENS as MAX_REGIMENS } from './stop-medicine-limits';
 const OPERATION = 'stop_medicine_courses';
 
 function id(value: unknown, name: string): string {
@@ -61,7 +61,7 @@ async function hash(value: unknown) {
 export const stopMedicineCourses: ToolDefinition = {
   name: OPERATION,
   title: 'Stop medicine courses',
-  description: 'Stop a confirmed medicine and its exact active course and regimen snapshot. Read get_medicine_plan first. end_date is inclusive; repeat the same request_id and payload to recover the original receipt.',
+  description: 'Stop a confirmed medicine and its exact active course and regimen snapshot. Read get_medicine_stop_snapshot first. end_date is inclusive; repeat the same request_id and payload to recover the original receipt.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -89,6 +89,7 @@ export const stopMedicineCourses: ToolDefinition = {
   idempotent: true,
   handler: async (ctx, args) => {
     if (!ctx.canWriteClaims) throw new ToolError('health:claims:write is required');
+    if (!ctx.tokenClientId || ctx.tokenClientId !== ctx.clientId) throw new ToolError('This connection is no longer authorized for this profile');
     object(args, ['patient_id', 'medicine_id', 'expected_medicine_revision', 'expected_courses', 'end_date', 'request_id']);
     const patientId = id(args.patient_id, 'patient_id');
     const medicineId = id(args.medicine_id, 'medicine_id');
@@ -105,9 +106,14 @@ export const stopMedicineCourses: ToolDefinition = {
     // Drizzle's libsql transaction() uses the client's default write mode:
     // BEGIN IMMEDIATE precedes the first read on both HTTP and SQLite transports.
     const outcome = await db.transaction(async (tx) => {
+      const [grant] = await tx.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1);
+      const scopes = grant?.scope.split(/\s+/) ?? [];
+      if (!grant || grant.revokedAt || grant.ownerUserId !== ctx.userId || grant.clientId !== ctx.clientId || !scopes.includes(READ_SCOPE) || !scopes.includes(CLAIM_WRITE_SCOPE) || !grantPatientIds(grant).includes(patientId)) {
+        throw new ToolError('This connection is no longer authorized for this profile');
+      }
       const [owner] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.id, patientId), eq(patient.ownerUserId, ctx.userId))).limit(1);
       if (!owner) throw new ToolError('No such patient');
-      const receiptKey = and(eq(mcpWriteReceipt.patientId, patientId), eq(mcpWriteReceipt.clientId, ctx.clientId), eq(mcpWriteReceipt.operation, OPERATION), eq(mcpWriteReceipt.requestId, key));
+      const receiptKey = and(eq(mcpWriteReceipt.patientId, patientId), eq(mcpWriteReceipt.operation, OPERATION), eq(mcpWriteReceipt.requestId, key));
       const [previous] = await tx.select().from(mcpWriteReceipt).where(receiptKey).limit(1);
       if (previous) {
         if (previous.payloadHash !== payloadHash) throw new ToolError('STOP_REQUEST_ID_MISMATCH: request_id already used with a different payload');
@@ -126,6 +132,7 @@ export const stopMedicineCourses: ToolDefinition = {
       if (courses.length > MAX_COURSES) return reject('Active plan exceeds course limit');
       const regimens = courses.length ? await tx.select().from(doseRegimen).where(inArray(doseRegimen.courseId, courses.map((course) => course.id))).limit(MAX_REGIMENS + 1) : [];
       if (regimens.length > MAX_REGIMENS) return reject('Active plan exceeds regimen limit');
+      if (regimens.some((regimen) => regimen.patientId !== patientId)) return reject('Medicine plan is inconsistent');
       const actual = snapshot(courses.map((course) => ({ course_id: course.id, revision: course.revision, regimens: regimens.filter((regimen) => regimen.courseId === course.id).map((regimen) => ({ regimen_id: regimen.id, revision: regimen.revision })) })));
       if (JSON.stringify(actual) !== JSON.stringify(expectedCourses)) return reject('Active plan snapshot conflict');
       const oldMedicine = normalizeMedicineClaim(medicine);
