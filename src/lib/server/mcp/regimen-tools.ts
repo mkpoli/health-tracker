@@ -353,17 +353,23 @@ async function readMedicineStopSnapshot(ctx: McpContext, args: Record<string, un
   const id = text(args.medicine_id);
   if (!id) throw new ToolError('medicine_id is required');
   return withReadSnapshot(async (reader) => {
-    const [grant] = await reader.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1);
+    const activeWhere = and(eq(medicineCourse.patientId, profile.id), eq(medicineCourse.medicineClaimId, id), eq(medicineCourse.status, 'active'));
+    const activeCourseIds = reader.select({ id: medicineCourse.id }).from(medicineCourse).where(activeWhere).limit(MAX_STOP_COURSES + 1);
+    const [[grant], [owner]] = await reader.batch([
+      reader.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1),
+      reader.select({ id: patient.id }).from(patient).where(and(eq(patient.id, profile.id), eq(patient.ownerUserId, ctx.userId))).limit(1),
+    ]);
     if (!grant || grant.revokedAt || grant.ownerUserId !== ctx.userId || grant.clientId !== ctx.clientId || !grant.scope.split(/\s+/).includes(READ_SCOPE) || !grantPatientIds(grant).includes(profile.id)) {
       throw new ToolError('This connection is no longer authorized for this profile');
     }
-    const [owner] = await reader.select({ id: patient.id }).from(patient).where(and(eq(patient.id, profile.id), eq(patient.ownerUserId, ctx.userId))).limit(1);
     if (!owner) throw new ToolError('No such patient');
-    const [stored] = await reader.select().from(medicineClaim).where(and(eq(medicineClaim.id, id), eq(medicineClaim.patientId, profile.id))).limit(1);
+    const [[stored], courseRows] = await reader.batch([
+      reader.select().from(medicineClaim).where(and(eq(medicineClaim.id, id), eq(medicineClaim.patientId, profile.id))).limit(1),
+      reader.select().from(medicineCourse).where(activeWhere).limit(MAX_STOP_COURSES + 1),
+    ]);
     if (!stored) throw new ToolError('No such medicine claim');
-    const courseRows = await reader.select().from(medicineCourse).where(and(eq(medicineCourse.patientId, profile.id), eq(medicineCourse.medicineClaimId, id), eq(medicineCourse.status, 'active'))).limit(MAX_STOP_COURSES + 1);
     if (courseRows.length > MAX_STOP_COURSES) throw new ToolError(`Active plan exceeds ${MAX_STOP_COURSES} courses`);
-    const regimenRows = courseRows.length ? await reader.select().from(doseRegimen).where(inArray(doseRegimen.courseId, courseRows.map((course) => course.id))).limit(MAX_STOP_REGIMENS + 1) : [];
+    const regimenRows = await reader.select().from(doseRegimen).where(inArray(doseRegimen.courseId, activeCourseIds)).limit(MAX_STOP_REGIMENS + 1);
     if (regimenRows.length > MAX_STOP_REGIMENS) throw new ToolError(`Active plan exceeds ${MAX_STOP_REGIMENS} regimens`);
     if (regimenRows.some((regimen) => regimen.patientId !== profile.id)) throw new ToolError('Medicine plan is inconsistent');
     const plan = { courseRows, courses: courseRows.map(normalizeMedicineCourse), regimens: regimenRows.map(normalizeDoseRegimen) };

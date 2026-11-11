@@ -1,6 +1,9 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/libsql';
+import type { Client } from '@libsql/client';
 import { isDateOnly } from '$lib/medicine-plan';
 import { db } from '$lib/server/db';
+import * as schema from '$lib/server/db/schema';
 import { claimRevision, doseRegimen, mcpWriteReceipt, medicineClaim, medicineCourse, patient } from '$lib/server/db/schema';
 import { mcpGrant } from '$lib/server/db/mcp.schema';
 import { normalizeMedicineClaim } from '$lib/server/claim-mutations';
@@ -103,67 +106,97 @@ export const stopMedicineCourses: ToolDefinition = {
     const source = { kind: 'mcp', provider: mcpProvider(ctx) };
     const changedAt = new Date(ctx.now).toISOString();
 
-    // Drizzle's libsql transaction() uses the client's default write mode:
-    // BEGIN IMMEDIATE precedes the first read on both HTTP and SQLite transports.
-    const outcome = await db.transaction(async (tx) => {
-      const [grant] = await tx.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1);
+    // The adapter batches through this transaction, not the parent client.
+    // libsql's write mode begins with BEGIN IMMEDIATE before the first batch.
+    const transaction = await db.$client.transaction('write');
+    let committed = false;
+    try {
+      const tx = drizzle(transaction as unknown as Client, { schema });
+      const activeWhere = and(eq(medicineCourse.medicineClaimId, medicineId), eq(medicineCourse.patientId, patientId), eq(medicineCourse.status, 'active'));
+      const receiptKey = and(eq(mcpWriteReceipt.patientId, patientId), eq(mcpWriteReceipt.operation, OPERATION), eq(mcpWriteReceipt.requestId, key));
+      const activeCourseIds = tx.select({ id: medicineCourse.id }).from(medicineCourse).where(activeWhere).limit(MAX_COURSES + 1);
+      const [[grant], [owner], [previous]] = await tx.batch([
+        tx.select({ ownerUserId: mcpGrant.ownerUserId, clientId: mcpGrant.clientId, revokedAt: mcpGrant.revokedAt, scope: mcpGrant.scope, patientIds: mcpGrant.patientIds }).from(mcpGrant).where(eq(mcpGrant.id, ctx.grant.id)).limit(1),
+        tx.select({ id: patient.id }).from(patient).where(and(eq(patient.id, patientId), eq(patient.ownerUserId, ctx.userId))).limit(1),
+        tx.select({ payloadHash: mcpWriteReceipt.payloadHash, receipt: sql<string>`${mcpWriteReceipt.receipt}` }).from(mcpWriteReceipt).where(receiptKey).limit(1),
+      ]);
+      const outcome = await (async () => {
       const scopes = grant?.scope.split(/\s+/) ?? [];
       if (!grant || grant.revokedAt || grant.ownerUserId !== ctx.userId || grant.clientId !== ctx.clientId || !scopes.includes(READ_SCOPE) || !scopes.includes(CLAIM_WRITE_SCOPE) || !grantPatientIds(grant).includes(patientId)) {
         throw new ToolError('This connection is no longer authorized for this profile');
       }
-      const [owner] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.id, patientId), eq(patient.ownerUserId, ctx.userId))).limit(1);
       if (!owner) throw new ToolError('No such patient');
-      const receiptKey = and(eq(mcpWriteReceipt.patientId, patientId), eq(mcpWriteReceipt.operation, OPERATION), eq(mcpWriteReceipt.requestId, key));
-      const [previous] = await tx.select().from(mcpWriteReceipt).where(receiptKey).limit(1);
       if (previous) {
         if (previous.payloadHash !== payloadHash) throw new ToolError('STOP_REQUEST_ID_MISMATCH: request_id already used with a different payload');
-        return previous.receipt as { kind: 'success'; receipt: unknown } | { kind: 'error'; message: string };
+        return JSON.parse(previous.receipt) as { kind: 'success'; receipt: unknown } | { kind: 'error'; message: string };
       }
+      const [[medicine], courses, regimens] = await tx.batch([
+        tx.select().from(medicineClaim).where(and(eq(medicineClaim.id, medicineId), eq(medicineClaim.patientId, patientId))).limit(1),
+        tx.select().from(medicineCourse).where(activeWhere).limit(MAX_COURSES + 1),
+        tx.select({ id: doseRegimen.id, patientId: doseRegimen.patientId, courseId: doseRegimen.courseId, revision: doseRegimen.revision, effectiveTo: doseRegimen.effectiveTo }).from(doseRegimen).where(inArray(doseRegimen.courseId, activeCourseIds)).limit(MAX_REGIMENS + 1),
+      ]);
       const reject = async (message: string) => {
         const result = { kind: 'error' as const, message: `STOP_REJECTED: ${message}` };
         await tx.insert(mcpWriteReceipt).values({ patientId, clientId: ctx.clientId, operation: OPERATION, requestId: key, payloadHash, receipt: result });
         return result;
       };
-      const [medicine] = await tx.select().from(medicineClaim).where(and(eq(medicineClaim.id, medicineId), eq(medicineClaim.patientId, patientId))).limit(1);
       if (!medicine) return reject('No such medicine claim');
       if (medicine.revision !== expectedRevision) return reject('Medicine revision conflict');
       if (medicine.startDate && endDate < medicine.startDate) return reject('end_date precedes medicine start_date');
-      const courses = await tx.select().from(medicineCourse).where(and(eq(medicineCourse.medicineClaimId, medicineId), eq(medicineCourse.patientId, patientId), eq(medicineCourse.status, 'active'))).limit(MAX_COURSES + 1);
       if (courses.length > MAX_COURSES) return reject('Active plan exceeds course limit');
-      const regimens = courses.length ? await tx.select().from(doseRegimen).where(inArray(doseRegimen.courseId, courses.map((course) => course.id))).limit(MAX_REGIMENS + 1) : [];
       if (regimens.length > MAX_REGIMENS) return reject('Active plan exceeds regimen limit');
       if (regimens.some((regimen) => regimen.patientId !== patientId)) return reject('Medicine plan is inconsistent');
       const actual = snapshot(courses.map((course) => ({ course_id: course.id, revision: course.revision, regimens: regimens.filter((regimen) => regimen.courseId === course.id).map((regimen) => ({ regimen_id: regimen.id, revision: regimen.revision })) })));
       if (JSON.stringify(actual) !== JSON.stringify(expectedCourses)) return reject('Active plan snapshot conflict');
       const oldMedicine = normalizeMedicineClaim(medicine);
-      await tx.insert(claimRevision).values(claimRevisionValues('medicine', oldMedicine, source)).onConflictDoNothing();
-      const [updatedMedicine] = await tx.update(medicineClaim).set({ status: 'stopped', endDate, revision: medicine.revision + 1, updatedAt: changedAt }).where(and(eq(medicineClaim.id, medicineId), eq(medicineClaim.patientId, patientId), eq(medicineClaim.revision, expectedRevision))).returning();
-      if (!updatedMedicine) throw new ToolError('Medicine revision conflict');
-      await tx.insert(claimRevision).values(claimRevisionValues('medicine', normalizeMedicineClaim(updatedMedicine), source));
-      let updatedCourses: typeof courses = [];
+      const expectedMedicine = { ...medicine, status: 'stopped', endDate, revision: medicine.revision + 1, updatedAt: changedAt };
+      const expectedCoursesAfter = courses.map((course) => ({
+        ...course,
+        status: course.startDate > endDate ? 'held' : 'ended',
+        endDate: course.startDate > endDate ? course.endDate : course.endDate && course.endDate < endDate ? course.endDate : endDate,
+        revision: course.revision + 1,
+        updatedAt: changedAt,
+      }));
+      const updatedById = new Map(expectedCoursesAfter.map((course) => [course.id, course]));
+      const stopped = [...courses].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((course) => {
+        const updated = updatedById.get(course.id)!;
+        return { course_id: course.id, old_revision: course.revision, new_revision: updated.revision, old_status: course.status, new_status: updated.status, old_end_date: course.endDate, new_end_date: updated.endDate, regimens: regimens.filter((regimen) => regimen.courseId === course.id).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((regimen) => ({ regimen_id: regimen.id, old_revision: regimen.revision, new_revision: regimen.revision, old_effective_to: regimen.effectiveTo, new_effective_to: regimen.effectiveTo })) };
+      });
+      const receipt = { request_id: key, medicine: serializeMedicine(normalizeMedicineClaim(expectedMedicine)), courses: stopped };
+      const result = { kind: 'success' as const, receipt };
+      const oldMedicineRevision = tx.insert(claimRevision).values(claimRevisionValues('medicine', oldMedicine, source)).onConflictDoNothing();
+      const medicineUpdate = tx.update(medicineClaim).set({ status: 'stopped', endDate, revision: medicine.revision + 1, updatedAt: changedAt }).where(and(eq(medicineClaim.id, medicineId), eq(medicineClaim.patientId, patientId), eq(medicineClaim.revision, expectedRevision))).returning();
+      const newMedicineRevision = tx.insert(claimRevision).values(claimRevisionValues('medicine', normalizeMedicineClaim(expectedMedicine), source));
+      const receiptInsert = tx.insert(mcpWriteReceipt).values({ patientId, clientId: ctx.clientId, operation: OPERATION, requestId: key, payloadHash, receipt: result });
+      let medicineRows: Array<typeof medicineClaim.$inferSelect>;
+      let courseRows: Array<typeof medicineCourse.$inferSelect> = [];
       if (courses.length) {
-        await tx.insert(claimRevision).values(courses.map((course) => claimRevisionValues('medicine_course', normalizeMedicineCourse(course), source))).onConflictDoNothing();
-        // The write lock protects the complete checked set until this update commits.
-        updatedCourses = await tx.update(medicineCourse).set({
+        const oldCourseRevisions = tx.insert(claimRevision).values(courses.map((course) => claimRevisionValues('medicine_course', normalizeMedicineCourse(course), source))).onConflictDoNothing();
+        const courseUpdate = tx.update(medicineCourse).set({
           status: sql`case when ${medicineCourse.startDate} > ${endDate} then 'held' else 'ended' end`,
           endDate: sql`case when ${medicineCourse.startDate} > ${endDate} then ${medicineCourse.endDate} when ${medicineCourse.endDate} is not null and ${medicineCourse.endDate} < ${endDate} then ${medicineCourse.endDate} else ${endDate} end`,
           revision: sql`${medicineCourse.revision} + 1`, updatedAt: changedAt,
-        }).where(and(eq(medicineCourse.medicineClaimId, medicineId), eq(medicineCourse.patientId, patientId), eq(medicineCourse.status, 'active'))).returning();
-        if (updatedCourses.length !== courses.length) throw new ToolError('Active plan snapshot conflict');
-        await tx.insert(claimRevision).values(updatedCourses.map((course) => claimRevisionValues('medicine_course', normalizeMedicineCourse(course), source)));
+        }).where(activeWhere).returning();
+        const newCourseRevisions = tx.insert(claimRevision).values(expectedCoursesAfter.map((course) => claimRevisionValues('medicine_course', normalizeMedicineCourse(course), source)));
+        [, medicineRows, , , courseRows] = await tx.batch([oldMedicineRevision, medicineUpdate, newMedicineRevision, oldCourseRevisions, courseUpdate, newCourseRevisions, receiptInsert]);
+      } else {
+        [, medicineRows] = await tx.batch([oldMedicineRevision, medicineUpdate, newMedicineRevision, receiptInsert]);
       }
-      const updatedById = new Map(updatedCourses.map((course) => [course.id, course]));
-      const stopped = courses.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((course) => {
-        const updated = updatedById.get(course.id);
-        if (!updated) throw new ToolError('Active plan snapshot conflict');
-        return { course_id: course.id, old_revision: course.revision, new_revision: updated.revision, old_status: course.status, new_status: updated.status, old_end_date: course.endDate, new_end_date: updated.endDate, regimens: regimens.filter((regimen) => regimen.courseId === course.id).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((regimen) => ({ regimen_id: regimen.id, old_revision: regimen.revision, new_revision: regimen.revision, old_effective_to: regimen.effectiveTo, new_effective_to: regimen.effectiveTo })) };
-      });
-      const receipt = { request_id: key, medicine: serializeMedicine(normalizeMedicineClaim(updatedMedicine)), courses: stopped };
-      const result = { kind: 'success' as const, receipt };
-      await tx.insert(mcpWriteReceipt).values({ patientId, clientId: ctx.clientId, operation: OPERATION, requestId: key, payloadHash, receipt: result });
+      if (medicineRows.length !== 1 || JSON.stringify(serializeMedicine(normalizeMedicineClaim(medicineRows[0]))) !== JSON.stringify(receipt.medicine)) throw new ToolError('Medicine revision conflict');
+      if (courseRows.length !== courses.length || courseRows.some((course) => JSON.stringify(normalizeMedicineCourse(course)) !== JSON.stringify(normalizeMedicineCourse(updatedById.get(course.id)!)))) throw new ToolError('Active plan snapshot conflict');
       return result;
-    });
-    if (outcome.kind === 'error') throw new ToolError(outcome.message);
-    return outcome.receipt;
+      })();
+      await transaction.commit();
+      committed = true;
+      if (outcome.kind === 'error') throw new ToolError(outcome.message);
+      return outcome.receipt;
+    } catch (error) {
+      if (!committed && !transaction.closed) {
+        try { await transaction.rollback(); } catch { /* Preserve the original failure. */ }
+      }
+      throw error;
+    } finally {
+      transaction.close();
+    }
   },
 };

@@ -51,11 +51,16 @@ function getReadDb(): Db {
 export async function withReadSnapshot<T>(body: (reader: Db) => Promise<T>): Promise<T> {
   const transaction = await getReadDb().$client.transaction('read');
   try {
-    // Drizzle's query methods use only execute on this transaction-backed adapter.
+    // Both execute and batch stay on this transaction-backed adapter.
     const reader = drizzle(transaction as unknown as Client, { schema });
     const result = await body(reader);
     await transaction.commit();
     return result;
+  } catch (error) {
+    if (!transaction.closed) {
+      try { await transaction.rollback(); } catch { /* Preserve the original failure. */ }
+    }
+    throw error;
   } finally {
     transaction.close();
   }

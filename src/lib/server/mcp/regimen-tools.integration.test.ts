@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
+import { createClient as createHttpClient } from '@libsql/client/http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlink } from 'node:fs/promises';
@@ -623,13 +624,11 @@ describe('stop_medicine_courses', () => {
     const spy = vi.spyOn(connection, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
       const transaction = await originalTransaction(mode);
       if (mode === 'read') {
-        const execute = transaction.execute.bind(transaction);
-        vi.spyOn(transaction, 'execute').mockImplementation(async (statement) => {
-          const result = await execute(statement);
-          if (typeof statement === 'object' && statement.sql.includes('from "medicine_claim"')) {
-            reached();
-            await proceed;
-          }
+        const batch = transaction.batch.bind(transaction);
+        vi.spyOn(transaction, 'batch').mockImplementation(async (statements) => {
+          const result = await batch(statements);
+          reached();
+          await proceed;
           return result;
         });
       }
@@ -744,7 +743,24 @@ describe('stop_medicine_courses', () => {
     const snapshot = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id }) as any;
     expect(snapshot.courses).toHaveLength(50);
     expect(snapshot.courses.reduce((n: number, course: any) => n + course.regimens.length, 0)).toBe(200);
-    const result = await call(args);
+    const { db } = await import('$lib/server/db');
+    const originalTransaction = db.$client.transaction.bind(db.$client);
+    const batchSizes: number[] = [];
+    const spy = vi.spyOn(db.$client, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(mode);
+      if (mode === 'write') {
+        const batch = transaction.batch.bind(transaction);
+        vi.spyOn(transaction, 'batch').mockImplementation(async (statements) => { batchSizes.push(statements.length); return batch(statements); });
+      }
+      return transaction;
+    });
+    let result: any;
+    try {
+      result = await call(args);
+      expect(batchSizes).toEqual([3, 3, 7]);
+    } finally {
+      spy.mockRestore();
+    }
     expect(result.courses).toHaveLength(50);
     expect(result.courses.reduce((n: number, course: any) => n + course.regimens.length, 0)).toBe(200);
     expect((await client.execute(`SELECT count(*) AS n FROM medicine_course WHERE medicine_claim_id='medicine-large' AND status='ended' AND revision=2`)).rows[0].n).toBe(50);
@@ -811,6 +827,12 @@ describe('stop_medicine_courses', () => {
       ]) {
         await client.execute(`UPDATE mcp_grant SET ${change} WHERE id='grant-1'`);
         await expect(call(args)).rejects.toThrow('no longer authorized');
+        const read = tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id });
+        if (change === `scope='health:read'`) {
+          expect((await read as any).medicine.medicine_id).toBe(args.medicine_id);
+        } else {
+          await expect(read).rejects.toThrow('no longer authorized');
+        }
         await client.execute(`UPDATE mcp_grant SET revoked_at=NULL, scope='health:read health:claims:write', patient_ids='["profile-1","profile-2"]', owner_user_id='owner-1', client_id='assistant-client' WHERE id='grant-1'`);
       }
       expect((await client.execute(`SELECT count(*) AS n FROM mcp_write_receipt WHERE request_id='request-grant-gate'`)).rows[0].n).toBe(0);
@@ -820,6 +842,254 @@ describe('stop_medicine_courses', () => {
     } finally {
       await client.execute(`UPDATE mcp_grant SET revoked_at=NULL, scope='health:read health:claims:write', patient_ids='["profile-1","profile-2"]', owner_user_id='owner-1', client_id='assistant-client' WHERE id='grant-1'`);
     }
+  });
+
+  it('rechecks ownership after the preflight lookup', async () => {
+    const args = await seed('snapshot-owner-race');
+    const { db } = await import('$lib/server/db');
+    const originalTransaction = db.$client.transaction.bind(db.$client);
+    const spy = vi.spyOn(db.$client, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      if (mode === 'read') await client.execute(`UPDATE patient SET owner_user_id='owner-2' WHERE id='profile-1'`);
+      return originalTransaction(mode);
+    });
+    try {
+      await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id })).rejects.toThrow('No such patient');
+    } finally {
+      spy.mockRestore();
+      await client.execute(`UPDATE patient SET owner_user_id='owner-1' WHERE id='profile-1'`);
+    }
+  });
+
+  it('batches the bounded snapshot on the read transaction', async () => {
+    const args = await seed('snapshot-round-budget');
+    const { db } = await import('$lib/server/db');
+    const connection = db.$client;
+    const originalTransaction = connection.transaction.bind(connection);
+    const events: Array<{ kind: string; statements?: number }> = [];
+    const independent = vi.spyOn(connection, 'batch').mockImplementation(async () => { throw new Error('Batch escaped transaction'); });
+    const spy = vi.spyOn(connection, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(mode);
+      if (mode === 'read') {
+        const batch = transaction.batch.bind(transaction);
+        const execute = transaction.execute.bind(transaction);
+        const commit = transaction.commit.bind(transaction);
+        const rollback = transaction.rollback.bind(transaction);
+        vi.spyOn(transaction, 'batch').mockImplementation(async (statements) => { events.push({ kind: 'batch', statements: statements.length }); return batch(statements); });
+        vi.spyOn(transaction, 'execute').mockImplementation(async (statement) => { events.push({ kind: 'execute' }); return execute(statement); });
+        vi.spyOn(transaction, 'commit').mockImplementation(async () => { events.push({ kind: 'commit' }); return commit(); });
+        vi.spyOn(transaction, 'rollback').mockImplementation(async () => { events.push({ kind: 'rollback' }); return rollback(); });
+      }
+      return transaction;
+    });
+    try {
+      const result = await tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id }) as any;
+      expect(result.courses).toHaveLength(1);
+      expect(events).toEqual([{ kind: 'batch', statements: 2 }, { kind: 'batch', statements: 2 }, { kind: 'execute' }, { kind: 'commit' }]);
+      expect(independent).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      independent.mockRestore();
+    }
+  });
+
+  it('uses bounded batches for stop transaction operations', async () => {
+    const args = await seed('round-budget');
+    const { db } = await import('$lib/server/db');
+    const connection = db.$client;
+    const originalTransaction = connection.transaction.bind(connection);
+    const events: Array<{ kind: string; statements?: number }> = [];
+    const independent = vi.spyOn(connection, 'batch').mockImplementation(async () => { throw new Error('Batch escaped transaction'); });
+    const spy = vi.spyOn(connection, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(mode);
+      if (mode === 'write') {
+        const batch = transaction.batch.bind(transaction);
+        const execute = transaction.execute.bind(transaction);
+        const commit = transaction.commit.bind(transaction);
+        const rollback = transaction.rollback.bind(transaction);
+        vi.spyOn(transaction, 'batch').mockImplementation(async (statements) => { events.push({ kind: 'batch', statements: statements.length }); return batch(statements); });
+        vi.spyOn(transaction, 'execute').mockImplementation(async (statement) => { events.push({ kind: 'execute' }); return execute(statement); });
+        vi.spyOn(transaction, 'commit').mockImplementation(async () => { events.push({ kind: 'commit' }); return commit(); });
+        vi.spyOn(transaction, 'rollback').mockImplementation(async () => { events.push({ kind: 'rollback' }); return rollback(); });
+      }
+      return transaction;
+    });
+    try {
+      const receipt = await call(args);
+      expect(receipt.medicine.revision).toBe(2);
+      expect(events).toEqual([{ kind: 'batch', statements: 3 }, { kind: 'batch', statements: 3 }, { kind: 'batch', statements: 7 }, { kind: 'commit' }]);
+      events.length = 0;
+      expect(await call(args)).toEqual(receipt);
+      expect(events).toEqual([{ kind: 'batch', statements: 3 }, { kind: 'commit' }]);
+      events.length = 0;
+      await expect(call({ ...args, request_id: 'round-budget-rejected', expected_medicine_revision: 99 })).rejects.toThrow('STOP_REJECTED: Medicine revision conflict');
+      expect(events).toEqual([{ kind: 'batch', statements: 3 }, { kind: 'batch', statements: 3 }, { kind: 'execute' }, { kind: 'commit' }]);
+      expect(independent).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      independent.mockRestore();
+    }
+  });
+
+  it('checks authorization and request hash before decoding a damaged receipt', async () => {
+    const args = await seed('malformed-receipt');
+    await call(args);
+    await client.execute(`UPDATE mcp_write_receipt SET receipt='invalid json' WHERE request_id='request-malformed-receipt'`);
+    await expect(call({ ...args, end_date: '2026-01-31' })).rejects.toThrow('STOP_REQUEST_ID_MISMATCH');
+    await client.execute(`UPDATE mcp_grant SET revoked_at='2026-01-01' WHERE id='grant-1'`);
+    try {
+      await expect(call(args)).rejects.toThrow('no longer authorized');
+    } finally {
+      await client.execute(`UPDATE mcp_grant SET revoked_at=NULL WHERE id='grant-1'`);
+    }
+  });
+
+  it('preserves authorization, receipts and rejection precedence with malformed regimen JSON', async () => {
+    const success = await seed('malformed-success');
+    const receipt = await call(success);
+    await client.execute(`UPDATE dose_regimen SET slots='invalid json' WHERE id='regimen-malformed-success'`);
+    expect(await call(success)).toEqual(receipt);
+    await client.execute(`UPDATE mcp_grant SET revoked_at='2026-01-01' WHERE id='grant-1'`);
+    try {
+      await expect(call(success)).rejects.toThrow('no longer authorized');
+      await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: success.patient_id, medicine_id: success.medicine_id })).rejects.toThrow('no longer authorized');
+    } finally {
+      await client.execute(`UPDATE mcp_grant SET revoked_at=NULL WHERE id='grant-1'`);
+    }
+    const rejected = await seed('malformed-rejected');
+    const conflict = { ...rejected, expected_medicine_revision: 99 };
+    await expect(call(conflict)).rejects.toThrow('STOP_REJECTED: Medicine revision conflict');
+    await client.execute(`UPDATE dose_regimen SET slots='invalid json' WHERE id='regimen-malformed-rejected'`);
+    await expect(call(conflict)).rejects.toThrow('STOP_REJECTED: Medicine revision conflict');
+    await expect(call({ ...conflict, request_id: 'malformed-new-conflict' })).rejects.toThrow('STOP_REJECTED: Medicine revision conflict');
+    const overflow = await seed('malformed-overflow');
+    await client.execute(`UPDATE dose_regimen SET slots='invalid json' WHERE id='regimen-malformed-overflow'`);
+    await client.execute(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50) INSERT INTO medicine_course (id,patient_id,medicine_claim_id,status,start_date) SELECT 'malformed-overflow-' || i,'profile-1','medicine-malformed-overflow','active','2026-01-01' FROM n`);
+    await expect(call(overflow)).rejects.toThrow('STOP_REJECTED: Active plan exceeds course limit');
+    await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: overflow.patient_id, medicine_id: overflow.medicine_id })).rejects.toThrow('Active plan exceeds 50 courses');
+  });
+
+  it.each(['read', 'write'] as const)('awaits asynchronous %s rollback before reporting failure', async (mode) => {
+    const args = await seed(`rollback-await-${mode}`);
+    const { db } = await import('$lib/server/db');
+    const originalTransaction = db.$client.transaction.bind(db.$client);
+    let reached!: () => void;
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => { reached = resolve; });
+    const proceed = new Promise<void>((resolve) => { resume = resolve; });
+    let settled = false;
+    const spy = vi.spyOn(db.$client, 'transaction').mockImplementation(async (requested?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(requested);
+      if (requested === mode) {
+        const rollback = transaction.rollback.bind(transaction);
+        vi.spyOn(transaction, 'rollback').mockImplementation(async () => { reached(); await proceed; await rollback(); });
+      }
+      return transaction;
+    });
+    if (mode === 'read') await client.execute(`UPDATE mcp_grant SET revoked_at='2026-01-01' WHERE id='grant-1'`);
+    else await client.execute(`CREATE TRIGGER fail_await_rollback BEFORE UPDATE ON medicine_course WHEN OLD.id='course-rollback-await-write' BEGIN SELECT RAISE(ABORT,'rollback await failure'); END`);
+    const operation = (mode === 'read' ? tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id }) : call(args)).then(() => { settled = true; return null; }, (error) => { settled = true; return error; });
+    try {
+      await paused;
+      expect(settled).toBe(false);
+      resume();
+      const error = await operation;
+      expect(String(error)).toContain(mode === 'read' ? 'no longer authorized' : 'rollback await failure');
+    } finally {
+      resume();
+      await operation;
+      spy.mockRestore();
+      if (mode === 'read') await client.execute(`UPDATE mcp_grant SET revoked_at=NULL WHERE id='grant-1'`);
+      else await client.execute(`DROP TRIGGER fail_await_rollback`);
+    }
+  });
+
+  it('waits for the libsql HTTP rollback response before rejecting', async () => {
+    const { db, withReadSnapshot } = await import('$lib/server/db');
+    let reached!: () => void;
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => { reached = resolve; });
+    const proceed = new Promise<void>((resolve) => { resume = resolve; });
+    const emptyResult = { cols: [], rows: [], affected_row_count: 0, last_insert_rowid: null };
+    const fetchMock: typeof fetch = async (input) => {
+      const body = JSON.parse(await (input as Request).text());
+      if (body.requests.some((request: any) => request.type === 'execute' && request.stmt.sql === 'ROLLBACK')) {
+        reached();
+        await proceed;
+      }
+      const results = body.requests.map((request: any) => {
+        const response = request.type === 'batch'
+          ? { type: 'batch', result: { step_results: request.batch.steps.map(() => emptyResult), step_errors: request.batch.steps.map(() => null) } }
+          : request.type === 'execute' ? { type: 'execute', result: emptyResult } : { type: request.type };
+        return { type: 'ok', response };
+      });
+      return new Response(JSON.stringify({ baton: 'test-baton', base_url: null, results }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const http = createHttpClient({ url: 'https://libsql.example.invalid', fetch: fetchMock });
+    const spy = vi.spyOn(db.$client, 'transaction').mockImplementation(() => http.transaction('read'));
+    let settled = false;
+    const operation = withReadSnapshot(async (reader) => {
+      await reader.$client.execute('SELECT 1');
+      throw new Error('original read failure');
+    }).then(() => { settled = true; return null; }, (error) => { settled = true; return error; });
+    try {
+      await paused;
+      expect(settled).toBe(false);
+      resume();
+      expect(String(await operation)).toContain('original read failure');
+    } finally {
+      resume();
+      await operation;
+      spy.mockRestore();
+      http.close();
+    }
+  });
+
+  it('preserves the original error when rollback fails', async () => {
+    const args = await seed('rollback-error');
+    const { db } = await import('$lib/server/db');
+    const originalTransaction = db.$client.transaction.bind(db.$client);
+    const spy = vi.spyOn(db.$client, 'transaction').mockImplementation(async (mode?: 'read' | 'write' | 'deferred') => {
+      const transaction = await originalTransaction(mode);
+      if (mode === 'read') vi.spyOn(transaction, 'rollback').mockRejectedValue(new Error('rollback transport failure'));
+      return transaction;
+    });
+    await client.execute(`UPDATE mcp_grant SET revoked_at='2026-01-01' WHERE id='grant-1'`);
+    try {
+      await expect(tool('get_medicine_stop_snapshot').handler(context, { patient_id: args.patient_id, medicine_id: args.medicine_id })).rejects.toThrow('no longer authorized');
+    } finally {
+      spy.mockRestore();
+      await client.execute(`UPDATE mcp_grant SET revoked_at=NULL WHERE id='grant-1'`);
+    }
+  });
+
+  it('rolls back a mid-batch failure and a guard mismatch', async () => {
+    const mid = await seed('mid-batch');
+    await client.execute(`CREATE TRIGGER fail_course_update BEFORE UPDATE ON medicine_course WHEN OLD.id='course-mid-batch' BEGIN SELECT RAISE(ABORT,'test failure'); END`);
+    await expect(call(mid)).rejects.toThrow();
+    await client.execute(`DROP TRIGGER fail_course_update`);
+    expect((await client.execute(`SELECT status,revision FROM medicine_claim WHERE id='medicine-mid-batch'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT status,revision FROM medicine_course WHERE id='course-mid-batch'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT count(*) AS n FROM claim_revision WHERE claim_id IN ('course-mid-batch','medicine-mid-batch')`)).rows[0].n).toBe(0);
+    expect((await client.execute(`SELECT count(*) AS n FROM mcp_write_receipt WHERE request_id='request-mid-batch'`)).rows[0].n).toBe(0);
+    expect((await call(mid)).medicine.revision).toBe(2);
+
+    const guard = await seed('batch-guard');
+    await client.execute(`CREATE TRIGGER ignore_medicine_update BEFORE UPDATE ON medicine_claim WHEN OLD.id='medicine-batch-guard' BEGIN SELECT RAISE(IGNORE); END`);
+    await expect(call(guard)).rejects.toThrow('Medicine revision conflict');
+    await client.execute(`DROP TRIGGER ignore_medicine_update`);
+    expect((await client.execute(`SELECT status,revision FROM medicine_course WHERE id='course-batch-guard'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT count(*) AS n FROM claim_revision WHERE claim_id IN ('course-batch-guard','medicine-batch-guard')`)).rows[0].n).toBe(0);
+    expect((await client.execute(`SELECT count(*) AS n FROM mcp_write_receipt WHERE request_id='request-batch-guard'`)).rows[0].n).toBe(0);
+    expect((await call(guard)).medicine.revision).toBe(2);
+
+    const courseGuard = await seed('batch-course-guard');
+    await client.execute(`CREATE TRIGGER ignore_course_update BEFORE UPDATE ON medicine_course WHEN OLD.id='course-batch-course-guard' BEGIN SELECT RAISE(IGNORE); END`);
+    await expect(call(courseGuard)).rejects.toThrow('Active plan snapshot conflict');
+    await client.execute(`DROP TRIGGER ignore_course_update`);
+    expect((await client.execute(`SELECT status,revision FROM medicine_claim WHERE id='medicine-batch-course-guard'`)).rows[0]).toMatchObject({ status: 'active', revision: 1 });
+    expect((await client.execute(`SELECT count(*) AS n FROM claim_revision WHERE claim_id IN ('course-batch-course-guard','medicine-batch-course-guard')`)).rows[0].n).toBe(0);
+    expect((await client.execute(`SELECT count(*) AS n FROM mcp_write_receipt WHERE request_id='request-batch-course-guard'`)).rows[0].n).toBe(0);
+    expect((await call(courseGuard)).medicine.revision).toBe(2);
   });
 
   it('rolls back all changes when receipt insertion fails', async () => {
@@ -889,6 +1159,10 @@ describe('stop_medicine_courses', () => {
     expect(coursePlan).toMatch(/medicine_course_active_snapshot_idx \(medicine_claim_id=\? AND patient_id=\? AND status=\?\)/);
     const regimenPlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM dose_regimen WHERE course_id IN ('x','y') LIMIT 201`)).rows.map((row) => String(row.detail)).join(' ');
     expect(regimenPlan).toMatch(/dose_regimen_course_idx \(course_id=\?\)/);
+    const batchedRegimenPlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM dose_regimen WHERE course_id IN (SELECT id FROM medicine_course WHERE medicine_claim_id='x' AND patient_id='p' AND status='active' LIMIT 51) LIMIT 201`)).rows.map((row) => String(row.detail)).join(' ');
+    expect(batchedRegimenPlan).toMatch(/dose_regimen_course_idx \(course_id=\?\)/);
+    expect(batchedRegimenPlan).toMatch(/medicine_course_active_snapshot_idx \(medicine_claim_id=\? AND patient_id=\? AND status=\?\)/);
+    expect(batchedRegimenPlan).not.toMatch(/SCAN (medicine_course|dose_regimen)|USE TEMP B-TREE/);
     const receiptPlan = (await client.execute(`EXPLAIN QUERY PLAN SELECT * FROM mcp_write_receipt WHERE patient_id='p' AND operation='o' AND request_id='r' LIMIT 1`)).rows.map((row) => String(row.detail)).join(' ');
     expect(receiptPlan).toMatch(/mcp_write_receipt_key_idx \(patient_id=\? AND operation=\? AND request_id=\?\)/);
     for (const sql of [
