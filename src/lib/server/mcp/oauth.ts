@@ -26,6 +26,9 @@ export const ACCESS_TOKEN_TTL = 15 * 60;
 // A connection nobody refreshes for three months has been forgotten; forgetting
 // it back is better than leaving read access to health records live forever.
 export const REFRESH_TOKEN_TTL = 90 * 24 * 60 * 60;
+// A rotation whose response never arrived leaves the client holding the spent
+// token. It retries within a tick or two; anything later is a second copy.
+export const REFRESH_RETRY_WINDOW = 120;
 const AUTH_CODE_TTL = 60;
 
 export type McpTokenClaims = {
@@ -286,27 +289,43 @@ export async function setRefreshToken(grantId: string, token: string | null) {
     .set({
       refreshTokenHash: token ? await hashToken(token) : null,
       previousRefreshTokenHash: null,
+      refreshRotatedAt: null,
       refreshExpiresAt: token ? new Date(Date.now() + REFRESH_TOKEN_TTL * 1000).toISOString() : null,
     })
     .where(eq(mcpGrant.id, grantId));
 }
 
 /**
+ * The token a refresh token rotates into. Derived rather than drawn, so a
+ * client that never received the answer to its rotation gets the same token
+ * when it asks again, and the chain cannot fork.
+ */
+async function successorToken(token: string) {
+  const key = await crypto.subtle.importKey('raw', tokenKey(), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`refresh:${token}`));
+  return base64Url(new Uint8Array(mac));
+}
+
+/**
  * Rotating, with the swap done as one conditional update so two concurrent
- * refreshes cannot both succeed. The spent hash is kept for one generation:
- * presenting it again means a copy of the token is in circulation. Reuse
- * revokes the whole grant, including the newer token.
+ * refreshes cannot both succeed. The spent hash is kept for one generation.
+ * Presenting it within the retry window repeats the answer the rotation gave:
+ * the response may have been lost on the way, and the client holds nothing
+ * newer. Presenting it later means a copy of the token is in circulation, and
+ * that reuse revokes the whole grant, including the newer token.
  */
 export async function rotateRefreshToken(token: string) {
   const hash = await hashToken(token);
-  const next = randomToken();
+  const next = await successorToken(token);
+  const nextHash = await hashToken(next);
   const now = new Date();
 
   const rows = await db
     .update(mcpGrant)
     .set({
-      refreshTokenHash: await hashToken(next),
+      refreshTokenHash: nextHash,
       previousRefreshTokenHash: hash,
+      refreshRotatedAt: now.toISOString(),
       refreshExpiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL * 1000).toISOString(),
       lastUsedAt: now.toISOString(),
     })
@@ -324,12 +343,16 @@ export async function rotateRefreshToken(token: string) {
     return { grant: row, refreshToken: next };
   }
 
-  const replayed = await db.select().from(mcpGrant).where(eq(mcpGrant.previousRefreshTokenHash, hash));
+  const replayed = (await db.select().from(mcpGrant).where(eq(mcpGrant.previousRefreshTokenHash, hash)))[0];
 
-  if (replayed[0] && !replayed[0].revokedAt) {
-    await revokeGrantById(replayed[0].id);
+  if (!replayed || replayed.revokedAt) return null;
+
+  const rotatedAt = replayed.refreshRotatedAt ? new Date(replayed.refreshRotatedAt).getTime() : 0;
+  if (replayed.refreshTokenHash === nextHash && now.getTime() - rotatedAt <= REFRESH_RETRY_WINDOW * 1000) {
+    return { grant: replayed, refreshToken: next };
   }
 
+  await revokeGrantById(replayed.id);
   return null;
 }
 

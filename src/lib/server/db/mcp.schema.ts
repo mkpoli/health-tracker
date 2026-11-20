@@ -35,6 +35,8 @@ export const mcpGrant = sqliteTable('mcp_grant', {
 	 * copies of the refresh token exist, which is the signal rotation is for.
 	 */
 	previousRefreshTokenHash: text('previous_refresh_token_hash'),
+	/** When the current token replaced the previous one; a retry of that rotation is answered for a short while after. */
+	refreshRotatedAt: text('refresh_rotated_at'),
 	refreshExpiresAt: text('refresh_expires_at'),
 	createdAt: text('created_at').notNull(),
 	lastUsedAt: text('last_used_at'),

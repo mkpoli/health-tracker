@@ -195,7 +195,7 @@ beforeAll(async () => {
     CREATE INDEX medicine_course_medicine_idx ON medicine_course(medicine_claim_id);
     CREATE INDEX medicine_course_active_snapshot_idx ON medicine_course(medicine_claim_id, patient_id, status);
     CREATE INDEX dose_regimen_course_idx ON dose_regimen(course_id);
-    CREATE TABLE mcp_grant (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, client_id TEXT NOT NULL, patient_ids TEXT NOT NULL, share_demographics INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL, refresh_token_hash TEXT, previous_refresh_token_hash TEXT, refresh_expires_at TEXT, created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z', last_used_at TEXT, revoked_at TEXT);
+    CREATE TABLE mcp_grant (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, client_id TEXT NOT NULL, patient_ids TEXT NOT NULL, share_demographics INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL, refresh_token_hash TEXT, previous_refresh_token_hash TEXT, refresh_rotated_at TEXT, refresh_expires_at TEXT, created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z', last_used_at TEXT, revoked_at TEXT);
     INSERT INTO mcp_grant (id,owner_user_id,client_id,patient_ids,scope) VALUES
       ('grant-1','owner-1','assistant-client','["profile-1","profile-2"]','health:read health:claims:write'),
       ('new-grant','owner-1','reauthorized-client','["profile-1"]','health:read health:claims:write'),
