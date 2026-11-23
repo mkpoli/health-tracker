@@ -40,7 +40,7 @@ jobs:
         with:
           # A floating version puts the runtime's release schedule in the path of
           # every pull request. The suite reads Intl output, which moves with it.
-          bun-version-file: .bun-version
+          bun-version-file: package.json
 
       # A registry tarball that fails to download or extract fails the whole
       # run, and nothing in the repository caused it. Three attempts are enough
